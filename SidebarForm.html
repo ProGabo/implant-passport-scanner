@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <title>Añadir Nuevo Implante</title>
+    <style>
+        /* Estilo básico para la barra lateral */
+        body { font-family: 'Segoe UI', Arial, sans-serif; padding: 10px; background-color: #f5f8fc; }
+        .form-group { margin-bottom: 10px; }
+        label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 3px; color: #333; }
+        input[type="text"], input[type="email"], input[type="date"], select {
+            width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 13px;
+        }
+        button { background: #02234f; color: white; padding: 8px 10px; border: none; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 5px; font-size: 13px; }
+        button:hover:not(:disabled) { background: #03306e; }
+        button:disabled { background: #9bbddf; cursor: not-allowed; }
+        .patient-info { background-color: #eef4fb; padding: 8px; border-radius: 4px; margin-top: 5px; font-size: 13px; }
+        .status-message { padding: 8px; margin-top: 8px; border-radius: 4px; font-size: 13px; }
+        .status-success { background-color: #d4edda; color: #155724; }
+        .status-error { background-color: #f8d7da; color: #721c24; }
+        .hidden { display: none; }
+        hr { border: 0; border-top: 1px solid #ddd; margin: 15px 0; }
+        .remove-implant-btn { width: auto; float: right; margin: 0; padding: 4px 8px; font-size: 11px; background: #cc0000; }
+        .remove-implant-btn:hover { background: #990000; }
+    </style>
+</head>
+<body>
+
+    <div class="form-group">
+        <label for="dni">1. Introducir DNI/Identificador:</label>
+        <input type="text" id="dni" placeholder="Ej: 12345678A" required>
+        <button id="search-dni-btn" onclick="searchDNI()">Buscar Paciente</button>
+    </div>
+
+    <div id="status"></div>
+    <hr>
+
+    <div id="patientSection" class="hidden">
+        <label>Código Paciente: <strong id="patientCodeDisplay"></strong></label>
+        <input type="hidden" id="pacienteCodigo" value="GENERAR">
+
+        <div class="patient-info">
+            <div class="form-group">
+                <label for="nombre">Nombre Completo:</label>
+                <input type="text" id="nombre" required>
+            </div>
+            <div class="form-group">
+                <label for="email">Email:</label>
+                <input type="email" id="email" required>
+            </div>
+        </div>
+        
+        <hr>
+        
+        <form id="implantForm">
+            <h4>2. Datos Técnicos del Implante(s)</h4>
+            
+            <div id="implantContainer"> 
+               </div>
+            
+            <button type="button" onclick="addImplantSection()">➕ Añadir otro Implante</button>
+            <hr> 
+            
+            <div class="form-group" style="margin-top: 20px;">
+                <input type="checkbox" id="sendEmail" value="true" checked>
+                <label for="sendEmail" style="display: inline; font-weight: bold; color: #155724;">Enviar Pasaporte por Email al paciente</label>
+            </div>
+
+            <button type="submit" id="save-btn">3. Guardar Implante(s)</button>
+        </form>
+    </div>
+
+<datalist id="marcaOptions"></datalist>
+<datalist id="modeloOptions"></datalist>
+<datalist id="conexionOptions"></datalist>
+
+<template id="implant-template">
+    <div class="implant-section" data-index="0" style="border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; border-radius: 4px;">
+        <h5 style="margin-top: 0; display: inline-block;">Implante #<span class="implant-number">1</span></h5>
+        <button type="button" class="remove-implant-btn" >❌ Eliminar</button>
+        <hr style="margin: 5px 0 10px 0;">
+
+        <div class="form-group">
+            <label for="posicion">Posición (Diente):</label>
+            <input type="text" class="implant-field" name="posicion" placeholder="Ej: 14 o 46" required>
+        </div>
+        <div class="form-group">
+            <label for="fechaColocacion">Fecha de Colocación:</label>
+            <input type="date" class="implant-field" name="fecha_colocacion" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="marca">Marca:</label>
+            <input type="text" class="implant-field" name="marca" list="marcaOptions" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="modelo">Modelo:</label>
+            <input type="text" class="implant-field" name="modelo" list="modeloOptions" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="dimensiones">Dimensiones:</label>
+            <input type="text" class="implant-field" name="dimensiones" placeholder="Ej: 4.1 x 10 mm" required>
+        </div>
+        <div class="form-group">
+            <label for="plataforma">Plataforma:</label>
+            <input type="text" class="implant-field" name="plataforma" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="conexion">Conexión:</label>
+            <input type="text" class="implant-field" name="conexion" list="conexionOptions" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="pilar">Pilar transepitelial:</label>
+            <input type="text" class="implant-field" name="pilar" required>
+        </div>
+        <div class="form-group">
+            <label for="codImplante">Código de Implante (Ref. Interna):</label>
+            <input type="text" class="implant-field" name="cod_implante" required>
+        </div>
+        <div class="form-group">
+            <label for="lote">Lote:</label>
+            <input type="text" class="implant-field" name="lote" required>
+        </div>
+    </div>
+</template>
+
+<hr style="margin-top: 20px;">
+<div style="padding: 10px; background-color: #f7f7f7; border-radius: 4px;">
+    <h5 style="margin-top: 0; color: #02234f;">Recuperación de Código</h5>
+    <div class="form-group">
+        <label for="recovery_dni">DNI/Email del paciente:</label>
+        <input type="text" id="recovery_dni" placeholder="DNI o Email" required>
+        <button id="recover-btn" type="button" onclick="sendRecovery()">Enviar Código al Email Registrado</button>
+    </div>
+    <div id="recovery-status"></div>
+</div>
+
+<script>
+    // Variables globales
+    const dniInput = document.getElementById('dni');
+    const searchBtn = document.getElementById('search-dni-btn');
+    const patientSection = document.getElementById('patientSection');
+    const patientCodeDisplay = document.getElementById('patientCodeDisplay');
+    const pacienteCodigoInput = document.getElementById('pacienteCodigo');
+    const nombreInput = document.getElementById('nombre');
+    const emailInput = document.getElementById('email');
+    const implantForm = document.getElementById('implantForm');
+    const statusDiv = document.getElementById('status');
+    const saveBtn = document.getElementById('save-btn');
+    const sendEmailCheckbox = document.getElementById('sendEmail');
+    const implantContainer = document.getElementById('implantContainer'); 
+    
+    // Variables de Recuperación (NUEVAS)
+    const recoveryDniInput = document.getElementById('recovery_dni');
+    const recoverBtn = document.getElementById('recover-btn');
+    const recoveryStatusDiv = document.getElementById('recovery-status');
+
+    // Variable global para almacenar las opciones del catálogo
+    let catalogOptions = null;
+
+    // --- Lógica de Implantes Múltiples ---
+
+    // Función para añadir una nueva sección de implante
+    window.addImplantSection = function() {
+        const template = document.getElementById('implant-template');
+        const clone = template.content.cloneNode(true);
+        
+        // Asignar evento al botón de eliminar
+        const removeButton = clone.querySelector('.remove-implant-btn');
+        removeButton.onclick = function() {
+            removeImplantSection(removeButton.closest('.implant-section'));
+        };
+        
+        // Lógica NUEVA para la cascada (Modelo depende de Marca)
+        const brandInput = clone.querySelector('input[name="marca"]');
+        const modelInput = clone.querySelector('input[name="modelo"]');
+        
+        // Manejar el evento 'input' para actualizar el datalist del modelo
+        brandInput.addEventListener('input', (e) => handleBrandChange(e.target.value, modelInput));
+
+        implantContainer.appendChild(clone);
+        updateImplantNumbers();
+    };
+
+    // Función para eliminar una sección de implante
+    window.removeImplantSection = function(sectionElement) {
+        if (implantContainer.querySelectorAll('.implant-section').length > 1) {
+            sectionElement.remove();
+            updateImplantNumbers();
+        } else {
+            showStatus('Debe haber al menos una sección de implante.', 'error');
+        }
+    };
+
+    // Función para reordenar y actualizar los números de implante
+    function updateImplantNumbers() {
+        const sections = implantContainer.querySelectorAll('.implant-section');
+        sections.forEach((section, index) => {
+            section.querySelector('.implant-number').textContent = index + 1;
+        });
+    }
+
+    // --- Lógica de Carga de Opciones Dinámicas (DATALIST) ---
+    
+    // Poblado de DATALIST (Global para Marca, Modelo y Conexión)
+    function populateDatalist(datalistId, itemsArray) {
+        const datalist = document.getElementById(datalistId);
+        if (!datalist) return;
+        
+        // Limpiar opciones previas
+        datalist.innerHTML = '';
+        
+        // Añadir nuevas opciones
+        itemsArray.forEach(item => {
+            const option = document.createElement('option');
+            option.value = item;
+            datalist.appendChild(option);
+        });
+    }
+
+    // Lógica de Cascada: Maneja el cambio de Marca para filtrar Modelos
+    function handleBrandChange(selectedBrand, modelInput) {
+        // Obtenemos el datalist de Modelos (es el mismo para todas las secciones)
+        const modelDatalist = document.getElementById('modeloOptions');
+        if (!modelDatalist) return;
+
+        modelDatalist.innerHTML = ''; // Limpiar el datalist de modelos
+        
+        // Verificar si la marca seleccionada tiene modelos en el catálogo
+        if (selectedBrand && catalogOptions.modelsByBrand[selectedBrand]) {
+            catalogOptions.modelsByBrand[selectedBrand].forEach(model => {
+                const option = document.createElement('option');
+                option.value = model;
+                modelDatalist.appendChild(option);
+            });
+        }
+    }
+
+    // Llamada al backend para obtener las opciones
+    function loadImplantOptions() {
+        showStatus('Cargando catálogo de implantes...', 'info');
+        google.script.run
+            .withSuccessHandler(handleOptionsResponse)
+            .withFailureHandler(handleError)
+            .getImplantOptions();
+    }
+
+    // Manejador de la respuesta del catálogo
+    function handleOptionsResponse(res) {
+        if (res.ok) {
+            catalogOptions = res.options;
+            
+            // 1. Cargar Marcas y Conexiones (son listas globales)
+            populateDatalist('marcaOptions', catalogOptions.brands);
+            populateDatalist('conexionOptions', catalogOptions.allConnections);
+            
+            // 2. Ejecutar la lógica de cascada en el primer implante si hay valor
+            const firstBrandInput = implantContainer.querySelector('input[name="marca"]');
+            const firstModelInput = implantContainer.querySelector('input[name="modelo"]');
+            if(firstBrandInput) {
+                handleBrandChange(firstBrandInput.value, firstModelInput);
+            }
+            
+            showStatus('Catálogo cargado.', 'info');
+        } else {
+            showStatus(res.message || 'Error al cargar el catálogo.', 'error');
+        }
+    }
+
+    // --- Lógica de Búsqueda y Guardado ---
+
+    // 1. Lógica de Búsqueda por DNI 
+    function searchDNI() {
+        const dni = dniInput.value.trim();
+        if (!dni) {
+            showStatus('Introduce el DNI.', 'error');
+            return;
+        }
+        
+        searchBtn.disabled = true;
+        searchBtn.textContent = 'Buscando...';
+        patientSection.classList.add('hidden');
+        showStatus('');
+        
+        google.script.run
+            .withSuccessHandler(handleDNIResponse)
+            .withFailureHandler(handleError)
+            .getPatientByDNI(dni);
+    }
+
+    function handleDNIResponse(res) {
+        searchBtn.disabled = false;
+        searchBtn.textContent = 'Buscar Paciente';
+        
+        if (res.ok === false) {
+            showStatus(res.message || 'Error en la conexión del servidor.', 'error');
+            return;
+        }
+
+        patientSection.classList.remove('hidden');
+
+        if (res.found) {
+            // DNI ENCONTRADO
+            const data = res.data;
+            nombreInput.value = data.nombre || '';
+            emailInput.value = data.email || '';
+            pacienteCodigoInput.value = data.codigo; 
+            
+            patientCodeDisplay.textContent = data.codigo;
+            patientCodeDisplay.style.color = 'green';
+            showStatus(`Paciente encontrado: ${data.nombre}.`, 'success');
+            
+            nombreInput.disabled = true;
+            emailInput.disabled = true;
+            
+        } else {
+            // DNI NO ENCONTRADO (Generar nuevo paciente)
+            nombreInput.value = '';
+            emailInput.value = '';
+            pacienteCodigoInput.value = 'GENERAR'; 
+            
+            patientCodeDisplay.textContent = 'NUEVO (Se generará un código)';
+            patientCodeDisplay.style.color = 'orange';
+            showStatus('DNI nuevo. Rellena Nombre/Email.', 'info');
+            
+            nombreInput.disabled = false;
+            emailInput.disabled = false;
+        }
+    }
+
+
+    // 2. Lógica de Guardado del Formulario (INCLUYE LIMPIEZA UX)
+    implantForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Guardando...';
+        showStatus('');
+        
+        // 1. Recolección de DATOS DEL IMPLANTE (ARRAY)
+        const implantsArray = [];
+        const sections = implantContainer.querySelectorAll('.implant-section');
+
+        sections.forEach(section => {
+            const impData = {};
+            let isValid = true;
+            
+            section.querySelectorAll('.implant-field').forEach(input => {
+                if (input.required && !input.value.trim()) {
+                    isValid = false;
+                }
+                // Recolecta el valor escrito en el INPUT
+                impData[input.name] = input.value.trim();
+            });
+
+            if (isValid) {
+                implantsArray.push(impData);
+            }
+        });
+
+        if (implantsArray.length === 0) {
+            showStatus('Rellena al menos un implante válido.', 'error');
+            saveBtn.disabled = false;
+            saveBtn.textContent = '3. Guardar Implante(s)';
+            return;
+        }
+
+        // 2. Recolección de DATOS DEL PACIENTE y Envío
+        const formData = {
+            dni: dniInput.value.trim(),
+            codigo_paciente: pacienteCodigoInput.value,
+            nombre: nombreInput.value.trim(),
+            email: emailInput.value.trim(),
+            sendEmail: sendEmailCheckbox.checked ? 'true' : 'false', 
+            implantes: implantsArray 
+        };
+        
+        google.script.run
+            .withSuccessHandler(handleSaveResponse)
+            .withFailureHandler(handleError)
+            .saveNewImplant(formData); 
+    });
+
+    function handleSaveResponse(res) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = '3. Guardar Implante(s)';
+        
+        if (res.ok) {
+            let msg = `✅ ${res.implantsCount} implante(s) guardado(s) para el código ${res.newCode}.`;
+            
+            if (res.emailSent) {
+                 msg += ` Correo de pasaporte enviado a ${emailInput.value}.`;
+            } else if (res.emailError) {
+                 msg += ` ⚠️ ERROR al enviar email: ${res.emailError}`;
+            }
+            
+            showStatus(msg, 'success');
+            
+            // *** MEJORA DE FLUJO UX: Limpieza total para el siguiente paciente ***
+            
+            // 1. Resetear TODOS los campos de paciente
+            dniInput.value = '';
+            nombreInput.value = '';
+            emailInput.value = '';
+            pacienteCodigoInput.value = 'GENERAR'; 
+            patientCodeDisplay.textContent = '';
+            
+            // 2. Ocultar la sección del paciente
+            patientSection.classList.add('hidden'); 
+            
+            // 3. Restaurar el primer implante limpio
+            implantContainer.innerHTML = '';
+            addImplantSection(); 
+            
+        } else {
+            showStatus(res.message || 'Error al guardar.', 'error');
+        }
+    }
+    
+    // --- NUEVA Lógica de Recuperación de Código ---
+    
+    window.sendRecovery = function() {
+        const dniOrEmail = recoveryDniInput.value.trim();
+        if (!dniOrEmail) {
+            showRecoveryStatus('Introduce el DNI o Email.', 'error');
+            return;
+        }
+
+        recoverBtn.disabled = true;
+        recoverBtn.textContent = 'Buscando y Enviando...';
+        showRecoveryStatus('');
+
+        google.script.run
+            .withSuccessHandler(handleRecoveryResponse)
+            .withFailureHandler(handleError) // Reusa el manejador de errores principal
+            .sendCodeRecoveryEmail(dniOrEmail);
+    };
+
+    function handleRecoveryResponse(res) {
+        recoverBtn.disabled = false;
+        recoverBtn.textContent = 'Enviar Código al Email Registrado';
+        
+        if (res.ok) {
+            showRecoveryStatus(`✅ ${res.message}`, 'success');
+            recoveryDniInput.value = ''; // Limpiar campo al terminar
+        } else {
+            showRecoveryStatus(`❌ ${res.message}`, 'error');
+        }
+    }
+
+    // Helper para mostrar el estado solo de la sección de recuperación
+    function showRecoveryStatus(message, type = 'info') {
+        // Usamos la clase de estilo CSS "status-message" + el tipo
+        recoveryStatusDiv.innerHTML = `<div class="status-message status-${type}">${message}</div>`;
+    }
+
+
+    // 3. Utilidades (ACTUALIZADA para restaurar botones)
+    function handleError(err) {
+        // Restaurar botones de búsqueda y guardado principales
+        searchBtn.disabled = false;
+        saveBtn.disabled = false;
+        searchBtn.textContent = 'Buscar Paciente';
+        saveBtn.textContent = '3. Guardar Implante(s)';
+        
+        // Restaurar botón de recuperación si la acción falló
+        recoverBtn.disabled = false;
+        recoverBtn.textContent = 'Enviar Código al Email Registrado'; 
+        
+        showStatus('❌ Error: ' + err.message, 'error');
+    }
+
+    function showStatus(message, type = 'info') {
+        statusDiv.innerHTML = `<div class="status-message status-${type}">${message}</div>`;
+    }
+
+    // Ejecutar al cargar la página
+    document.addEventListener('DOMContentLoaded', (event) => {
+        addImplantSection(); 
+        loadImplantOptions();
+    });
+</script>
+</body>
+</html>
