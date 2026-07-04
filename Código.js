@@ -877,6 +877,7 @@ function verifyOTPAndGetData(patientCode, inputPin) {
 
 
 const GEMINI_API_KEY = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+const OPENROUTER_API_KEY = PropertiesService.getScriptProperties().getProperty('OPENROUTER_API_KEY');
 
 /**
  * Synchronous httpFetch adapter ScanEngine's providers call instead of UrlFetchApp
@@ -907,7 +908,8 @@ function processImplantFile(data, filename) {
 
     return ScanEngine.scanPassport(base64Data, mimeType, {
       httpFetch: gasHttpFetch,
-      apiKey: GEMINI_API_KEY
+      geminiApiKey: GEMINI_API_KEY,
+      openRouterApiKey: OPENROUTER_API_KEY
     });
 
   } catch (e) {

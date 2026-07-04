@@ -85,3 +85,94 @@ test('parseResponse skips malformed (null/non-object) entries instead of throwin
   assert.equal(result[0].cod_implante, 'ABC');
   assert.equal(result[1].cod_implante, 'DEF');
 });
+
+// ==========================================
+//  Money-safety guard tests — no network, fully mocked httpFetch.
+//  These encode the hard constraint "never spend the $10 OpenRouter credit" as a
+//  permanent regression check, not just a one-time manual verification.
+// ==========================================
+
+test('OPENROUTER_MODEL is pinned to a free model', () => {
+  assert.match(ScanEngine.OPENROUTER_MODEL, /:free$/);
+});
+
+const FAKE_IMPLANT_RAW = JSON.stringify([{
+  fecha_colocacion: '2024-09-09',
+  marca: 'Southern Implants',
+  modelo: 'ExHex Zygan',
+  conexion: 'Hexágono Externo',
+  plataforma: 'RP (Regular)',
+  referencia: 'ZYGAN-47.5',
+  lote: '085003',
+  diametro: 4.3,
+  longitud: 47.5,
+  posicion: '25',
+  pilar: 'Multi-unit 1.5 mm'
+}]);
+
+function geminiDownOpenRouterUpHttpFetch(capturedBodies) {
+  return function (url, options) {
+    if (url.indexOf('generativelanguage.googleapis.com') !== -1) {
+      return { status: 429, text: '{"error":"simulated quota exceeded"}' };
+    }
+    if (url.indexOf('openrouter.ai') !== -1) {
+      if (capturedBodies) capturedBodies.push(options.body);
+      return { status: 200, text: JSON.stringify({ choices: [{ message: { content: FAKE_IMPLANT_RAW } }] }) };
+    }
+    throw new Error('unexpected URL in test: ' + url);
+  };
+}
+
+test('scanPassport falls back to OpenRouter when Gemini fails', () => {
+  const result = ScanEngine.scanPassport('ZmFrZQ==', 'application/pdf', {
+    httpFetch: geminiDownOpenRouterUpHttpFetch(),
+    geminiApiKey: 'fake-gemini-key',
+    openRouterApiKey: 'fake-openrouter-key'
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.provider, 'openrouter');
+  assert.equal(result.data[0].cod_implante, 'ZYGAN-47.5');
+});
+
+test('scanPassport fails gracefully when both providers fail', () => {
+  const bothDownHttpFetch = () => ({ status: 429, text: '{"error":"simulated quota exceeded"}' });
+
+  const result = ScanEngine.scanPassport('ZmFrZQ==', 'application/pdf', {
+    httpFetch: bothDownHttpFetch,
+    geminiApiKey: 'fake-gemini-key',
+    openRouterApiKey: 'fake-openrouter-key'
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.message, 'Límite alcanzado por hoy. Inténtelo de nuevo mañana.');
+});
+
+test('OpenRouter PDF requests always pin the free cloudflare-ai engine and never mistral-ocr', () => {
+  const capturedBodies = [];
+  ScanEngine.scanPassport('ZmFrZQ==', 'application/pdf', {
+    httpFetch: geminiDownOpenRouterUpHttpFetch(capturedBodies),
+    geminiApiKey: 'fake-gemini-key',
+    openRouterApiKey: 'fake-openrouter-key'
+  });
+
+  assert.equal(capturedBodies.length, 1);
+  const body = JSON.parse(capturedBodies[0]);
+  assert.equal(body.model, ScanEngine.OPENROUTER_MODEL);
+  assert.equal(body.plugins[0].pdf.engine, 'cloudflare-ai');
+  assert.equal(capturedBodies[0].indexOf('mistral-ocr'), -1);
+});
+
+test('OpenRouter image requests skip the file-parser plugin entirely', () => {
+  const capturedBodies = [];
+  ScanEngine.scanPassport('ZmFrZQ==', 'image/jpeg', {
+    httpFetch: geminiDownOpenRouterUpHttpFetch(capturedBodies),
+    geminiApiKey: 'fake-gemini-key',
+    openRouterApiKey: 'fake-openrouter-key'
+  });
+
+  assert.equal(capturedBodies.length, 1);
+  const body = JSON.parse(capturedBodies[0]);
+  assert.equal(body.plugins, undefined);
+  assert.equal(body.messages[0].content[1].type, 'image_url');
+});

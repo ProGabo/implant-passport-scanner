@@ -166,28 +166,93 @@ var ScanEngine = (function () {
   }
 
   /**
-   * deps: { httpFetch: (url, {method, headers, body}) -> {status, text}, apiKey: string }
+   * deps: { httpFetch: (url, {method, headers, body}) -> {status, text}, geminiApiKey: string }
    * httpFetch must be synchronous in both runtimes (GAS's UrlFetchApp is inherently
    * synchronous, and google.script.run is not reliably async-safe for server functions).
    */
   function geminiProvider(base64Data, mimeType, promptText, deps) {
-    const modelName = getBestAvailableModel(deps.httpFetch, deps.apiKey);
-    return callGeminiApi(deps.httpFetch, modelName, base64Data, mimeType, promptText, deps.apiKey);
+    const modelName = getBestAvailableModel(deps.httpFetch, deps.geminiApiKey);
+    return callGeminiApi(deps.httpFetch, modelName, base64Data, mimeType, promptText, deps.geminiApiKey);
+  }
+
+  // Hard-pinned to a free OpenRouter model. This string must always end in ":free" — it is
+  // never built from a variable or taken from any response, so there is no code path that
+  // could select a paid model. Verified live against OpenRouter's own model list (their
+  // free-tier roster changes over time; re-check https://openrouter.ai/api/v1/models if
+  // this ever needs to change).
+  const OPENROUTER_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
+
+  /**
+   * OpenRouter's PDF pipeline defaults to the PAID "mistral-ocr" engine ($2/1000 pages)
+   * whenever the `plugins` parameter is omitted and the target model lacks native PDF
+   * support (ours doesn't). To guarantee this never costs money, PDF requests always pin
+   * the free "cloudflare-ai" engine explicitly — never omitted, never "mistral-ocr". Images
+   * skip the file-parser plugin entirely: vision models take them natively at $0.
+   */
+  function callOpenRouterApi(httpFetch, base64Data, mimeType, prompt, apiKey) {
+    const isImage = mimeType.indexOf('image/') === 0;
+    const filePart = isImage
+      ? { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Data}` } }
+      : { type: 'file', file: { filename: 'scan.pdf', file_data: `data:${mimeType};base64,${base64Data}` } };
+
+    const payload = {
+      model: OPENROUTER_MODEL,
+      temperature: 0,
+      messages: [{
+        role: 'user',
+        content: [{ type: 'text', text: prompt }, filePart]
+      }]
+    };
+    if (!isImage) {
+      payload.plugins = [{ id: 'file-parser', pdf: { engine: 'cloudflare-ai' } }];
+    }
+
+    const res = httpFetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'post',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey.trim()}`
+      },
+      body: JSON.stringify(payload)
+    });
+    if (res.status !== 200) throw new Error("Error API OpenRouter: " + res.status);
+    const json = JSON.parse(res.text);
+    return json.choices[0].message.content;
   }
 
   /**
-   * Single entry point: buildPrompt -> geminiProvider -> parseResponse.
-   * Gemini-only for now — OpenRouter fallback is a separate, later phase; this call site
-   * is the seam where that fallback will wrap geminiProvider with a sibling provider.
+   * deps: { httpFetch, openRouterApiKey: string } — same synchronous httpFetch contract as
+   * geminiProvider.
+   */
+  function openRouterProvider(base64Data, mimeType, promptText, deps) {
+    return callOpenRouterApi(deps.httpFetch, base64Data, mimeType, promptText, deps.openRouterApiKey);
+  }
+
+  /**
+   * Single entry point: buildPrompt -> try geminiProvider, on any failure (network/HTTP
+   * error or malformed JSON) fall back to openRouterProvider; if that also fails, fail
+   * gracefully rather than crash or silently do nothing. Never spends money: see
+   * callOpenRouterApi's pinned model/engine.
    */
   function scanPassport(base64Data, mimeType, deps) {
     const promptText = buildPrompt();
-    const raw = geminiProvider(base64Data, mimeType, promptText, deps);
-    const fields = parseResponse(raw);
+    let fields;
+    let provider;
+    try {
+      fields = parseResponse(geminiProvider(base64Data, mimeType, promptText, deps));
+      provider = 'gemini';
+    } catch (geminiError) {
+      try {
+        fields = parseResponse(openRouterProvider(base64Data, mimeType, promptText, deps));
+        provider = 'openrouter';
+      } catch (openRouterError) {
+        return { ok: false, message: "Límite alcanzado por hoy. Inténtelo de nuevo mañana." };
+      }
+    }
     if (!fields || fields.length === 0) {
       return { ok: false, message: "La IA no detectó pegatinas. Asegúrate de que la foto esté bien iluminada y las pegatinas se vean claras." };
     }
-    return { ok: true, data: fields, count: fields.length };
+    return { ok: true, data: fields, count: fields.length, provider: provider };
   }
 
   return {
@@ -196,6 +261,8 @@ var ScanEngine = (function () {
     cleanJson: cleanJson,
     parseResponse: parseResponse,
     geminiProvider: geminiProvider,
+    openRouterProvider: openRouterProvider,
+    OPENROUTER_MODEL: OPENROUTER_MODEL,
     scanPassport: scanPassport
   };
 

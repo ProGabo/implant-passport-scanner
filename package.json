@@ -6,6 +6,8 @@
   "scripts": {
     "test": "node --test test/scanEngine.test.js",
     "test:accuracy": "node --env-file=.env test/accuracy.js",
+    "test:accuracy:fallback": "node --env-file=.env test/accuracy-fallback.js",
+    "test:accuracy:bothdown": "node test/accuracy-bothdown.js",
     "generate-fixtures": "node --env-file=.env test/generate-fixtures.js"
   }
 }

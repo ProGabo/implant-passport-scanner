@@ -44,7 +44,7 @@ function main() {
     try {
       raw = ScanEngine.geminiProvider(base64Data, mimeType, promptText, {
         httpFetch: curlHttpFetch,
-        apiKey
+        geminiApiKey: apiKey
       });
       fields = ScanEngine.parseResponse(raw);
     } catch (e) {

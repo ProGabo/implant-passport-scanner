@@ -8,10 +8,22 @@ const TEST_DIR = __dirname;
 const GOLDEN_DIR = path.join(TEST_DIR, 'golden');
 const MANIFEST_PATH = path.join(TEST_DIR, 'fixtures', 'MANIFEST.json');
 
+/**
+ * Forces Gemini to fail (synthetic 429, no real call) while letting OpenRouter calls
+ * through for real — proves scanPassport's fallback path actually reaches OpenRouter
+ * instead of just asserting it in isolation.
+ */
+function poisonedHttpFetch(url, options) {
+  if (url.indexOf('generativelanguage.googleapis.com') !== -1) {
+    return { status: 429, text: '{"error":{"message":"simulated quota exceeded"}}' };
+  }
+  return curlHttpFetch(url, options);
+}
+
 function main() {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    console.error('GEMINI_API_KEY not set. Add it to .env.');
+  const openRouterApiKey = process.env.OPENROUTER_API_KEY;
+  if (!openRouterApiKey) {
+    console.error('OPENROUTER_API_KEY not set. Add it to .env.');
     process.exit(1);
   }
   if (!fs.existsSync(MANIFEST_PATH)) {
@@ -22,8 +34,8 @@ function main() {
   const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
   const sampleNames = Object.keys(manifest).sort();
 
-  console.log(`Running accuracy test against LIVE Gemini for ${sampleNames.length} sample(s).`);
-  console.log('This makes real API calls and uses daily quota.\n');
+  console.log(`Running fallback accuracy test (Gemini forced down) against LIVE OpenRouter for ${sampleNames.length} sample(s).`);
+  console.log('Gemini calls are simulated (no network); OpenRouter calls use the free model ($0).\n');
 
   let passed = 0;
   let failed = 0;
@@ -43,12 +55,18 @@ function main() {
 
     try {
       const result = ScanEngine.scanPassport(base64Data, 'application/pdf', {
-        httpFetch: curlHttpFetch,
-        geminiApiKey: apiKey
+        httpFetch: poisonedHttpFetch,
+        geminiApiKey: 'unused-gemini-is-forced-down',
+        openRouterApiKey
       });
 
       if (!result.ok) {
         console.log(`[${sampleName}] FAIL - engine returned: ${result.message}`);
+        failed++;
+        return;
+      }
+      if (result.provider !== 'openrouter') {
+        console.log(`[${sampleName}] FAIL - expected provider 'openrouter', got '${result.provider}'`);
         failed++;
         return;
       }
