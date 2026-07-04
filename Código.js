@@ -878,76 +878,37 @@ function verifyOTPAndGetData(patientCode, inputPin) {
 
 const GEMINI_API_KEY = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
 
+/**
+ * Synchronous httpFetch adapter ScanEngine's providers call instead of UrlFetchApp
+ * directly, keeping ScanEngine.js itself GAS-agnostic.
+ */
+function gasHttpFetch(url, options) {
+  const params = { method: (options.method || 'get'), muteHttpExceptions: true };
+  if (options.headers) {
+    const headers = Object.assign({}, options.headers);
+    if (headers['Content-Type']) {
+      params.contentType = headers['Content-Type'];
+      delete headers['Content-Type'];
+    }
+    if (Object.keys(headers).length > 0) {
+      params.headers = headers;
+    }
+  }
+  if (options.body !== undefined) {
+    params.payload = options.body;
+  }
+  const res = UrlFetchApp.fetch(url, params);
+  return { status: res.getResponseCode(), text: res.getContentText() };
+}
 
 function processImplantFile(data, filename) {
-  let respuestaCruda = "";
-  
   try {
-    const base64Data = data.includes(',') ? data.split(',')[1] : data;
-    const mimeType = "application/pdf";
+    const { mimeType, base64Data } = ScanEngine.parseDataUrl(data);
 
-    const modelName = getBestAvailableModel();
-
-    // PROMPT REFORZADO: Más descriptivo y menos restrictivo
-    const promptText = `
-      Actúa como una secretaria experta en trazabilidad quirúrgica. Analiza la imagen del pasaporte de implantes.
-      
-      OBJETIVO: Extraer datos EXCLUSIVAMENTE de las pegatinas de IMPLANTES DENTALES.
-      
-      INSTRUCCIONES DE SEGURIDAD (CRÍTICO):
-      1. AISLAMIENTO DE FICHA: Cada pegatina es una isla. NUNCA asignes el Lote o Referencia de una pegatina a la de al lado. Si una pegatina no tiene lote impreso, déjalo VACÍO ("").
-      2. BASURA: Ignora completamente "Abutment", "Healing Cap", "Cuff", "Membrane", "Sutura". Si la referencia empieza por "MC-M", "AMCZ", "HMC", "B-", o también si ves que o bien no hay dimensiones o bien las dimensiones de longitud son demasiado pequeñas (mayor a 6 mm) como para ser un implante, IGNÓRALO, no es un implante. 
-      3. LOGICA VISUAL Y MANUSCRITA:
-         - FECHA: Busca la fecha manuscrita en la parte superior izquierda de la página (ej: "9-9-24" o "09/09/2024" o variaciones). OBLIGATORIO: Traduce y formatea SIEMPRE esta fecha al formato estricto YYYY-MM-DD. Por ejemplo, si lees "9-9-24", debes transformarlo a "2024-09-09".. Añade este valor exacto en el campo 'fecha' para TODOS los implantes encontrados.        
-         - POSICIÓN: El texto manuscrito al lado de la ficha que empieza por la letra 'Z' (ej: "Z:25", "Z (14)") suele indicar la POSICIÓN del diente y está escrito AL LADO de la pegatina correspondiente.
-         - CONEXIÓN: Si ves una pegatina que pone "Ref ZYGAN" y mide más de 30mm, el Modelo es "ExHex Zygan" (Cigomático). Si ves "Int Hex" o referencias que empiezan por "I" o "IM", el Modelo es "Internal Hex".
-         - PILAR MULTI-UNIT : Busca notas manuscritas cerca de las fichas que empiecen por un símbolo "+" seguido de una cantidad, unas siglas (como "Mt. U" o similares de "MI.U", "MIU") y una altura en "mm" (ej: "+ 2 Mt.U 3 mm" o "+ (1) Mt.U 1.5 mm").
-           * Si identificas estas siglas como Multi-Unit, extrae la altura y asigna al campo 'pilar' el valor "Multi-unit [altura] mm" (ej: "Multi-unit 3 mm").
-           * Si la nota indica una cantidad mayor a 1 (ej: "+ 2..."), aplica este mismo pilar a esa cantidad de implantes MÁS CERCANOS a la nota.
-           * Si la nota manuscrita tiene otras siglas que no son Multi-Unit, o si simplemente no hay ninguna nota de pilar cerca, asigna al campo 'pilar' el valor "NO"
-
-      INSTRUCCIONES DE LÓGICA DENTAL (CALCULA ESTOS CAMPOS):
-      A. PLATAFORMA (Basada estrictamente en el Diámetro):
-         - Si Diámetro <= 3.3 mm  -> "NP (Narrow)"
-         - Si Diámetro > 3.3 mm Y < 5.0 mm -> "RP (Regular)"
-         - Si Diámetro >= 5.0 mm -> "WP (Wide)"
-      
-      B. CONEXIÓN (Deduce basada en Marca y Modelo):
-         - Southern "ExHex", "Zygan" o "Co-Axis (ExHex)" -> "Hexágono Externo"
-         - Southern "Int Hex", "Internal Hex", "M-Series" o REF empieza por "I" -> "Hexágono Interno"
-         - Southern "Deep Conical" -> "Cónico Interno"
-         - Southern "Tri-Nex" -> "Trilobular"
-         - Ticare "Inhex" -> "Hexágono Interno"
-         - Ticare "Osseous" -> "Hexágono Externo"
-         - Si no estás segura, usa tu conocimiento general sobre la marca + modelo para deducirlo!
-      
-      EXTRAE ESTOS DATOS PARA CADA IMPLANTE (Longitud > 6mm):
-      - fecha_colocacion: (Fecha superior izquierda, Formato estricto YYYY-MM-DD, ej "2024-09-09")
-      - marca: (Southern Implants, Ticare, etc. Mira el logo)
-      - modelo: (ExHex Zygan, Internal Hex, Co-Axis, Inhex, etc. lo pone en la ficha)
-      - referencia: (REF). Cuidado: NO confundir con la REF del pilar/implante vecino (si hay).
-      - lote: (LOT).
-      - diámetro: (Número decimal, ej 4.3)
-      - longitud: (Número > 6, ej 13, 47.5)
-      - posicion: (Número de diente 11-48, busca anotaciones a mano cercanas después de la letra zeta 'Z' o CUADRANTES).
-      - pilar: ("Multi-unit [altura] mm" o "NO" según la regla manuscrita).
-
-      Salida OBLIGATORIA: Un array JSON puro. Ejemplo:
-      [{"fecha_colocacion":"2024-09-09","marca":"Southern Implants","modelo":"ExHex Zygan","conexion":"Hexágono Externo","plataforma":"RP (Regular)","referencia":"ZYGAN-47.5","lote":"085003","diametro":4.3,"longitud":47.5,"posicion":"25","pilar":"Multi-unit 1.5 mm"}]
-    `;
-
-    respuestaCruda = callGeminiApi(modelName, base64Data, mimeType, promptText);
-    
-    const jsonString = cleanJson(respuestaCruda);
-    const results = JSON.parse(jsonString);
-    const finalData = Array.isArray(results) ? results : [results];
-
-    // Si la IA sigue devolviendo vacío, mandamos un mensaje de "Ayuda"
-    if (!finalData || finalData.length === 0 || finalData.length === undefined) {
-       return { ok: false, message: "La IA no detectó pegatinas. Asegúrate de que la foto esté bien iluminada y las pegatinas se vean claras." };
-    }
-
-    return { ok: true, data: finalData, count: finalData.length };
+    return ScanEngine.scanPassport(base64Data, mimeType, {
+      httpFetch: gasHttpFetch,
+      apiKey: GEMINI_API_KEY
+    });
 
   } catch (e) {
     if (e.message && e.message.indexOf('script.external_request') !== -1) {
@@ -958,42 +919,6 @@ function processImplantFile(data, filename) {
     }
     return { ok: false, message: "Error al interpretar: " + e.message };
   }
-}
-
-// Mantenemos esta función que ya vimos que funciona bien
-function getBestAvailableModel() {
-  try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY.trim()}`;
-    const res = UrlFetchApp.fetch(url, { method: 'get', muteHttpExceptions: true });
-    const json = JSON.parse(res.getContentText());
-    if (res.getResponseCode() !== 200) return "gemini-1.5-flash-latest";
-    const found = json.models.find(m => m.name.includes("flash") && m.supportedGenerationMethods.includes("generateContent"));
-    return found ? found.name : "models/gemini-1.5-flash-latest";
-  } catch (e) {
-    return "models/gemini-1.5-flash-latest";
-  }
-}
-
-function callGeminiApi(modelPath, base64Data, mimeType, prompt) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/${modelPath}:generateContent?key=${GEMINI_API_KEY.trim()}`;
-  const payload = {
-    contents: [{
-      parts: [
-        { text: prompt },
-        { inline_data: { mime_type: mimeType, data: base64Data } }
-      ]
-    }],
-    generationConfig: { response_mime_type: "application/json", temperature: 0.2 }
-  };
-  const options = { method: 'post', contentType: 'application/json', payload: JSON.stringify(payload), muteHttpExceptions: true };
-  const res = UrlFetchApp.fetch(url, options);
-  const json = JSON.parse(res.getContentText());
-  if (res.getResponseCode() !== 200) throw new Error("Error API: " + res.getResponseCode());
-  return json.candidates[0].content.parts[0].text;
-}
-
-function cleanJson(text) {
-  return text.replace(/```json/g, "").replace(/```/g, "").trim();
 }
 
 function forzarPermisosGmail() {

@@ -1,3 +1,7 @@
 .env
-/test
+test/*.pdf
+test/fixtures/
+test/golden/
+node_modules/
 Error.jpeg
+.handoffs/
