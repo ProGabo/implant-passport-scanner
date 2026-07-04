@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ca">
+<head>
+<meta charset="UTF-8">
+<title>Com autoritzar el compte de Google - Escàner d'Implants</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f8fc;
+    --card: #ffffff;
+    --text: #1a2333;
+    --muted: #5b6472;
+    --accent: #02234f;
+    --accent-bg: #eaf0fb;
+    --step-num-bg: #02234f;
+    --step-num-fg: #ffffff;
+    --border: #dbe3f0;
+    --warn-bg: #fff6e5;
+    --warn-border: #f0c36d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10131a;
+      --card: #1b202b;
+      --text: #eef1f6;
+      --muted: #a7b0c0;
+      --accent: #9db8f5;
+      --accent-bg: #1e2a44;
+      --step-num-bg: #4d6ebd;
+      --step-num-fg: #ffffff;
+      --border: #2b3342;
+      --warn-bg: #3a2f14;
+      --warn-border: #8a6d1f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10131a;
+    --card: #1b202b;
+    --text: #eef1f6;
+    --muted: #a7b0c0;
+    --accent: #9db8f5;
+    --accent-bg: #1e2a44;
+    --step-num-bg: #4d6ebd;
+    --step-num-fg: #ffffff;
+    --border: #2b3342;
+    --warn-bg: #3a2f14;
+    --warn-border: #8a6d1f;
+  }
+  :root[data-theme="light"] {
+    --bg: #f5f8fc;
+    --card: #ffffff;
+    --text: #1a2333;
+    --muted: #5b6472;
+    --accent: #02234f;
+    --accent-bg: #eaf0fb;
+    --step-num-bg: #02234f;
+    --step-num-fg: #ffffff;
+    --border: #dbe3f0;
+    --warn-bg: #fff6e5;
+    --warn-border: #f0c36d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    line-height: 1.55;
+    padding: 24px 16px 64px;
+  }
+  .wrap {
+    max-width: 640px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.5rem;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    color: var(--muted);
+    margin-top: 0;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+  .intro {
+    background: var(--accent-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 28px;
+  }
+  .intro p { margin: 0; }
+  .step {
+    display: flex;
+    gap: 16px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+  }
+  .step-num {
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--step-num-bg);
+    color: var(--step-num-fg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.05rem;
+  }
+  .step-body h2 {
+    font-size: 1.05rem;
+    margin: 0 0 6px;
+    color: var(--text);
+  }
+  .step-body p {
+    margin: 0 0 6px;
+    color: var(--text);
+  }
+  .step-body p.detail {
+    color: var(--muted);
+    font-size: 0.92rem;
+  }
+  .btn-label {
+    display: inline-block;
+    background: var(--accent-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1px 8px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .warn {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-top: 8px;
+    font-size: 0.92rem;
+  }
+  .final {
+    margin-top: 28px;
+    background: var(--accent-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .final h2 { margin-top: 0; font-size: 1.05rem; color: var(--accent); }
+  footer {
+    margin-top: 32px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  @media print {
+    body { padding: 0; }
+    .step { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Com solucionar l'error de l'Escàner d'Implants</h1>
+  <p class="subtitle">Instruccions pas a pas — compte clinicapiesteller@gmail.com</p>
+
+  <div class="intro">
+    <p>Quan vas fer servir l'Escàner d'Implants va sortir un missatge d'error vermell que deia
+    "Error de Lectura". Això passa perquè el teu compte de Google encara no ha donat permís
+    perquè el programa pugui llegir la imatge. Només cal fer-ho <strong>una vegada</strong>.
+    Segueix aquests passos amb calma, un per un.</p>
+  </div>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <h2>Obre el Full de càlcul de Google</h2>
+      <p>Obre el Google Sheets on tens la llista de pacients, com sempre.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <h2>Ves al menú "Extensions"</h2>
+      <p>A la part de dalt de la pantalla, busca la paraula
+      <span class="btn-label">Extensions</span> i fes-hi clic una vegada.</p>
+      <p class="detail">Surt un menú desplegable amb varies opcions.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <h2>Fes clic a "Apps Script"</h2>
+      <p>Dins d'aquest menú, busca l'opció <span class="btn-label">Apps Script</span>
+      (pot posar també "Editor de scripts") i fes-hi clic.</p>
+      <p class="detail">S'obrirà una pestanya nova al navegador amb codi de programació.
+      No et preocupis, no cal que entenguis res del que hi surt.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-body">
+      <h2>Selecciona la funció i prem "Executar"</h2>
+      <p>Just al costat del botó amb la fletxa, hi ha una llista desplegable. Fes-hi clic i
+      selecciona la que diu <span class="btn-label">forzarPermisosGmail</span>.</p>
+      <p>Ara prem el botó amb la fletxa <span class="btn-label">▶ Executar</span>
+      (en anglès pot dir "Run").</p>
+      <p class="detail">És important triar aquesta funció i no una altra, perquè aquesta
+      no necessita cap dada extra i no donarà cap error.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">5</div>
+    <div class="step-body">
+      <h2>Prem "Revisar permisos"</h2>
+      <p>Sortirà una finestra que diu <strong>"Autorització necessària"</strong>.
+      Fes clic al botó <span class="btn-label">Revisar permisos</span>.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">6</div>
+    <div class="step-body">
+      <h2>Tria el teu compte</h2>
+      <p>Fes clic al compte <strong>clinicapiesteller@gmail.com</strong> a la llista que surt.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">7</div>
+    <div class="step-body">
+      <h2>Si surt un avís groc o de precaució</h2>
+      <p>És possible que surti una pantalla que digui que "Google no ha verificat aquesta
+      aplicació". <strong>Això és normal</strong>, el programa és nostre i és segur.</p>
+      <p>Fes clic a on posa <span class="btn-label">Avançat</span> (a baix a l'esquerra),
+      i després fes clic a on posa <span class="btn-label">Anar a Pasaporte Implantológico
+      (no segur)</span>.</p>
+      <div class="warn">Si no surt aquesta pantalla, no passa res: vol dir que pots continuar
+      directament al pas següent.</div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">8</div>
+    <div class="step-body">
+      <h2>Prem "Permetre" a totes les pantalles</h2>
+      <p>Et demanarà permís per fer coses com "veure els teus fulls de càlcul" o "connectar
+      amb serveis externs". Fes clic a <span class="btn-label">Permetre</span>
+      (o "Allow") cada vegada que surti, fins que es tanqui la finestra.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">9</div>
+    <div class="step-body">
+      <h2>Torna al Full de càlcul i prova l'Escàner</h2>
+      <p>Tanca aquesta pestanya del codi i torna a la pestanya del Google Sheets.
+      Obre l'Escàner d'Implants una altra vegada i prova de llegir una foto.</p>
+      <p class="detail">Ja no hauria de sortir l'error vermell.</p>
+    </div>
+  </div>
+
+  <div class="final">
+    <h2>Si segueix sense funcionar</h2>
+    <p>Truca'm o envia'm un missatge i m'ho dius — ho mirem junts per videotrucada.</p>
+  </div>
+
+  <footer>Pasaporte Implantológico</footer>
+</div>
+</body>
+</html>

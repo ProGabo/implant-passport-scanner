@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <title>Consulta implantes - Clínica Dental</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
     <style>
       body {
@@ -24,6 +26,7 @@
         max-width: 700px;
         width: 100%;
         text-align: center;
+        min-height: 300px;
       }
 
       .logo {
@@ -34,17 +37,30 @@
       }
 
       h2 { margin-top: 0; color: #02234f; font-size: 26px; }
+      h4 { color: #02234f; font-size: 18px; margin-top: 15px;}
       p { color: #333; margin-bottom: 24px; font-size: 16px; }
 
-      input[type=text] {
+      /* Inputs generales */
+      input[type=text], input[type=email] {
         padding: 12px;
         font-size: 15px;
         width: 260px;
         border: 1px solid #d1d9e6;
         border-radius: 6px;
         outline: none;
+        box-sizing: border-box;
+        transition: border 0.3s;
       }
-      input[type=text]:focus { border-color: #02234f; }
+      input[type=text]:focus, input[type=email]:focus { border-color: #02234f; }
+
+      /* Estilo especial para el PIN OTP */
+      .otp-input {
+        text-align: center;
+        letter-spacing: 4px;
+        font-weight: bold;
+        font-size: 18px !important;
+        width: 180px !important;
+      }
 
       button {
         padding: 12px 20px;
@@ -59,6 +75,23 @@
       button:hover { background: #03306e; }
       button:disabled { background: #9bbddf; cursor: default; }
 
+      /* Botón del PDF (Estilo específico) */
+      .pdf-btn {
+        background: #02234f; /* Mismo azul que la web */
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+        gap: 8px; 
+        margin: 0 auto; /* Centrado */
+        padding: 10px 20px; 
+        font-size: 14px;
+        border: 1px solid #02234f;
+      }
+      .pdf-btn:hover {
+        background: white;
+        color: #02234f;
+      }
+
       .tooth-btn {
         background: white; 
         color: #02234f; 
@@ -68,6 +101,10 @@
       }
       .tooth-btn:hover { background: #eef4fb; }
       .tooth-btn.active { background: #02234f; color: white; }
+      /* Estilos para dientes dudosos o no especificados */
+      .tooth-btn-dudoso { background: #fffbeb; color: #b45309; border: 2px dashed #b45309; }
+      .tooth-btn-dudoso:hover { background: #fef3c7; }
+      .tooth-btn-dudoso.active { background: #b45309; color: white; border-style: solid; }
 
       .ok { color: #0a7a0a; margin-top: 15px; font-weight: 500; display:block; }
       .error { color: #b00020; margin-top: 15px; font-weight: 500; display:block; }
@@ -92,6 +129,15 @@
       }
 
       footer { margin-top: 25px; font-size: 13px; color: #777; }
+
+      /* Animación suave */
+      .fade-in {
+        animation: fadeIn 0.5s ease-in-out;
+      }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
     </style>
   </head>
 
@@ -100,83 +146,322 @@
       <img class="logo" src="https://i.postimg.cc/tTX6JQ42/DR-PI-ESTELLER.png" alt="Clínica Dental Logo">
 
       <h2>Consulta tus implantes</h2>
-      <p>Introduce tu código para ver tu pasaporte implantológico.</p>
+      
+      
+      <div id="step-1-code" class="fade-in">
+        <p>Introduce tu código para verificar tu identidad.</p>
+        <form id="formCode">
+          <input id="codigoInput" type="text" placeholder="Ej: ABC1234" autocomplete="off" />
+          <button id="btnCode" type="submit">Siguiente</button>
+        </form>
+        
+        <div style="margin-top: 15px;">
+            <a href="#" id="forgotCodeLink" style="font-size: 14px; color: #02234f;">¿He olvidado mi código?</a>
+        </div>
+      </div>
 
-      <form id="form">
-        <input id="codigo" type="text" placeholder="Ej: ABC1234" autocomplete="off" />
-        <button id="btn" type="submit">Buscar</button>
-      </form>
+      <div id="step-2-otp" style="display:none;" class="fade-in">
+        <p>Por seguridad, hemos enviado un código a: <br><strong id="emailDisplay" style="color:#02234f;">...</strong></p>
+        <form id="formOtp">
+          <input id="otpInput" class="otp-input" type="text" placeholder="######" maxlength="6" inputmode="numeric" autocomplete="off" />
+          <button id="btnOtp" type="submit">Ver Pasaporte</button>
+        </form>
+        <div style="margin-top: 15px;">
+          <a href="#" onclick="resetView(event)" style="font-size: 13px; color: #777;">¿No lo has recibido? Volver atrás</a>
+        </div>
+      </div>
+
+      <div id="retrieveForm" style="display: none; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;" class="fade-in">
+          <h4>Recuperar Código por Email</h4>
+          <form id="retrieveEmailForm">
+              <input id="emailRetrieveInput" type="email" placeholder="Introduce tu email" autocomplete="email" />
+              <button id="btnRetrieve" type="submit">Enviar Código</button>
+          </form>
+          <div id="retrieveStatus" style="margin-top: 10px;"></div>
+          <div style="margin-top: 15px;">
+              <a href="#" id="backToSearchLink" style="font-size: 14px; color: #777;">Volver a buscar por código</a>
+          </div>
+      </div>
 
       <div id="status"></div>
+
+      <div id="downloadAction" style="display:none; text-align:center; margin-top:25px; margin-bottom:10px;">
+        <button onclick="generatePDF()" class="pdf-btn">
+          📄 Descargar Pasaporte PDF
+        </button>
+      </div>
+
       <div id="resultArea"></div>
 
       <footer>© Clínica Dental Dr. Pi Esteller — Todos los derechos reservados</footer>
-    </div>
+
+      <div id="pdf-template" style="display:none;">
+        <div style="padding: 40px; font-family: 'Helvetica', sans-serif; color: #333; background:white;">
+          
+          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 2px solid #02234f; padding-bottom: 20px; margin-bottom: 30px;">
+            <img src="https://i.postimg.cc/tTX6JQ42/DR-PI-ESTELLER.png" style="height: 60px;">
+            <div style="text-align:right;">
+              <h1 style="margin:0; color: #02234f; font-size: 24px;">Pasaporte Implantológico</h1>
+              <p style="margin:5px 0; font-size: 12px; color: #666;">Certificado de Autenticidad y Garantía</p>
+            </div>
+          </div>
+
+          <div style="background: #f4f6f9; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+            <table style="width:100%; border:none;">
+              <tr>
+                <td style="width:50%; padding:5px;"><strong>Paciente:</strong> <span id="pdf-nombre"></span></td>
+                <td style="width:50%; padding:5px;"><strong>id_quartup:</strong> <span id="pdf-id_quartup"></span></td>
+              </tr>
+              <tr>
+                <td style="padding:5px;"><strong>Fecha Emisión:</strong> <span id="pdf-fecha"></span></td>
+                <td style="padding:5px;"><strong>Nº Historial:</strong> <span id="pdf-codigo"></span></td>
+              </tr>
+            </table>
+          </div>
+
+          <h3 style="color:#02234f; border-bottom: 1px solid #ccc; padding-bottom: 5px;">Registro de Implantes Colocados</h3>
+          <table style="width:100%; border-collapse: collapse; margin-top: 15px; font-size: 11px;">
+            <thead style="background: #02234f; color: white;">
+              <tr>
+                <th style="padding: 8px; text-align: left; width: 10%;">Diente</th>
+                <th style="padding: 8px; text-align: left; width: 20%;">Marca / Modelo</th>
+                <th style="padding: 8px; text-align: left; width: 15%;">Medidas</th>
+                <th style="padding: 8px; text-align: left; width: 20%;">Pilar</th> <th style="padding: 8px; text-align: left; width: 20%;">Ref/Lote</th>
+                <th style="padding: 8px; text-align: left; width: 15%;">Fecha</th>
+              </tr>
+            </thead>
+            <tbody id="pdf-table-body">
+              </tbody>
+          </table>
+
+          <div style="margin-top: 60px; font-size: 10px; color: #999; border-top: 1px solid #eee; padding-top: 20px; text-align: center;">
+            <p>Este documento certifica los componentes médicos implantados. Se recomienda conservar este documento para futuras referencias clínicas.</p>
+            <p>© Clínica Dental Dr. Pi Esteller</p>
+          </div>
+        </div>
+      </div>
+      </div>
 
     <script>
-      const form = document.getElementById('form');
-      const input = document.getElementById('codigo');
-      const btn = document.getElementById('btn');
+      
+
+      // Variables de Estado
+      let currentPatientCode = '';
+      const API_URL = "https://script.google.com/macros/s/AKfycbymkCc2Bf0pW82p6wUbpCIzIigaeYX9g7P-wTQxgTMpbAsqjF9JyB-W7LyCatuepz3O/exec";
+      // Referencias DOM
+      const step1 = document.getElementById('step-1-code');
+      const formCode = document.getElementById('formCode');
+      const codigoInput = document.getElementById('codigoInput');
+      const btnCode = document.getElementById('btnCode');
+
+      const step2 = document.getElementById('step-2-otp');
+      const formOtp = document.getElementById('formOtp');
+      const otpInput = document.getElementById('otpInput');
+      const btnOtp = document.getElementById('btnOtp');
+      const emailDisplay = document.getElementById('emailDisplay');
+
       const status = document.getElementById('status');
       const resultArea = document.getElementById('resultArea');
+      const downloadAction = document.getElementById('downloadAction');
+      
+      const forgotLink = document.getElementById('forgotCodeLink');
+      const retrieveFormDiv = document.getElementById('retrieveForm');
+      const retrieveEmailForm = document.getElementById('retrieveEmailForm');
+      const retrieveEmailInput = document.getElementById('emailRetrieveInput');
+      const btnRetrieve = document.getElementById('btnRetrieve');
+      const retrieveStatus = document.getElementById('retrieveStatus');
+      const backLink = document.getElementById('backToSearchLink');
 
-      // Escapar HTML por seguridad
       function escapeHtml(s) {
         return String(s || '').replace(/[&<>]/g, t => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[t]));
       }
 
-      // --- RENDERIZADO DE MÚLTIPLES IMPLANTES ---
+      // --- PASO 1 ---
+      formCode.addEventListener('submit', function(e){
+        e.preventDefault();
+        const code = codigoInput.value.trim();
+        status.innerHTML = '';
+        
+        if (!code) {
+          status.innerHTML = '<span class="error">Por favor, introduce tu código.</span>';
+          return;
+        }
+
+        // 1. Cambiamos el texto del botón para que parezca más profesional
+        btnCode.disabled = true;
+        btnCode.textContent = 'Buscando en la base de datos...';
+
+        // 2. Mensaje de Marketing (Estático y 100% seguro contra pantallas blancas)
+        status.innerHTML = `
+          <div style="color: #02234f; background: #eef4fb; padding: 12px; border-radius: 6px; font-size: 14px; border: 1px solid #cde0f5; text-align: center; margin-top: 15px;">
+            ⏳ <b>Analizando Historial Clínico...</b><br><br>
+            Buscando tu código de forma segura entre los <b>más de 10.000 implantes</b> que hemos colocado con éxito.<br><br>
+            <span style="font-size: 12px; color: #666;">Gracias por tu paciencia.</span>
+          </div>
+        `;
+
+        fetch(API_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'initiateLogin', code: code }),
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+        })
+        .then(res => res.json())
+        .then(res => {
+            btnCode.disabled = false;
+            btnCode.textContent = 'Siguiente';
+
+            if (res.ok) {
+              currentPatientCode = code; 
+
+              // --- CASO A: NO TIENE EMAIL (ACCESO DIRECTO) ---
+              if (res.skipOTP) {
+                step1.style.display = 'none';
+                status.innerHTML = '<span class="ok">Identidad verificada. ✅</span>';
+                
+                if (res.implantes && res.implantes.length > 0) {
+                    res.implantes.sort((a, b) => {
+                        let posA = parseInt(String(a.posicion || a.posiciondiente).replace(/\D/g, '')) || 0;
+                        let posB = parseInt(String(b.posicion || b.posiciondiente).replace(/\D/g, '')) || 0;
+                        return posA - posB;
+                    });
+                    
+                    resultArea.innerHTML = renderMultiImplantView(res.implantes);
+                    downloadAction.style.display = 'block';
+                } else {
+                    status.innerHTML = '<span class="error">No se encontraron implantes.</span>';
+                }
+
+              // --- CASO B: SÍ TIENE EMAIL (PEDIR PIN) ---
+              } else if (res.requiresOTP) {
+                step1.style.display = 'none';
+                step2.style.display = 'block';
+                emailDisplay.textContent = res.maskedEmail;
+                otpInput.focus();
+                status.innerHTML = '<span class="ok">Código correcto. Revisa tu email.</span>';
+              }
+              
+            } else {
+              status.innerHTML = '<span class="error">' + (res.message || 'Error desconocido') + '</span>';
+            }
+        })
+        .catch(err => {
+            btnCode.disabled = false;
+            btnCode.textContent = 'Siguiente';
+            status.innerHTML = '<span class="error">Error de conexión. Inténtalo de nuevo.</span>';
+        });
+      });
+
+      // --- PASO 2 ---
+      formOtp.addEventListener('submit', function(e){
+        e.preventDefault();
+        const pin = otpInput.value.trim();
+        status.innerHTML = '';
+
+        if (!pin || pin.length < 6) {
+          status.innerHTML = '<span class="error">Introduce el código de 6 dígitos del email.</span>';
+          return;
+        }
+
+        btnOtp.disabled = true;
+        btnOtp.textContent = 'Validando...';
+
+        fetch(API_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'verifyOTPAndGetData', currentPatientCode: currentPatientCode, pin: pin }),
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+        })
+        .then(res => res.json())
+        .then(res => {
+            btnOtp.disabled = false;
+            btnOtp.textContent = 'Ver Pasaporte';
+
+            if (res.ok && res.implantes && res.implantes.length > 0) {
+              
+              res.implantes.sort((a, b) => {
+                  let posA = parseInt(String(a.posicion || a.posiciondiente).replace(/\D/g, '')) || 0;
+                  let posB = parseInt(String(b.posicion || b.posiciondiente).replace(/\D/g, '')) || 0;
+                  return posA - posB;
+              });
+
+              step2.style.display = 'none';
+              status.innerHTML = '<span class="ok">Identidad verificada correctamente ✅</span>';
+              
+              resultArea.innerHTML = renderMultiImplantView(res.implantes);
+              downloadAction.style.display = 'block';
+
+            } else {
+              status.innerHTML = '<span class="error">' + (res.message || 'Código de seguridad incorrecto.') + '</span>';
+            }
+        })
+        .catch(err => {
+            btnOtp.disabled = false;
+            btnOtp.textContent = 'Ver Pasaporte';
+            status.innerHTML = '<span class="error">Error de conexión.</span>';
+        });
+      });
+
+      // --- RESET VIEW ---
+      window.resetView = function(e) {
+        if(e) e.preventDefault();
+        step1.style.display = 'block';
+        step2.style.display = 'none';
+        status.innerHTML = '';
+        resultArea.innerHTML = '';
+        downloadAction.style.display = 'none'; 
+        otpInput.value = '';
+        currentPatientCode = '';
+      };
+
+      // --- RENDER WEB ---
       function renderMultiImplantView(implantes) {
         if (!implantes || implantes.length === 0) return '';
-
-        // 1. Datos del Paciente (tomamos el primero)
         const p = implantes[0];
         
         let html = `
-          <div style="background:#eef4fb; padding:15px; border-radius:8px; margin-top:20px; text-align:left;">
+          <div style="background:#eef4fb; padding:15px; border-radius:8px; margin-top:20px; text-align:left;" class="fade-in">
             <h3 style="margin:0; color:#02234f;">👤 ${escapeHtml(p.nombre)}</h3>
             <p style="margin:5px 0; font-size:14px;">
-               <strong>DNI:</strong> ${escapeHtml(p.dni)} <br> 
-               <strong>Email:</strong> ${escapeHtml(p.email)}
+                <strong>id_quartup:</strong> ${escapeHtml(p.id_quartup)} <br> 
+                <strong>Email:</strong> ${escapeHtml(p.email)}
             </p>
           </div>
         `;
 
-        // 2. Botonera de Dientes
         html += `<h4 style="color:#666; margin-top:20px;">Selecciona el diente:</h4>`;
         html += `<div style="display:flex; flex-wrap:wrap; justify-content:center; gap:5px; margin-bottom:20px;">`;
         
         implantes.forEach((imp, index) => {
-          // Intentamos buscar la clave 'posicion'. Si no existe, ponemos un placeholder
-          const diente = imp.posicion || imp.posiciondiente || ('#' + (index + 1)); 
-          html += `<button class="tooth-btn" onclick="showImplantDetail(${index}, this)">
-                    🦷 ${escapeHtml(diente)}
-                   </button>`;
+          const diente = String(imp.posicion || imp.posiciondiente || ('#' + (index + 1))).trim();
+          const dienteMinusculas = diente.toLowerCase();
+          
+          // Comprobamos si es un diente dudoso o no especificado
+          const esDudoso = dienteMinusculas === 'no especificado' || dienteMinusculas.startsWith('posible');
+
+          if (esDudoso) {
+            html += `<button class="tooth-btn tooth-btn-dudoso" onclick="showImplantDetail(${index}, this)">
+                        ⚠️ ${escapeHtml(diente)}
+                       </button>`;
+          } else {
+            html += `<button class="tooth-btn" onclick="showImplantDetail(${index}, this)">
+                        🦷 ${escapeHtml(diente)}
+                       </button>`;
+          }
         });
         html += `</div>`;
-
-        // 3. Contenedor Detalle
         html += `<div id="technicalDetail" style="text-align:left; border-top:2px solid #eee; padding-top:10px;">
-                  <p style="text-align:center; color:#999; font-style:italic;">Pulsa un diente para ver los detalles técnicos.</p>
-                 </div>`;
-
-        // Guardar en memoria global
+                      <p style="text-align:center; color:#999; font-style:italic;">Pulsa un diente para ver los detalles técnicos.</p>
+                     </div>`;
         window.currentImplants = implantes;
         return html;
       }
 
-      // Mostrar detalle al hacer click
       window.showImplantDetail = function(index, btnElement) {
-        // Gestionar estado visual de los botones
         const allBtns = document.querySelectorAll('.tooth-btn');
         allBtns.forEach(b => b.classList.remove('active'));
         if(btnElement) btnElement.classList.add('active');
 
         const imp = window.currentImplants[index];
         const container = document.getElementById('technicalDetail');
-
-        // Definimos las claves que vienen de "Code.gs" -> _cleanKey
-        // Ajusta las claves de la derecha según tus cabeceras reales
         const fields = [
             { label: 'Posición', key: 'posicion' },
             { label: 'Marca', key: 'marca' },
@@ -186,65 +471,207 @@
             { label: 'Conexión', key: 'conexion' },
             { label: 'Pilar', key: 'pilar' },
             { label: 'Fecha Colocación', key: 'fecha_de_colocacion' }, 
-            { label: 'Cód. Implante', key: 'cod_implante' }, // o 'codigo_implante' según header
+            { label: 'Cód. Implante', key: 'cod_implante' },
             { label: 'Lote', key: 'lote' }
         ];
 
-        let detailHtml = `<h4>Detalles Técnicos</h4><table>`;
+        const posVal = String(imp.posicion || imp.posiciondiente || '').toLowerCase().trim();
+        const esDudoso = posVal === 'no especificado' || posVal.startsWith('posible');
+
+        let detailHtml = `<h4>Detalles Técnicos</h4>`;
+        
+        if (esDudoso) {
+            detailHtml += `
+            <div style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 10px; margin-bottom: 15px; border-radius: 4px; font-size: 13px; color: #92400e;">
+                <strong>⚠️ Pendiente de confirmación:</strong> La posición exacta de este implante está en revisión y será actualizada próximamente por la clínica.
+            </div>`;
+        }
+        
+        detailHtml += `<table>`;
         fields.forEach(f => {
-            // Buscamos la clave. Si no está exacta, intentamos sin guiones bajos
             let val = imp[f.key] || imp[f.key.replace(/_/g,'')] || '';
+            
+            // Si es fecha, formatear bonito en la vista web también
+            if (f.key === 'fecha_de_colocacion' && val) {
+                 let d = new Date(val);
+                 if(!isNaN(d.getTime())) val = d.toLocaleDateString('es-ES');
+            }
+
             if(val) {
                 detailHtml += `<tr><td class="label">${f.label}</td><td>${escapeHtml(val)}</td></tr>`;
             }
         });
         detailHtml += `</table>`;
 
-        // Animación simple
         container.style.opacity = '0.5';
         container.innerHTML = detailHtml;
         setTimeout(() => container.style.opacity = '1', 100);
       };
 
-      // --- LOGICA FORMULARIO ---
-      form.addEventListener('submit', function(e){
-        e.preventDefault();
-        const code = input.value.trim();
-        resultArea.innerHTML = '';
-        status.textContent = '';
-        window.currentImplants = [];
+// --- GENERAR PDF MEJORADO Y BLINDADO ---
+      window.generatePDF = function() {
+        const implants = window.currentImplants;
+        if (!implants || implants.length === 0) return;
+        const p = implants[0];
 
-        if (!code) {
-          status.innerHTML = '<span class="error">Introduce un código.</span>';
-          return;
+        // 1. Rellenar datos Cabecera
+        document.getElementById('pdf-nombre').textContent = p.nombre || '';
+        document.getElementById('pdf-id_quartup').textContent = p.id_quartup || '';
+        document.getElementById('pdf-codigo').textContent = currentPatientCode;
+        document.getElementById('pdf-fecha').textContent = new Date().toLocaleDateString('es-ES');
+
+        // 2. Rellenar tabla
+        const tbody = document.getElementById('pdf-table-body');
+        tbody.innerHTML = ''; 
+
+        // --- FUNCIÓN HELPER: Buscar valor ignorando mayúsculas/acentos ---
+        // Esto encuentra 'Fecha Colocación', 'fecha_colocacion', 'fechadecolocacion', etc.
+        function findValueFuzzy(obj, searchTerms) {
+            // 1. Búsqueda exacta primero
+            for (let key in obj) {
+                // Quitamos guiones bajos, espacios y pasamos a minúsculas para comparar
+                let cleanKey = key.toLowerCase().replace(/[_ ]/g, '');
+                // Comparamos con cada término de búsqueda limpio
+                for (let term of searchTerms) {
+                    if (cleanKey === term.toLowerCase().replace(/[_ ]/g, '')) return obj[key];
+                }
+            }
+            // 2. Búsqueda "contiene" (para casos difíciles)
+            for (let key in obj) {
+                let k = key.toLowerCase();
+                // Si la clave contiene "fecha" Y "coloca", es la nuestra.
+                if (k.includes('fecha') && k.includes('coloca')) return obj[key];
+            }
+            return null;
         }
 
-        btn.disabled = true;
-        btn.textContent = 'Buscando...';
+        // --- FUNCIÓN HELPER: Formatear fecha a la fuerza ---
+        function parseDateSecure(raw) {
+            if (!raw) return '-';
+            
+            // Si ya es un objeto fecha
+            if (raw instanceof Date) return raw.toLocaleDateString('es-ES');
 
-        google.script.run
-          .withSuccessHandler(function(res){
-            btn.disabled = false;
-            btn.textContent = 'Buscar';
+            // Si es texto, intentamos detectar si es formato ISO (2023-05-20) o Español (20/05/2023)
+            const str = String(raw).trim();
+            
+            // Caso A: Texto tipo "20/05/2023" (Hoja de cálculo en texto plano)
+            if (str.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
+                return str; // Ya está bien, lo devolvemos tal cual
+            }
 
-            if (!res || res.ok === false) {
-              status.innerHTML = '<span class="error">' + (res && res.message ? escapeHtml(res.message) : 'Error desconocido.') + '</span>';
+            // Caso B: Formato ISO o fecha standard de Google (2023-05-20T...)
+            const d = new Date(str);
+            if (!isNaN(d.getTime())) {
+                return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            }
+
+            // Caso C: Devolvemos el texto original si no sabemos qué es, para no mostrar guión
+            return str;
+        }
+
+        implants.forEach(imp => {
+          // Buscamos los datos usando la búsqueda inteligente
+          const diente = imp.posicion || imp.posiciondiente || '-';
+          const marcaModelo = `${imp.marca || ''} ${imp.modelo || ''}`;
+          const medidas = imp.dimensiones || '-';
+          
+          // Busca 'pilar', 'pilar transepitelial', etc.
+          const pilar = findValueFuzzy(imp, ['pilar', 'pilartransepitelial', 'aditamentos']) || '-';
+          
+          const refLote = `Ref: ${imp.cod_implante || '-'} <br> Lote: ${imp.lote || '-'}`;
+          
+          // Busca la fecha con lupa
+          const rawDate = findValueFuzzy(imp, ['fecha_de_colocacion', 'fechadecolocacion', 'fecha', 'fechaColocacion']);
+          const fechaStr = parseDateSecure(rawDate);
+
+          const row = `
+            <tr style="border-bottom: 1px solid #eee;">
+              <td style="padding: 8px;"><strong>${escapeHtml(diente)}</strong></td>
+              <td style="padding: 8px;">${escapeHtml(marcaModelo)}</td>
+              <td style="padding: 8px;">${escapeHtml(medidas)}</td>
+              <td style="padding: 8px;">${escapeHtml(pilar)}</td>
+              <td style="padding: 8px;">${refLote}</td>
+              <td style="padding: 8px;">${escapeHtml(fechaStr)}</td>
+            </tr>
+          `;
+          tbody.innerHTML += row;
+        });
+
+        // 3. Configuración y Generación del PDF
+        const element = document.getElementById('pdf-template');
+        const opt = {
+          margin:       10,
+          filename:     `Pasaporte_${(p.nombre || 'Paciente').replace(/\s+/g, '_')}.pdf`,
+          image:        { type: 'jpeg', quality: 0.98 },
+          html2canvas:  { scale: 2, useCORS: true }, 
+          jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+
+        element.style.display = 'block'; 
+        
+        // Pequeño retardo para asegurar que el DOM se pinte antes de capturar (ayuda con imágenes/fuentes)
+        setTimeout(() => {
+            html2pdf().set(opt).from(element).save().then(() => {
+              element.style.display = 'none';
+            });
+        }, 100);
+      };
+
+      // --- LOGICA RECOVERY (Mantenida) ---
+      forgotLink.addEventListener('click', function(e) {
+          e.preventDefault();
+          step1.style.display = 'none'; 
+          retrieveFormDiv.style.display = 'block';
+          forgotLink.style.display = 'none';
+          retrieveStatus.innerHTML = '';
+          retrieveEmailInput.focus();
+          status.innerHTML = '';
+      });
+
+      backLink.addEventListener('click', function(e) {
+          e.preventDefault();
+          step1.style.display = 'block'; 
+          retrieveFormDiv.style.display = 'none';
+          forgotLink.style.display = 'block';
+          retrieveStatus.innerHTML = '';
+          retrieveEmailInput.value = '';
+          codigoInput.focus();
+      });
+
+      retrieveEmailForm.addEventListener('submit', function(e) {
+          e.preventDefault();
+          const email = retrieveEmailInput.value.trim();
+          retrieveStatus.innerHTML = '';
+
+          if (!email) {
+              retrieveStatus.innerHTML = '<span class="error">El email es obligatorio.</span>';
               return;
-            }
+          }
 
-            if (res.found === true && res.implantes && res.implantes.length > 0) {
-              status.innerHTML = '<span class="ok">Historial encontrado ✅</span>';
-              resultArea.innerHTML = renderMultiImplantView(res.implantes);
-            } else {
-              status.innerHTML = '<span class="error">No se encontraron datos para ese código.</span>';
-            }
+          btnRetrieve.disabled = true;
+          btnRetrieve.textContent = 'Enviando...';
+          
+          fetch(API_URL, {
+              method: 'POST',
+              body: JSON.stringify({ action: 'retrieveCodeByEmail', email: email }),
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' }
           })
-          .withFailureHandler(function(err){
-            btn.disabled = false;
-            btn.textContent = 'Buscar';
-            status.innerHTML = '<span class="error">Error de conexión con el servidor.</span>';
+          .then(res => res.json())
+          .then(res => {
+              btnRetrieve.disabled = false;
+              btnRetrieve.textContent = 'Enviar Código';
+              if (res.ok) {
+                  retrieveStatus.innerHTML = '<span class="ok">' + escapeHtml(res.message) + '</span>';
+              } else {
+                  retrieveStatus.innerHTML = '<span class="error">' + escapeHtml(res.message) + '</span>';
+              }
           })
-          .getPatientDataVerbose(code);
+          .catch(err => {
+              btnRetrieve.disabled = false;
+              btnRetrieve.textContent = 'Enviar Código';
+              retrieveStatus.innerHTML = '<span class="error">Error de red. Inténtalo más tarde.</span>';
+          }); 
       });
     </script>
   </body>
