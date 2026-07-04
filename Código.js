@@ -1,7 +1,7 @@
 // --- CONFIGURACIÓN ---
-const SPREADSHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId(); 
-const SHEET_NAME = "Pacientes"; 
-const CATALOG_SHEET_NAME = "Catálogo de Implantes"; // <-- NUEVA CONSTANTE
+const SPREADSHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
+const SHEET_NAME = "Pacientes";
+const CATALOG_SHEET_NAME = "Catálogo de Implantes";
 
 /**
  * Sirve la página principal de la aplicación web (la interfaz de búsqueda del paciente).
@@ -10,8 +10,7 @@ const CATALOG_SHEET_NAME = "Catálogo de Implantes"; // <-- NUEVA CONSTANTE
 function doGet() {
   const htmlOutput = HtmlService.createTemplateFromFile('Index')
       .evaluate();
-      
-  // *** CAMBIO CLAVE: Eliminar la barra de Apps Script ***
+
   htmlOutput.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
             .setTitle('Pasaporte Implantológico');
 
@@ -28,7 +27,9 @@ function doGet() {
 function onOpen() {
   SpreadsheetApp.getUi()
       .createMenu('Pasaporte Implantológico 🦷')
-      .addItem('➕ Añadir Implante / Paciente', 'showSidebar') 
+      .addItem('➕ Añadir Implante / Paciente', 'showSidebar')
+      .addSeparator()
+      .addItem('🧹 Limpiar Pacientes Duplicados', 'eliminarDuplicados')
       .addToUi();
 }
 
@@ -37,10 +38,10 @@ function onOpen() {
  * Necesita el archivo HTML: SidebarForm.html
  */
 function showSidebar() {
-  const html = HtmlService.createTemplateFromFile('SidebarForm'); 
+  const html = HtmlService.createTemplateFromFile('SidebarForm');
   SpreadsheetApp.getUi()
       .showSidebar(html.evaluate()
-      .setTitle('Gestión Rápida de Implantes'));
+      .setTitle('Escáner de Implantes'));
 }
 
 
@@ -760,15 +761,6 @@ function procesarCargaMasiva() {
   SpreadsheetApp.getUi().alert(`Proceso finalizado. ${successCount} pacientes importados/actualizados.`);
 }
 
-function onOpen() {
-  SpreadsheetApp.getUi()
-      .createMenu('Pasaporte Implantológico 🦷')
-      .addItem('➕ Añadir Implante (Manual)', 'showSidebar')
-      .addSeparator()
-      .addItem('📂 Procesar Carga Masiva (Hoja)', 'procesarCargaMasiva') // Nuevo Item
-      .addToUi();
-}
-
 // ==========================================
 //  SEGURIDAD Y AUTENTICACIÓN (2FA)
 // ==========================================
@@ -1003,10 +995,6 @@ function callGeminiApi(modelPath, base64Data, mimeType, prompt) {
 function cleanJson(text) {
   return text.replace(/```json/g, "").replace(/```/g, "").trim();
 }
-// --- RESTO DE FUNCIONES NECESARIAS PARA QUE LA WEB CARGUE ---
-function doGet() { return HtmlService.createTemplateFromFile('Index').evaluate().setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL).setTitle('Pasaporte Implantológico'); }
-function onOpen() { SpreadsheetApp.getUi().createMenu('Pasaporte Implantológico 🦷').addItem('➕ Añadir Implante / Paciente', 'showSidebar').addToUi(); }
-function showSidebar() { const html = HtmlService.createTemplateFromFile('SidebarForm').evaluate().setTitle('Escáner de Implantes'); SpreadsheetApp.getUi().showSidebar(html); }
 
 function forzarPermisosGmail() {
   // Esta línea no hace nada malo, solo obliga a Google a pedirte permisos de Gmail
@@ -1016,287 +1004,6 @@ function forzarPermisosGmail() {
 function forzarPermisosPDF() {
   // Esta línea obliga a Google a pedirte el permiso de "script.external_request"
   UrlFetchApp.fetch("https://www.google.com"); 
-}
-
-// =========================================================================
-// MIGRACIÓN AUTOMÁTICA EN SEGUNDO PLANO (BIG DATA) - QUARTUP -> PACIENTES
-// =========================================================================
-
-function INICIAR_ROBOT_MIGRACION() {
-  const ui = SpreadsheetApp.getUi();
-  const respuesta = ui.alert(
-    "🚀 Iniciar Robot en Segundo Plano", 
-    "Esto procesará las 42.000 líneas de forma automática.\n\nEl proceso se ejecutará en los servidores de Google CADA MINUTO. Puedes cerrar el ordenador o seguir trabajando en otra cosa.\n\n¿Quieres arrancar el motor?", 
-    ui.ButtonSet.YES_NO
-  );
-  
-  if (respuesta === ui.Button.YES) {
-    DETENER_ROBOT_MIGRACION_SILENCIOSO(); // Limpiamos alarmas viejas por seguridad
-    ScriptApp.newTrigger("MOTOR_migracionIA_SegundoPlano")
-      .timeBased()
-      .everyMinutes(1)
-      .create(); 
-    ui.alert("✅ Motor arrancado. Revisa la pestaña 'Pacientes' de vez en cuando para ver cómo van apareciendo los implantes mágicamente.");
-  }
-}
-
-function DETENER_ROBOT_MIGRACION() {
-  DETENER_ROBOT_MIGRACION_SILENCIOSO();
-  SpreadsheetApp.getUi().alert("🛑 Robot detenido. Ya no procesará más líneas automáticamente.");
-}
-
-function DETENER_ROBOT_MIGRACION_SILENCIOSO() {
-  const triggers = ScriptApp.getProjectTriggers();
-  for (let i = 0; i < triggers.length; i++) {
-    if (triggers[i].getHandlerFunction() === "MOTOR_migracionIA_SegundoPlano") {
-      ScriptApp.deleteTrigger(triggers[i]);
-    }
-  }
-}
-
-// =========================================================================
-// EL MOTOR PRINCIPAL (Este se ejecuta solo, no le des tú al botón)
-// =========================================================================
-function MOTOR_migracionIA_SegundoPlano() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const hojaImportacion = ss.getSheetByName("Importación Quartup");
-  const hojaPacientes = ss.getSheetByName("Pacientes");
-  
-  if (!hojaImportacion || !hojaPacientes) return; 
-  
-  const datosCSV = hojaImportacion.getDataRange().getValues();
-  const cabeceras = datosCSV[0]; 
-  
-  const colPacienteID = cabeceras.indexOf("Paciente");
-  const colNombre = cabeceras.indexOf("Nombre paciente");
-  const colFecha = cabeceras.indexOf("Fecha");
-  const colArticuloCodigo = cabeceras.indexOf("Artículo");
-  const colArticuloNombre = cabeceras.indexOf("Artículo, Nombre");
-  const colComentario = cabeceras.indexOf("Comentario"); 
-  const colDescripcion = cabeceras.indexOf("Descripción"); 
-  const colEstado = 18; 
-  
-  // 1. AGRUPAR DATOS (Procesamos 15 cirugías por minuto para no saturar la API)
-  const cirugiasPendientes = {};
-  let filasParaMarcar = []; 
-  
-  for (let i = 1; i < datosCSV.length; i++) {
-    let fila = datosCSV[i];
-    let estado = fila[colEstado] ? fila[colEstado].toString() : "";
-    
-    if (estado === "✅ Procesado" || !fila[colNombre]) continue;
-    
-    let id_quartup = fila[colPacienteID].toString().trim();
-    let fecha = fila[colFecha].toString().trim();
-    let llave = id_quartup + "_" + fecha;
-    
-    if (!cirugiasPendientes[llave]) {
-      // Tope de seguridad: 15 cirugías distintas por cada ejecución
-      if (Object.keys(cirugiasPendientes).length >= 25) break;
-      
-      cirugiasPendientes[llave] = {
-        id_quartup: id_quartup,
-        nombre: fila[colNombre].toString().trim(),
-        fecha: fecha,
-        articulos_abiertos: [] 
-      };
-    }
-    
-    if (fila[colArticuloNombre]) {
-      cirugiasPendientes[llave].articulos_abiertos.push({
-        codigo_articulo: fila[colArticuloCodigo].toString().trim(),
-        nombre_articulo: fila[colArticuloNombre].toString().trim(),
-        comentario: fila[colComentario].toString().trim(),
-        descripcion_general: fila[colDescripcion].toString().trim()
-      });
-    }
-    
-    filasParaMarcar.push({ filaExcel: i + 1, llave: llave });
-  }
-  
-  const llavesProcesar = Object.keys(cirugiasPendientes);
-  
-  // Si ya no hay nada que procesar, APAGAMOS EL ROBOT
-  if (llavesProcesar.length === 0) {
-    DETENER_ROBOT_MIGRACION_SILENCIOSO();
-    console.log("MIGRACIÓN 100% COMPLETADA. Robot apagado.");
-    return;
-  }
-  
-  const loteParaIA = llavesProcesar.map(llave => cirugiasPendientes[llave]);
-  
-  // 2. EL PROMPT MAESTRO
-  const prompt = `
-Eres un auditor médico experto en odontología e implantología. 
-Analiza este JSON de "Cirugías". Cada cirugía contiene el paciente, la fecha y un array 'articulos_abiertos' con TODO lo que se usó ese día (Implantes, Pilares, etc.) y anotaciones médicas desordenadas.
-
-OBJETIVO ESTRICTO:
-Extrae EXCLUSIVAMENTE los IMPLANTES DENTALES. Por cada implante encontrado en una cirugía, devuelve un objeto JSON. Ignora consumibles menores que no sean implantes.
-
-REGLAS DE DEDUCCIÓN Y MAPEO:
-
-1. DATOS BÁSICOS DEL PACIENTE:
-   - "id_quartup": Usa el campo 'id_quartup' (que es el código de paciente temporal).
-   - "nombre": Usa el campo 'nombre'.
-   - "fecha": Usa el campo 'fecha'.
-   - "email": OBLIGATORIO DEJAR VACÍO "".
-   - "lote": OBLIGATORIO DEJAR VACÍO "".
-
-2. DATOS DEL IMPLANTE:
-   - "codigo_implante": Usa 'codigo_articulo' (columna Artículo del CSV).
-   - "marca": Extráela de 'nombre_articulo' (ej. Branemark, Ticare, Southern Implants).
-   - "modelo": Extráelo de 'nombre_articulo'. Si no lo pone, mira el 'codigo_articulo' (REF) a ver si puedes deducirlo con alta confianza. Si no hay manera, pon "No especificado".
-   - "dimensiones": Extrae el diámetro y longitud de 'nombre_articulo' (ej. "3.75x13mm").
-
-3. LÓGICA DENTAL (CALCULA ESTOS CAMPOS):
-   A. PLATAFORMA (Basada estrictamente en el Diámetro):
-      - Si Diámetro <= 3.3 mm  -> "NP (Narrow)"
-      - Si Diámetro > 3.3 mm Y < 5.0 mm -> "RP (Regular)"
-      - Si Diámetro >= 5.0 mm -> "WP (Wide)"
-   
-   B. CONEXIÓN (Deduce basada en Marca y Modelo):
-      - Southern "ExHex", "Zygan" o "Co-Axis (ExHex)" -> "Hexágono Externo"
-      - Southern "Int Hex", "Internal Hex", "M-Series" o REF empieza por "I" -> "Hexágono Interno"
-      - Southern "Deep Conical" -> "Cónico Interno"
-      - Southern "Tri-Nex" -> "Trilobular"
-      - Ticare "Inhex" -> "Hexágono Interno"
-      - Ticare "Osseous" -> "Hexágono Externo"
-      - Si no estás seguro o no hay modelo, usa tu conocimiento general sobre la marca + código de artículo para deducirlo.
-
-4. LÓGICA DE POSICIÓN (DIENTES) - ¡CRUZAMIENTO DE DATOS!:
-   - Analiza los campos 'comentario' y 'descripcion_general' de TODA la cirugía.
-   - Si un implante dice "z.23,24, 12,14" y OTRO implante de la misma cirugía dice "fisura 1r cuadrante", debes usar la lógica dental: asigna "12, 14" al implante del 1r cuadrante, y deja "23, 24" para el otro implante. Si no estás seguro de a qué dientes corresponde déjalo en 'posible 12, 14'
-   - Combina la información de las diferentes filas de la misma cirugía para deducir qué diente corresponde a qué implante. Nunca inventes datos, pero asócialos lógicamente.
-
-5. REGLA ESTRICTA DE PILARES (MULTI-UNIT):
-   - Revisa si en la cirugía se abrió algún artículo que sea un Pilar "Multi-unit" (o variaciones).
-   - Si existe, extrae sus dimensiones en mm (ej. "Multi-unit 3 mm").
-   - ¿A qué diente va?: Si el comentario dice claramente el diente, asígnalo. Si el comentario dice "2o cuadrante", asígnalo SOLO a los implantes de esa cirugía que pertenezcan al 2º cuadrante según hayas deducido.
-   - Si no hay Multi-Unit en la cirugía o no es para ese implante, pon "NO".
-
-SALIDA OBLIGATORIA (Devuelve SOLO el array JSON, sin formato Markdown ni saludos):
-[
-  {
-    "id_quartup": "430000009",
-    "nombre": "PLANS HERNANDEZ, TERESA",
-    "email": "",
-    "posicion": "12, 14",
-    "fecha": "01/10/1991",
-    "marca": "Branemark",
-    "modelo": "MKIII",
-    "dimensiones": "3.75x18mm",
-    "plataforma": "RP (Regular)",
-    "conexion": "Hexágono Externo",
-    "pilar": "NO",
-    "codigo_implante": "28916",
-    "lote": ""
-  }
-]
-
-DATOS A ANALIZAR:
-${JSON.stringify(loteParaIA)}
-  `;
-  
-  try {
-    const modelName = getBestAvailableModel();
-    const respuestaIA = callGeminiApiTextOnly(modelName, prompt);
-    const jsonLimpio = cleanJson(respuestaIA);
-    const implantesDeducidos = JSON.parse(jsonLimpio);
-    
-    if (implantesDeducidos.length > 0) {
-      const ultimaFila = Math.max(hojaPacientes.getLastRow(), 1);
-      let mapaCodigos = {}; 
-      
-      // Construir diccionario de códigos existentes para no duplicar
-      if (ultimaFila > 1) {
-        const datosExistentes = hojaPacientes.getRange(2, 1, ultimaFila - 1, 2).getValues();
-        datosExistentes.forEach(fila => {
-          if (fila[0] && fila[1]) mapaCodigos[fila[1].toString().trim()] = fila[0].toString().trim();
-        });
-      }
-
-      const matrizPacientes = implantesDeducidos.map(imp => {
-        let id_quartupTemporal = (imp.id_quartup || "").toString().trim();
-        let codigoAsignado = "";
-
-        if (id_quartupTemporal && mapaCodigos[id_quartupTemporal]) {
-          codigoAsignado = mapaCodigos[id_quartupTemporal];
-        } else {
-          codigoAsignado = generarCodigoUnico(hojaPacientes);
-          if (id_quartupTemporal) mapaCodigos[id_quartupTemporal] = codigoAsignado; 
-        }
-
-        return [
-          codigoAsignado, id_quartupTemporal, imp.nombre || "", imp.email || "", 
-          imp.posicion || "", imp.fecha || "", imp.marca || "", imp.modelo || "", 
-          imp.dimensiones || "", imp.plataforma || "", imp.conexion || "", 
-          imp.pilar || "", imp.codigo_implante || "", imp.lote || ""
-        ];
-      });
-      
-      hojaPacientes.getRange(ultimaFila + 1, 1, matrizPacientes.length, 14).setValues(matrizPacientes);
-    }
-    
-    // 4. MARCAR COMO PROCESADOS
-    llavesProcesar.forEach(llaveProcesada => {
-      filasParaMarcar.forEach(item => {
-        if (item.llave === llaveProcesada) {
-          hojaImportacion.getRange(item.filaExcel,  19).setValue("✅ Procesado");
-        }
-      });
-    });
-    
-  } catch (error) {
-    console.error("Error en motor de segundo plano: " + error.message);
-    // IMPORTANTE: No ponemos alerta de UI aquí porque rompe los scripts en segundo plano
-  }
-}
-// =========================================================================
-// FUNCIONES AUXILIARES PARA CONECTAR CON LA API DE GEMINI
-// ======================================================================
-
-function callGeminiApiTextOnly(modelName, prompt, intentos = 0) {
-  const apiKey = GEMINI_API_KEY;
-
-  if (!apiKey) throw new Error("No se encuentra la API Key de Gemini.");
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-  const payload = {
-    "contents": [{ "parts": [{ "text": prompt }] }],
-    "generationConfig": { "temperature": 0.1, "responseMimeType": "application/json" }
-  };
-  
-  const options = {
-    "method": "post",
-    "contentType": "application/json",
-    "payload": JSON.stringify(payload),
-    "muteHttpExceptions": true // Importante para que no colapse el código
-  };
-  
-  const response = UrlFetchApp.fetch(url, options);
-  const jsonResponse = JSON.parse(response.getContentText());
-  
-  if (jsonResponse.error) {
-    // Si es un error de cuota (429) y no hemos intentado más de 3 veces
-    if (jsonResponse.error.code === 429 && intentos < 3) {
-      console.log("⏳ Límite de cuota alcanzado. El robot va a dormir 45 segundos y lo volverá a intentar...");
-      Utilities.sleep(45000); // Pausa el script 45 segundos
-      return callGeminiApiTextOnly(modelName, prompt, intentos + 1); // Reintento automático
-    }
-    throw new Error(jsonResponse.error.message);
-  }
-  
-  return jsonResponse.candidates[0].content.parts[0].text;
-}
-
-// Actualiza tu función onOpen para añadir la nueva opción
-function onOpen() { 
-  SpreadsheetApp.getUi()
-    .createMenu('Pasaporte Implantológico 🦷')
-    .addItem('➕ Añadir Implante / Paciente', 'showSidebar')
-    .addSeparator() // Añade una línea separadora visual
-    .addItem('🧹 Limpiar Pacientes Duplicados', 'eliminarDuplicados') 
-    .addToUi(); 
 }
 
 // Añade esta nueva función al final de tu Código.js
