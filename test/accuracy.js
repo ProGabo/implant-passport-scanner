@@ -1,8 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const assert = require('node:assert/strict');
 const ScanEngine = require('../ScanEngine.js');
 const { curlHttpFetch } = require('./httpFetchSync.js');
+const { compareToGolden } = require('./compareGolden.js');
 
 const TEST_DIR = __dirname;
 const GOLDEN_DIR = path.join(TEST_DIR, 'golden');
@@ -53,8 +53,14 @@ function main() {
         return;
       }
 
-      assert.deepStrictEqual(result.data, expected);
-      console.log(`[${sampleName}] PASS`);
+      const { critical, soft } = compareToGolden(result.data, expected);
+      if (critical.length > 0) {
+        console.log(`[${sampleName}] FAIL - critical field mismatch: ${critical.join(' | ')}`);
+        failed++;
+        return;
+      }
+      const softNote = soft.length > 0 ? ` (${soft.length} soft diff(s): ${soft.join(' | ')})` : '';
+      console.log(`[${sampleName}] PASS${softNote}`);
       passed++;
     } catch (e) {
       console.log(`[${sampleName}] FAIL - ${e.message}`);

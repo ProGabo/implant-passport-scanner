@@ -30,6 +30,7 @@ function onOpen() {
       .addItem('➕ Añadir Implante / Paciente', 'showSidebar')
       .addSeparator()
       .addItem('🧹 Limpiar Pacientes Duplicados', 'eliminarDuplicados')
+      .addItem('🩺 Comprobar escáner', 'comprobarEscaner')
       .addToUi();
 }
 
@@ -913,14 +914,80 @@ function processImplantFile(data, filename) {
     });
 
   } catch (e) {
-    if (e.message && e.message.indexOf('script.external_request') !== -1) {
-      return {
-        ok: false,
-        message: "Esta cuenta de Google todavía no tiene autorizados los permisos necesarios. Ve a Extensiones > Apps Script, selecciona la función 'forzarPermisosGmail' en el desplegable de arriba, pulsa el botón ▶ Ejecutar y acepta los permisos que te pida Google. Después vuelve aquí y prueba de nuevo."
-      };
+    if (ScanEngine.isAuthError(e)) {
+      return { ok: false, message: MENSAJE_REAUTORIZAR };
     }
     return { ok: false, message: "Error al interpretar: " + e.message };
   }
+}
+
+const MENSAJE_REAUTORIZAR = "Esta cuenta de Google todavía no tiene autorizados los permisos necesarios. Ve a Extensiones > Apps Script, selecciona la función 'forzarPermisosPDF' en el desplegable de arriba, pulsa el botón ▶ Ejecutar y acepta los permisos que te pida Google. Después vuelve aquí y prueba de nuevo.";
+
+/**
+ * Autodiagnóstico del escáner, ejecutable desde el menú por cualquier usuario de la
+ * hoja. Comprueba cada capa por separado (permisos del usuario actual, claves API,
+ * Gemini, OpenRouter) para que un fallo diga exactamente QUÉ arreglar, en vez del
+ * antiguo mensaje genérico de "límite alcanzado".
+ */
+function comprobarEscaner() {
+  const lineas = [];
+
+  let permisosOk = true;
+  try {
+    gasHttpFetch('https://www.google.com', { method: 'get' });
+    lineas.push("✅ Permisos de esta cuenta: OK");
+  } catch (e) {
+    permisosOk = false;
+    lineas.push("❌ Permisos de esta cuenta: FALLO. " + MENSAJE_REAUTORIZAR);
+  }
+
+  lineas.push(GEMINI_API_KEY
+    ? "✅ Clave Gemini: configurada"
+    : "❌ Clave Gemini: FALTA en Propiedades del script. Avisa a Gabriel.");
+  lineas.push(OPENROUTER_API_KEY
+    ? "✅ Clave OpenRouter: configurada"
+    : "❌ Clave OpenRouter: FALTA en Propiedades del script. Avisa a Gabriel.");
+
+  if (permisosOk) {
+    if (GEMINI_API_KEY) {
+      try {
+        const res = gasHttpFetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + GEMINI_API_KEY.trim(), { method: 'get' });
+        if (res.status === 200) lineas.push("✅ Gemini: responde correctamente");
+        else if (res.status === 429) lineas.push("⚠️ Gemini: límite diario alcanzado (HTTP 429). El escáner usará OpenRouter hasta mañana.");
+        else lineas.push("❌ Gemini: error HTTP " + res.status + ". Avisa a Gabriel.");
+      } catch (e) {
+        lineas.push("❌ Gemini: sin conexión (" + e.message + ")");
+      }
+    }
+    if (OPENROUTER_API_KEY) {
+      try {
+        const res = gasHttpFetch('https://openrouter.ai/api/v1/key', {
+          method: 'get',
+          headers: { 'Authorization': 'Bearer ' + OPENROUTER_API_KEY.trim() }
+        });
+        if (res.status === 200) lineas.push("✅ OpenRouter (respaldo): responde correctamente");
+        else if (res.status === 429) lineas.push("⚠️ OpenRouter: límite diario alcanzado (HTTP 429).");
+        else lineas.push("❌ OpenRouter: error HTTP " + res.status + ". Avisa a Gabriel.");
+      } catch (e) {
+        lineas.push("❌ OpenRouter: sin conexión (" + e.message + ")");
+      }
+    }
+  } else {
+    lineas.push("⏭️ Gemini y OpenRouter: no comprobados (primero arregla los permisos de arriba).");
+  }
+
+  SpreadsheetApp.getUi().alert("Diagnóstico del escáner", lineas.join("\n\n"), SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Contador de escaneos donde la IA dudó de alguna posición ("No especificado").
+ * Sirve para decidir con datos reales si merece la pena que el modelo proponga
+ * posiciones candidatas en el futuro. Llamado fire-and-forget desde el sidebar.
+ */
+function registrarDuda(n) {
+  const props = PropertiesService.getScriptProperties();
+  const actual = parseInt(props.getProperty('SCAN_DOUBT_COUNT'), 10) || 0;
+  props.setProperty('SCAN_DOUBT_COUNT', String(actual + (parseInt(n, 10) || 1)));
 }
 
 function forzarPermisosGmail() {

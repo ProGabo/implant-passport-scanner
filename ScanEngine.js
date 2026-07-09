@@ -160,7 +160,11 @@ var ScanEngine = (function () {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    if (res.status !== 200) throw new Error("Error API: " + res.status);
+    if (res.status !== 200) {
+      const err = new Error("Error API: " + res.status);
+      err.status = res.status;
+      throw err;
+    }
     const json = JSON.parse(res.text);
     return json.candidates[0].content.parts[0].text;
   }
@@ -175,20 +179,27 @@ var ScanEngine = (function () {
     return callGeminiApi(deps.httpFetch, modelName, base64Data, mimeType, promptText, deps.geminiApiKey);
   }
 
-  // Hard-pinned to a free OpenRouter model. This string must always end in ":free" — it is
-  // never built from a variable or taken from any response, so there is no code path that
-  // could select a paid model. Verified live against OpenRouter's own model list (their
-  // free-tier roster changes over time; re-check https://openrouter.ai/api/v1/models if
-  // this ever needs to change).
-  const OPENROUTER_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
+  // Hard-pinned fallback model — never built from a variable or taken from any response.
+  // PAID, and deliberately so (decided 2026-07-09): every free OpenRouter model was
+  // benchmarked against the golden PDFs and none is usable (Gemma variants permanently
+  // 429, Nemotron variants blow past the 60s GAS UrlFetchApp limit and misread stickers).
+  // gemini-2.5-flash via OpenRouter is the same model as the primary path, reads PDFs
+  // natively, answered in 4-14s, and costs ~$0.0005-0.003 per scan — charged only when
+  // the free direct-Gemini path is already down, against PREPAID OpenRouter credits
+  // (worst case is an honest 402, never a surprise bill).
+  const OPENROUTER_MODEL = "google/gemini-2.5-flash";
 
   /**
-   * OpenRouter's PDF pipeline defaults to the PAID "mistral-ocr" engine ($2/1000 pages)
-   * whenever the `plugins` parameter is omitted and the target model lacks native PDF
-   * support (ours doesn't). To guarantee this never costs money, PDF requests always pin
-   * the free "cloudflare-ai" engine explicitly — never omitted, never "mistral-ocr". Images
-   * skip the file-parser plugin entirely: vision models take them natively at $0.
+   * PDF parsing is pinned to the "native" engine: gemini-2.5-flash reads the PDF pages
+   * visually itself (no parsing surcharge, and crucially no OCR middleman — the free
+   * "cloudflare-ai" engine started delivering empty pages, "pdf-text" can never work on
+   * the clinic's scanned PDFs, and any text-based OCR loses the sticker layout and
+   * handwriting the prompt depends on). Pinned explicitly rather than omitted so a future
+   * model change can't silently fall back to the paid-per-page "mistral-ocr" default.
+   * Images skip the file-parser plugin entirely: vision models take them natively.
    */
+  const OPENROUTER_PDF_ENGINE = "native";
+
   function callOpenRouterApi(httpFetch, base64Data, mimeType, prompt, apiKey) {
     const isImage = mimeType.indexOf('image/') === 0;
     const filePart = isImage
@@ -204,7 +215,7 @@ var ScanEngine = (function () {
       }]
     };
     if (!isImage) {
-      payload.plugins = [{ id: 'file-parser', pdf: { engine: 'cloudflare-ai' } }];
+      payload.plugins = [{ id: 'file-parser', pdf: { engine: OPENROUTER_PDF_ENGINE } }];
     }
 
     const res = httpFetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -215,7 +226,11 @@ var ScanEngine = (function () {
       },
       body: JSON.stringify(payload)
     });
-    if (res.status !== 200) throw new Error("Error API OpenRouter: " + res.status);
+    if (res.status !== 200) {
+      const err = new Error("Error API OpenRouter: " + res.status);
+      err.status = res.status;
+      throw err;
+    }
     const json = JSON.parse(res.text);
     return json.choices[0].message.content;
   }
@@ -229,10 +244,29 @@ var ScanEngine = (function () {
   }
 
   /**
+   * GAS authorization failures (user hasn't accepted the script's scopes) throw from
+   * UrlFetchApp itself, before any HTTP response exists — so they have no `status` and
+   * must be recognized by message. They are per-user and fixable only by re-authorizing,
+   * so they must escape scanPassport instead of being reported as a provider failure.
+   */
+  function isAuthError(e) {
+    return !!(e && e.message && /script\.external_request|PERMISSION|autorizaci/i.test(e.message));
+  }
+
+  function errorDetail(e) {
+    if (e && e.status !== undefined) return "HTTP " + e.status;
+    return (e && e.message) ? e.message : String(e);
+  }
+
+  /**
    * Single entry point: buildPrompt -> try geminiProvider, on any failure (network/HTTP
-   * error or malformed JSON) fall back to openRouterProvider; if that also fails, fail
-   * gracefully rather than crash or silently do nothing. Never spends money: see
-   * callOpenRouterApi's pinned model/engine.
+   * error or malformed JSON) fall back to openRouterProvider; if that also fails,
+   * classify honestly instead of blaming quota for everything: auth errors are rethrown
+   * (Código.js's processImplantFile catch turns them into re-authorization instructions),
+   * the daily-limit message appears only when BOTH providers returned 429, and anything
+   * else surfaces each provider's real failure. Spend is bounded and deliberate: the
+   * fallback model is paid but pinned, cents-per-scan, prepaid, and only reached when
+   * the free primary path already failed (see the OPENROUTER_MODEL note).
    */
   function scanPassport(base64Data, mimeType, deps) {
     const promptText = buildPrompt();
@@ -242,11 +276,20 @@ var ScanEngine = (function () {
       fields = parseResponse(geminiProvider(base64Data, mimeType, promptText, deps));
       provider = 'gemini';
     } catch (geminiError) {
+      if (isAuthError(geminiError)) throw geminiError;
       try {
         fields = parseResponse(openRouterProvider(base64Data, mimeType, promptText, deps));
         provider = 'openrouter';
       } catch (openRouterError) {
-        return { ok: false, message: "Límite alcanzado por hoy. Inténtelo de nuevo mañana." };
+        if (isAuthError(openRouterError)) throw openRouterError;
+        if (geminiError.status === 429 && openRouterError.status === 429) {
+          return { ok: false, message: "Límite alcanzado por hoy. Inténtelo de nuevo mañana." };
+        }
+        return {
+          ok: false,
+          message: "Error de lectura (Gemini: " + errorDetail(geminiError) +
+            "; OpenRouter: " + errorDetail(openRouterError) + "). Si se repite, avisa a Gabriel."
+        };
       }
     }
     if (!fields || fields.length === 0) {
@@ -263,6 +306,8 @@ var ScanEngine = (function () {
     geminiProvider: geminiProvider,
     openRouterProvider: openRouterProvider,
     OPENROUTER_MODEL: OPENROUTER_MODEL,
+    OPENROUTER_PDF_ENGINE: OPENROUTER_PDF_ENGINE,
+    isAuthError: isAuthError,
     scanPassport: scanPassport
   };
 

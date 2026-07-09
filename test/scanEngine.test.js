@@ -88,12 +88,20 @@ test('parseResponse skips malformed (null/non-object) entries instead of throwin
 
 // ==========================================
 //  Money-safety guard tests — no network, fully mocked httpFetch.
-//  These encode the hard constraint "never spend the $10 OpenRouter credit" as a
-//  permanent regression check, not just a one-time manual verification.
+//  Original constraint was "never spend the OpenRouter credit"; on 2026-07-09 (with
+//  Gabriel's approval) it became "spend deliberately and boundedly": every free model
+//  failed the golden benchmark (429s, >60s GAS timeouts, misread stickers), so the
+//  fallback now uses paid gemini-2.5-flash (~$0.0005-0.003/scan, prepaid, fallback-only).
+//  The guard is now an explicit allowlist: any model change must be a conscious edit
+//  here AND in ScanEngine.js, re-benchmarked against the goldens.
 // ==========================================
 
-test('OPENROUTER_MODEL is pinned to a free model', () => {
-  assert.match(ScanEngine.OPENROUTER_MODEL, /:free$/);
+test('OPENROUTER_MODEL is pinned to the deliberately-approved fallback model', () => {
+  assert.equal(ScanEngine.OPENROUTER_MODEL, 'google/gemini-2.5-flash');
+});
+
+test('OPENROUTER_PDF_ENGINE is pinned to native (no per-page OCR surcharge)', () => {
+  assert.equal(ScanEngine.OPENROUTER_PDF_ENGINE, 'native');
 });
 
 const FAKE_IMPLANT_RAW = JSON.stringify([{
@@ -135,7 +143,7 @@ test('scanPassport falls back to OpenRouter when Gemini fails', () => {
   assert.equal(result.data[0].cod_implante, 'ZYGAN-47.5');
 });
 
-test('scanPassport fails gracefully when both providers fail', () => {
+test('scanPassport shows the daily-limit message ONLY when both providers return 429', () => {
   const bothDownHttpFetch = () => ({ status: 429, text: '{"error":"simulated quota exceeded"}' });
 
   const result = ScanEngine.scanPassport('ZmFrZQ==', 'application/pdf', {
@@ -148,7 +156,50 @@ test('scanPassport fails gracefully when both providers fail', () => {
   assert.equal(result.message, 'Límite alcanzado por hoy. Inténtelo de nuevo mañana.');
 });
 
-test('OpenRouter PDF requests always pin the free cloudflare-ai engine and never mistral-ocr', () => {
+test('scanPassport reports real provider errors instead of blaming the daily limit', () => {
+  // Gemini 400 + OpenRouter 401: exactly the combo that used to be mislabeled as quota.
+  const mixedFailureHttpFetch = (url) => {
+    if (url.indexOf('generativelanguage.googleapis.com') !== -1) {
+      return { status: 400, text: '{"error":"bad request"}' };
+    }
+    return { status: 401, text: '{"error":"unauthorized"}' };
+  };
+
+  const result = ScanEngine.scanPassport('ZmFrZQ==', 'application/pdf', {
+    httpFetch: mixedFailureHttpFetch,
+    geminiApiKey: 'fake-gemini-key',
+    openRouterApiKey: 'fake-openrouter-key'
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.message.indexOf('Límite alcanzado'), -1);
+  assert.ok(result.message.indexOf('Gemini: HTTP 400') !== -1, result.message);
+  assert.ok(result.message.indexOf('OpenRouter: HTTP 401') !== -1, result.message);
+});
+
+test('scanPassport rethrows GAS authorization errors so Código.js can show re-auth instructions', () => {
+  const authThrowingHttpFetch = () => {
+    throw new Error('You do not have permission to call UrlFetchApp.fetch. Required permissions: https://www.googleapis.com/auth/script.external_request');
+  };
+
+  assert.throws(
+    () => ScanEngine.scanPassport('ZmFrZQ==', 'application/pdf', {
+      httpFetch: authThrowingHttpFetch,
+      geminiApiKey: 'fake-gemini-key',
+      openRouterApiKey: 'fake-openrouter-key'
+    }),
+    /script\.external_request/
+  );
+});
+
+test('isAuthError recognizes permission failures and rejects ordinary errors', () => {
+  assert.equal(ScanEngine.isAuthError(new Error('Required permissions: script.external_request')), true);
+  assert.equal(ScanEngine.isAuthError(new Error('PERMISSION_DENIED')), true);
+  assert.equal(ScanEngine.isAuthError(new Error('Error API: 429')), false);
+  assert.equal(ScanEngine.isAuthError(null), false);
+});
+
+test('OpenRouter PDF requests always pin the parser engine explicitly (never rely on the default)', () => {
   const capturedBodies = [];
   ScanEngine.scanPassport('ZmFrZQ==', 'application/pdf', {
     httpFetch: geminiDownOpenRouterUpHttpFetch(capturedBodies),
@@ -159,8 +210,10 @@ test('OpenRouter PDF requests always pin the free cloudflare-ai engine and never
   assert.equal(capturedBodies.length, 1);
   const body = JSON.parse(capturedBodies[0]);
   assert.equal(body.model, ScanEngine.OPENROUTER_MODEL);
-  assert.equal(body.plugins[0].pdf.engine, 'cloudflare-ai');
-  assert.equal(capturedBodies[0].indexOf('mistral-ocr'), -1);
+  assert.equal(body.plugins[0].pdf.engine, ScanEngine.OPENROUTER_PDF_ENGINE);
+  // Never rely on OpenRouter's default engine: an omitted plugin silently falls back to
+  // the paid-per-page mistral-ocr for models without native PDF support.
+  assert.notEqual(body.plugins[0].pdf.engine, undefined);
 });
 
 test('OpenRouter image requests skip the file-parser plugin entirely', () => {
