@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-const ScanEngine = require('../ScanEngine.js');
+const ScanEngine = require('../src/ScanEngine.js');
 
 const TEST_DIR = __dirname;
 const MANIFEST_PATH = path.join(TEST_DIR, 'fixtures', 'MANIFEST.json');

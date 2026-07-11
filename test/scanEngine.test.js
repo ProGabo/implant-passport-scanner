@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const ScanEngine = require('../ScanEngine.js');
+const ScanEngine = require('../src/ScanEngine.js');
 
 const FIXTURES_DIR = path.join(__dirname, 'fixtures');
 const GOLDEN_DIR = path.join(__dirname, 'golden');

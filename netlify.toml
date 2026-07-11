@@ -1,0 +1,4 @@
+# Netlify config for the public clinic page (clinicapiestellercom.netlify.app).
+# The site is a single static page; no build step.
+[build]
+  publish = "web"

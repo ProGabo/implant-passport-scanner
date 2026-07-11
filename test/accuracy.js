@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const ScanEngine = require('../ScanEngine.js');
+const ScanEngine = require('../src/ScanEngine.js');
 const { curlHttpFetch } = require('./httpFetchSync.js');
 const { compareToGolden } = require('./compareGolden.js');
 
