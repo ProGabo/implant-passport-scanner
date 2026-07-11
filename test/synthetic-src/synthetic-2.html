@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>synthetic-2</title>
+<style>
+  @page { size: A4; margin: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 18mm 14mm; color: #222; font-size: 10.5px; }
+  .header { font-size: 10px; }
+  .rule { border-top: 1.5px dashed #444; margin: 4px 0 30px 0; }
+  h1 { font-size: 17px; margin: 30px 0 8px 0; letter-spacing: .5px; }
+  table { border-collapse: collapse; width: 100%; font-size: 9.5px; }
+  th { border-top: 1px solid #999; border-bottom: 1px solid #999; padding: 4px 5px; text-align: left; font-size: 9px; }
+  td { padding: 4px 5px; vertical-align: top; }
+  .hand { font-family: 'Segoe Script', cursive; color: #17358f; }
+  .sticker {
+    display: inline-block; border: 1.4px solid #111; padding: 5px 8px; margin: 8px 12px 0 0;
+    font-size: 9px; line-height: 1.5; background: #fdfdf8;
+    box-shadow: 1px 1px 2px rgba(0,0,0,.25);
+  }
+  .s1 { transform: rotate(0.9deg); }
+  .s2 { transform: rotate(-1.6deg); }
+  .sticker b { font-size: 10px; }
+  .tag { border: 1px solid #111; padding: 0 3px; font-weight: bold; font-size: 8px; }
+  .notes { margin-top: 26px; font-size: 17px; line-height: 2.1; }
+</style>
+</head>
+<body>
+  <div class="header">Paciente: PRUEBA DOS, ANTONIO ; &nbsp;N&ordm; Romexis: 9002</div>
+  <div class="rule"></div>
+
+  <h1>HISTORIA CLINICA:</h1>
+
+  <table>
+    <tr><th>Fecha</th><th>C&oacute;d. Referidor</th><th>Tratamiento</th><th>Cantidad</th><th>Descripci&oacute;n</th><th>Indicaciones</th></tr>
+    <tr><td>12/11/2023</td><td>LBEL</td><td>5.220</td><td>2,00</td><td>IMPLANTE DE DESD PARCIAL INFER /4/Z-36,46</td><td>2 INF</td></tr>
+    <tr><td>28/09/2023</td><td>LBEL</td><td>9.200</td><td>1,00</td><td>CAMBIAR PILARES</td><td></td></tr>
+    <tr><td>28/09/2023</td><td>LBEL</td><td>1.500</td><td>1,00</td><td>1&ordf; VISITA + RX. PANORAMICA / 2 IMPL.INF.P</td><td></td></tr>
+  </table>
+
+  <div class="notes">
+    <span class="hand">12.11.23 &nbsp; 2 impl. inf &nbsp; // 36 + 46 .</span><br>
+    <div class="sticker s1">
+      <b>Straumann&reg; BLT &Oslash; 4.1mm RC<br>SLActive&reg; 10mm Roxolid&reg;</b><br>
+      <span class="tag">REF</span> 021.4510 &nbsp; <span class="tag">LOT</span> XG5527 &nbsp; <b>CE</b> <sub>0123</sub><br>
+      Institut Straumann AG &nbsp; &#8856; &nbsp; <span class="tag">STERILE R</span> &nbsp; 2028/06
+    </div>
+    <div class="sticker s2">
+      <b>Straumann&reg; BLT &Oslash; 3.3mm NC<br>SLActive&reg; 12mm Roxolid&reg;</b><br>
+      <span class="tag">REF</span> 021.3312 &nbsp; <span class="tag">LOT</span> XH8814 &nbsp; <b>CE</b> <sub>0123</sub><br>
+      Institut Straumann AG &nbsp; &#8856; &nbsp; <span class="tag">STERILE R</span> &nbsp; 2028/09
+    </div>
+    <br>
+    <span class="hand">4.1 en 36 , &nbsp; 3.3 en 46</span><br>
+    <span class="hand">Torque 35 Ncm los dos</span><br>
+    <span class="hand">Sutura: seda 3/0</span><br>
+    <span class="hand">Ctrol 15 dias</span>
+  </div>
+</body>
+</html>

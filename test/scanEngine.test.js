@@ -1,18 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const path = require('node:path');
 const ScanEngine = require('../src/ScanEngine.js');
+const { loadSamples } = require('./sampleSets.js');
 
-const FIXTURES_DIR = path.join(__dirname, 'fixtures');
-const GOLDEN_DIR = path.join(__dirname, 'golden');
-const MANIFEST_PATH = path.join(FIXTURES_DIR, 'MANIFEST.json');
+const samples = loadSamples();
 
-const sampleNames = fs.existsSync(MANIFEST_PATH)
-  ? Object.keys(JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'))).sort()
-  : [];
-
-if (sampleNames.length === 0) {
+if (samples.length === 0) {
   test(
     'parseResponse matches golden fixtures',
     { skip: 'no fixtures yet - run "npm run generate-fixtures" first' },
@@ -20,11 +14,8 @@ if (sampleNames.length === 0) {
   );
 }
 
-sampleNames.forEach((sampleName) => {
-  const fixturePath = path.join(FIXTURES_DIR, `${sampleName}.json`);
-  const goldenPath = path.join(GOLDEN_DIR, `${sampleName}.json`);
-
-  test(`parseResponse matches golden for ${sampleName}`, () => {
+samples.forEach(({ name, fixturePath, goldenPath }) => {
+  test(`parseResponse matches golden for ${name}`, () => {
     const raw = fs.readFileSync(fixturePath, 'utf8');
     const expected = JSON.parse(fs.readFileSync(goldenPath, 'utf8'));
     const actual = ScanEngine.parseResponse(raw);

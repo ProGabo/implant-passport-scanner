@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>synthetic-3</title>
+<style>
+  @page { size: A4; margin: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 18mm 14mm; color: #222; font-size: 10.5px; }
+  .header { font-size: 10px; }
+  .rule { border-top: 1.5px dashed #444; margin: 4px 0 30px 0; }
+  h1 { font-size: 17px; margin: 30px 0 8px 0; letter-spacing: .5px; }
+  table { border-collapse: collapse; width: 100%; font-size: 9.5px; }
+  th { border-top: 1px solid #999; border-bottom: 1px solid #999; padding: 4px 5px; text-align: left; font-size: 9px; }
+  td { padding: 4px 5px; vertical-align: top; }
+  .hand { font-family: 'Segoe Script', cursive; color: #1a3fb5; }
+  .sticker {
+    display: inline-block; border: 1.4px solid #111; padding: 5px 8px; margin-top: 6px;
+    font-size: 9px; line-height: 1.5; transform: rotate(1.4deg); background: #fdfdf8;
+    box-shadow: 1px 1px 2px rgba(0,0,0,.25);
+  }
+  .sticker b { font-size: 10px; }
+  .tag { border: 1px solid #111; padding: 0 3px; font-weight: bold; font-size: 8px; }
+  .notes { margin-top: 26px; font-size: 17px; line-height: 2.1; }
+</style>
+</head>
+<body>
+  <div class="header">Paciente: MODELO TRES, CARMEN ; &nbsp;N&ordm; Romexis: 9003</div>
+  <div class="rule"></div>
+
+  <h1>MEDICACION:</h1>
+
+  <table>
+    <tr><th>Fecha</th><th>C&oacute;d. Referidor</th><th>Tratamiento</th><th>Cantidad</th><th>Descripci&oacute;n</th><th>Indicaciones</th></tr>
+    <tr><td>20/01/2025</td><td>AAA</td><td>5.580</td><td>1,00</td><td>EXTRACCIONES + IMPL.INMEDIATOS N&ordm;PROT.412</td><td>1 SUP + EXO</td></tr>
+    <tr><td>03/12/2024</td><td>LBEL</td><td>7.000</td><td>1,00</td><td>CONTROL</td><td></td></tr>
+    <tr><td>03/12/2024</td><td>LBEL</td><td>1.500</td><td>1,00</td><td>1&ordf; VISITA + RX. PANORAMICA</td><td></td></tr>
+  </table>
+
+  <div class="notes">
+    <span class="hand">20.1.25 &nbsp; exo + 1 impl. inmediato // 25 .</span><br>
+    <div class="sticker">
+      <b>BTI Implante Interna Universal<br>&Oslash; 3.75 &nbsp; L 11.5 mm</b><br>
+      <span class="tag">REF</span> IIPU3711 &nbsp; <span class="tag">LOT</span> B240391 &nbsp; <b>CE</b> <sub>0318</sub> &nbsp; 2030/01<br>
+      B.T.I. Biotechnology Institute &nbsp; &#8856; &nbsp; (1 u.) &nbsp; <span class="tag">STERILE R</span>
+    </div>
+    <br>
+    <span class="hand">Exo de 25 atraumatica + impl. inmediato</span><br>
+    <span class="hand">Gap vestibular con Bio-oss fino</span><br>
+    <span class="hand">Torque 40 Ncm , &nbsp; pilar NO</span><br>
+    <span class="hand">Ctrol 3 semanas</span>
+  </div>
+</body>
+</html>

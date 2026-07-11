@@ -1,0 +1,15 @@
+[
+  {
+    "fecha_colocacion": "2025-01-20",
+    "marca": "BTI",
+    "modelo": "Implante Interna Universal",
+    "conexion": "Hexágono Interno",
+    "plataforma": "RP (Regular)",
+    "cod_implante": "IIPU3711",
+    "lote": "B240391",
+    "diametro": 3.75,
+    "longitud": 11.5,
+    "posicion": "25",
+    "pilar": "NO"
+  }
+]

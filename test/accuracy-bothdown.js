@@ -1,10 +1,7 @@
 const fs = require('node:fs');
-const path = require('node:path');
 const assert = require('node:assert/strict');
 const ScanEngine = require('../src/ScanEngine.js');
-
-const TEST_DIR = __dirname;
-const MANIFEST_PATH = path.join(TEST_DIR, 'fixtures', 'MANIFEST.json');
+const { loadSamples } = require('./sampleSets.js');
 const GRACEFUL_MESSAGE = 'Límite alcanzado por hoy. Inténtelo de nuevo mañana.';
 
 /**
@@ -17,22 +14,18 @@ function bothDownHttpFetch() {
 }
 
 function main() {
-  if (!fs.existsSync(MANIFEST_PATH)) {
-    console.error('No test/fixtures/MANIFEST.json found. Run "npm run generate-fixtures" first.');
+  const samples = loadSamples();
+  if (samples.length === 0) {
+    console.error('No samples found. Run "npm run generate-fixtures" first.');
     process.exit(1);
   }
 
-  const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
-  const sampleNames = Object.keys(manifest).sort();
-
-  console.log(`Running both-providers-down test for ${sampleNames.length} sample(s). Zero real network calls.\n`);
+  console.log(`Running both-providers-down test for ${samples.length} sample(s). Zero real network calls.\n`);
 
   let passed = 0;
   let failed = 0;
 
-  sampleNames.forEach((sampleName) => {
-    const filename = manifest[sampleName];
-    const filePath = path.join(TEST_DIR, filename);
+  samples.forEach(({ name: sampleName, pdfPath: filePath }) => {
     if (!fs.existsSync(filePath)) {
       console.log(`[${sampleName}] SKIP - missing PDF`);
       return;

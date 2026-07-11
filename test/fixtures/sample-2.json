@@ -1,0 +1,28 @@
+[
+  {
+    "fecha_colocacion": "2023-11-12",
+    "marca": "Straumann Implants",
+    "modelo": "BLT",
+    "conexion": "Cónico Interno",
+    "plataforma": "RP (Regular)",
+    "referencia": "021.4510",
+    "lote": "XG5527",
+    "diametro": 4.1,
+    "longitud": 10.0,
+    "posicion": "36",
+    "pilar": "NO"
+  },
+  {
+    "fecha_colocacion": "2023-11-12",
+    "marca": "Straumann Implants",
+    "modelo": "BLT",
+    "conexion": "Cónico Interno",
+    "plataforma": "NP (Narrow)",
+    "referencia": "021.3312",
+    "lote": "XH8814",
+    "diametro": 3.3,
+    "longitud": 12.0,
+    "posicion": "46",
+    "pilar": "NO"
+  }
+]

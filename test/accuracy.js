@@ -1,12 +1,8 @@
 const fs = require('node:fs');
-const path = require('node:path');
 const ScanEngine = require('../src/ScanEngine.js');
 const { curlHttpFetch } = require('./httpFetchSync.js');
 const { compareToGolden } = require('./compareGolden.js');
-
-const TEST_DIR = __dirname;
-const GOLDEN_DIR = path.join(TEST_DIR, 'golden');
-const MANIFEST_PATH = path.join(TEST_DIR, 'fixtures', 'MANIFEST.json');
+const { loadSamples } = require('./sampleSets.js');
 
 function main() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -14,25 +10,19 @@ function main() {
     console.error('GEMINI_API_KEY not set. Add it to .env.');
     process.exit(1);
   }
-  if (!fs.existsSync(MANIFEST_PATH)) {
-    console.error('No test/fixtures/MANIFEST.json found. Run "npm run generate-fixtures" first.');
+  const samples = loadSamples();
+  if (samples.length === 0) {
+    console.error('No samples found. Run "npm run generate-fixtures" first.');
     process.exit(1);
   }
 
-  const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
-  const sampleNames = Object.keys(manifest).sort();
-
-  console.log(`Running accuracy test against LIVE Gemini for ${sampleNames.length} sample(s).`);
+  console.log(`Running accuracy test against LIVE Gemini for ${samples.length} sample(s).`);
   console.log('This makes real API calls and uses daily quota.\n');
 
   let passed = 0;
   let failed = 0;
 
-  sampleNames.forEach((sampleName) => {
-    const filename = manifest[sampleName];
-    const filePath = path.join(TEST_DIR, filename);
-    const goldenPath = path.join(GOLDEN_DIR, `${sampleName}.json`);
-
+  samples.forEach(({ name: sampleName, pdfPath: filePath, goldenPath }) => {
     if (!fs.existsSync(filePath) || !fs.existsSync(goldenPath)) {
       console.log(`[${sampleName}] SKIP - missing PDF or golden file`);
       return;

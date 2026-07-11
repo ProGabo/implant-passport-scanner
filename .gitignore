@@ -1,7 +1,8 @@
 .env
-test/*.pdf
-test/fixtures/
-test/golden/
 node_modules/
-Error.jpeg
 .handoffs/
+
+# Real clinic scans and their fixtures/goldens live here and are never committed.
+# The committed test set (test/synthetic-*.pdf + test/fixtures + test/golden) is
+# fully synthetic - same layout as real scans, no real patient data.
+test/private/
