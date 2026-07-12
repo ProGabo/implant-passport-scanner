@@ -113,7 +113,9 @@ The demo patient has no email on file, so the portal skips the one-time-PIN
 step for it; real patients receive a 6-digit PIN by email before anything is
 shown.
 
-<!-- demo video/GIF: added after recording -->
+![Scan-to-portal demo](docs/demo-preview.gif)
+
+*Full ~60s walkthrough (scan → AI fill → save → automatic email → portal → passport) posted on [LinkedIn](https://www.linkedin.com/in/gabriel-lópez-maza-795179335/).*
 
 ## Try it
 
