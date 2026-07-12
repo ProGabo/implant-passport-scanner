@@ -1,7 +1,7 @@
 # Implant Passport Scanner
 
 AI-powered digital implant passport, **live in production at a real dental clinic**
-([Clínica Piesteller](https://clinicapiesteller.com/), Barcelona — see the
+([Clínica Drs. Pi y Esteller](https://clinicapiesteller.com/), Barcelona — see the
 *Pasaporte Implantológico* section, or the patient portal directly at
 [clinicapiestellercom.netlify.app](https://clinicapiestellercom.netlify.app/)).
 
