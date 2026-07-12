@@ -98,6 +98,23 @@ One honest caveat: synthetic PDFs are digitally rendered, so they scan cleaner t
 production photo-scans of glued stickers. The production accuracy story is the
 private golden set, run against both providers on every change.
 
+## Live demo
+
+Open a real passport right now, no setup:
+
+1. Go to [clinicapiestellercom.netlify.app](https://clinicapiestellercom.netlify.app/)
+2. Enter the demo code: **`DEMO2026`**
+3. You get the passport of a fictitious patient (synthetic data, clearly
+   banner-labeled) with two Straumann implants — the same implants described in
+   [`test/synthetic-2.pdf`](test/synthetic-2.pdf), the committed sample the
+   scanner reads in the test harness.
+
+The demo patient has no email on file, so the portal skips the one-time-PIN
+step for it; real patients receive a 6-digit PIN by email before anything is
+shown.
+
+<!-- demo video/GIF: added after recording -->
+
 ## Try it
 
 ```bash
@@ -132,5 +149,5 @@ sessions/   dated engineering session logs (kept public as a record of how
 
 ## Status
 
-In production at Clínica Piesteller (Barcelona). Built and maintained by
+In production at Clínica Drs. Pi y Esteller (Barcelona). Built and maintained by
 [Gabriel López](https://github.com/ProGabo).
