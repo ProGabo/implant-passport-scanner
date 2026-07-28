@@ -25,12 +25,19 @@ function doGet() {
  * Crea un menú personalizado en la interfaz de Google Sheets al abrir la hoja.
  */
 function onOpen() {
+  // Menú FIJO a propósito: mismos ítems, mismo orden, para todas las cuentas y todos los
+  // días. Se probó a detectar aquí el estado de autorización para avisar por adelantado,
+  // pero ScriptApp.getAuthorizationInfo() no es fiable dentro de onOpen (corre en
+  // AuthMode.LIMITED y da "pendiente" a cuentas que sí están autorizadas): avisaba en falso
+  // y desplazaba hacia abajo el botón que se usa cada día. El aviso fiable lo da el panel
+  // lateral, que detecta el fallo de verdad justo cuando se va a trabajar.
   SpreadsheetApp.getUi()
       .createMenu('Pasaporte Implantológico 🦷')
       .addItem('➕ Añadir Implante / Paciente', 'showSidebar')
       .addSeparator()
       .addItem('🧹 Limpiar Pacientes Duplicados', 'eliminarDuplicados')
-      .addItem('🩺 Comprobar escáner', 'comprobarEscaner')
+      .addItem('🩺 Comprobar todo', 'comprobarTodo')
+      .addItem('🔑 Autorizar mi cuenta', 'autorizarCuenta')
       .addToUi();
 }
 
@@ -921,7 +928,7 @@ function processImplantFile(data, filename) {
   }
 }
 
-const MENSAJE_REAUTORIZAR = "Esta cuenta de Google todavía no tiene autorizados los permisos necesarios. Ve a Extensiones > Apps Script, selecciona la función 'forzarPermisosPDF' en el desplegable de arriba, pulsa el botón ▶ Ejecutar y acepta los permisos que te pida Google. Después vuelve aquí y prueba de nuevo.";
+const MENSAJE_REAUTORIZAR = "Esta cuenta de Google todavía no tiene autorizados los permisos necesarios. Abre el menú 'Pasaporte Implantológico 🦷' y pulsa '🔑 Autorizar mi cuenta', y acepta los permisos que te pida Google. Después vuelve aquí y prueba de nuevo.";
 
 /**
  * Autodiagnóstico del escáner, ejecutable desde el menú por cualquier usuario de la
@@ -929,8 +936,22 @@ const MENSAJE_REAUTORIZAR = "Esta cuenta de Google todavía no tiene autorizados
  * Gemini, OpenRouter) para que un fallo diga exactamente QUÉ arreglar, en vez del
  * antiguo mensaje genérico de "límite alcanzado".
  */
-function comprobarEscaner() {
+function comprobarTodo() {
   const lineas = [];
+
+  // Nota: aquí no se consulta ScriptApp.getAuthorizationInfo(). Llegar a ejecutar esta
+  // función ya implica haber pasado el diálogo de consentimiento, así que siempre diría
+  // "concedida": sería una línea que nunca puede fallar, es decir, ruido.
+
+  // Capa 1: ¿se puede leer la base de datos?
+  try {
+    const hoja = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SHEET_NAME);
+    lineas.push(hoja
+      ? "✅ Base de datos: OK (" + Math.max(hoja.getLastRow() - 1, 0) + " filas)"
+      : "❌ Base de datos: no existe la pestaña '" + SHEET_NAME + "'. Avisa a Gabriel.");
+  } catch (e) {
+    lineas.push("❌ Base de datos: no se puede leer (" + e.message + ")");
+  }
 
   let permisosOk = true;
   try {
@@ -976,7 +997,12 @@ function comprobarEscaner() {
     lineas.push("⏭️ Gemini y OpenRouter: no comprobados (primero arregla los permisos de arriba).");
   }
 
-  SpreadsheetApp.getUi().alert("Diagnóstico del escáner", lineas.join("\n\n"), SpreadsheetApp.getUi().ButtonSet.OK);
+  SpreadsheetApp.getUi().alert("Diagnóstico", lineas.join("\n\n"), SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+// Alias de compatibilidad con el nombre anterior del diagnóstico.
+function comprobarEscaner() {
+  comprobarTodo();
 }
 
 /**
@@ -990,14 +1016,30 @@ function registrarDuda(n) {
   props.setProperty('SCAN_DOUBT_COUNT', String(actual + (parseInt(n, 10) || 1)));
 }
 
+/**
+ * Punto único de autorización: toca los tres permisos que la herramienta usa de verdad,
+ * de forma que una sola ejecución cubre todo. Se lanza desde el menú (no desde el panel)
+ * porque solo los elementos de menú disparan el diálogo de consentimiento de Google;
+ * las llamadas google.script.run del sidebar se limitan a devolver el error.
+ */
+function autorizarCuenta() {
+  UrlFetchApp.fetch("https://www.google.com");              // script.external_request
+  GmailApp.getAliases();                                    // https://mail.google.com/
+  SpreadsheetApp.openById(SPREADSHEET_ID).getName();        // spreadsheets
+
+  SpreadsheetApp.getUi().alert(
+    'Cuenta autorizada ✅',
+    'Esta cuenta de Google ya tiene todos los permisos necesarios.\n\nSi el panel lateral estaba abierto, ciérralo y vuelve a abrirlo desde el menú.',
+    SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+// Alias de compatibilidad: hay instrucciones antiguas (WhatsApp, sessions/2026-07-09-resume.md)
+// que nombran estas dos funciones.
 function forzarPermisosGmail() {
-  // Esta línea no hace nada malo, solo obliga a Google a pedirte permisos de Gmail
-  GmailApp.getAliases(); 
-  Logger.log("Permisos concedidos con éxito.");
+  autorizarCuenta();
 }
 function forzarPermisosPDF() {
-  // Esta línea obliga a Google a pedirte el permiso de "script.external_request"
-  UrlFetchApp.fetch("https://www.google.com"); 
+  autorizarCuenta();
 }
 
 // Añade esta nueva función al final de tu Código.js

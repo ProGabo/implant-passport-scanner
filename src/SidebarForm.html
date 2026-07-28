@@ -150,6 +150,21 @@
 </head>
 <body>
 
+    <!-- Sesión rota (multi-login o cuenta sin autorizar): se muestra ANTES de que nadie
+         empiece a escanear, para no perder trabajo contra un panel muerto. -->
+    <div id="authBanner" class="hidden" style="background:#fef2f2; border:2px solid #dc2626; border-radius:8px; padding:14px; margin-bottom:14px; color:#7f1d1d;">
+        <div style="font-weight:700; font-size:14px; margin-bottom:6px;">⛔ Este panel no puede conectar con la hoja</div>
+        <div style="font-size:12px; line-height:1.5;">
+            Tu navegador tiene <b>más de una cuenta de Google abierta</b>, o esta cuenta aún no ha
+            autorizado la herramienta.
+            <ol style="margin:8px 0 0 18px; padding:0;">
+                <li>Cierra las demás cuentas de Google (o abre la hoja en una ventana de incógnito con la cuenta de la clínica).</li>
+                <li>En el menú <b>Pasaporte Implantológico 🦷</b>, pulsa <b>🔑 Autorizar mi cuenta</b> y acepta los permisos.</li>
+                <li>Cierra este panel y vuelve a abrirlo desde el menú.</li>
+            </ol>
+        </div>
+    </div>
+
     <div class="card">
         <div class="form-group">
             <label for="id_quartup">1. Introducir id_quartup/Identificador:</label>
@@ -290,6 +305,71 @@
     // Variable global para almacenar las opciones del catálogo
     let catalogOptions = null;
 
+    // --- Sesión sin autorización -------------------------------------------------
+    // Un "Se necesita autorización" aquí casi nunca significa que falten permisos: el
+    // caso real (2026-07-28) fue multi-login, con el iframe del panel autenticado como
+    // una cuenta distinta de la que tenía abierta la hoja, mientras el escáner seguía
+    // funcionando. Por eso el mensaje habla de CUENTAS, no de permisos.
+
+    const authBanner = document.getElementById('authBanner');
+
+    function esErrorDeAutorizacion(err) {
+        const msg = (err && (err.message || String(err))) || '';
+        return /autoriz|authoriz/i.test(msg);
+    }
+
+    /**
+     * @param {boolean} bloquear true solo cuando el fallo ocurre al abrir el panel:
+     *   ahí no hay trabajo que perder y conviene impedir que nadie escanee contra una
+     *   sesión muerta. A media faena NO se bloquea, para que se pueda reintentar el
+     *   guardado sin perder el formulario ya rellenado.
+     */
+    function avisarSesionRota(bloquear) {
+        authBanner.classList.remove('hidden');
+
+        if (bloquear) {
+            searchBtn.disabled = true;
+            saveBtn.disabled = true;
+            const scanBtn = document.querySelector('.btn-scan');
+            if (scanBtn) scanBtn.disabled = true;
+        }
+
+        Swal.fire({
+            icon: 'error',
+            title: 'Cuenta de Google incorrecta',
+            html: bloquear
+                ? `<p style="text-align:left; font-size:14px;">Este panel no puede conectar con la hoja.</p>
+                   <p style="text-align:left; font-size:14px;">Suele pasar cuando hay <b>más de una cuenta de Google abierta</b> en el navegador: el panel se conecta con la cuenta equivocada.</p>
+                   <p style="text-align:left; font-size:14px;">Cierra las demás cuentas (o usa una ventana de incógnito con la cuenta de la clínica), autoriza desde el menú si hace falta, y vuelve a abrir el panel.</p>`
+                : `<p style="text-align:left; font-size:14px;"><b>No cierres este panel: tus datos siguen aquí.</b></p>
+                   <p style="text-align:left; font-size:14px;">La conexión con la hoja se ha perdido porque hay más de una cuenta de Google abierta en el navegador. Ciérralas en otra pestaña (o autoriza esta cuenta desde el menú <b>Pasaporte Implantológico 🦷 → 🔑 Autorizar mi cuenta</b>) y vuelve a pulsar el botón.</p>`,
+            confirmButtonColor: '#dc2626',
+            allowOutsideClick: false
+        });
+    }
+
+    /**
+     * Llamada al servidor con UN reintento ante error de autorización: cubre gratis el
+     * hipo transitorio de sesión. Si el segundo intento también falla, el problema es
+     * de cuenta y solo lo arregla una persona: no insistimos más.
+     */
+    function llamarServidor(nombreFn, args, onOk, onFail) {
+        let reintentado = false;
+        const invocar = () => {
+            google.script.run
+                .withSuccessHandler(onOk)
+                .withFailureHandler(function (err) {
+                    if (esErrorDeAutorizacion(err) && !reintentado) {
+                        reintentado = true;
+                        invocar();
+                        return;
+                    }
+                    onFail(err);
+                })[nombreFn].apply(null, args);
+        };
+        invocar();
+    }
+
     // Configuración general de notificaciones Toast (SweetAlert2)
     const Toast = Swal.mixin({
         toast: true,
@@ -383,10 +463,18 @@
 
     function loadImplantOptions() {
         showStatus('Cargando catálogo...', 'info');
-        google.script.run
-            .withSuccessHandler(handleOptionsResponse)
-            .withFailureHandler(handleError)
-            .getImplantOptions();
+        // Esta llamada, que ya existía, hace de autodiagnóstico al abrir el panel: si la
+        // sesión está rota, se sabe aquí, antes de que nadie escanee nada.
+        llamarServidor('getImplantOptions', [], handleOptionsResponse, handleErrorCarga);
+    }
+
+    function handleErrorCarga(err) {
+        if (esErrorDeAutorizacion(err)) {
+            showStatus('');
+            avisarSesionRota(true);
+            return;
+        }
+        handleError(err);
     }
 
     function handleOptionsResponse(res) {
@@ -525,10 +613,7 @@
         patientSection.classList.add('hidden');
         showStatus('');
         
-        google.script.run
-            .withSuccessHandler(handleid_quartupResponse)
-            .withFailureHandler(handleError)
-            .getPatientByid_quartup(id_quartup);
+        llamarServidor('getPatientByid_quartup', [id_quartup], handleid_quartupResponse, handleError);
     }
 
     function handleid_quartupResponse(res) {
@@ -636,10 +721,7 @@
             implantes: implantsArray 
         };
         
-        google.script.run
-            .withSuccessHandler(handleSaveResponse)
-            .withFailureHandler(handleError)
-            .saveNewImplant(formData); 
+        llamarServidor('saveNewImplant', [formData], handleSaveResponse, handleError);
     });
 
     function handleSaveResponse(res) {
@@ -683,7 +765,14 @@
         saveBtn.disabled = false;
         searchBtn.innerHTML = '🔍 Buscar Paciente';
         saveBtn.innerHTML = '💾 Guardar Todo';
-        
+
+        // El formulario NO se vacía nunca aquí: si el fallo llega al guardar, lo ya
+        // escaneado y revisado sigue en pantalla y se puede reintentar.
+        if (esErrorDeAutorizacion(err)) {
+            avisarSesionRota(false);
+            return;
+        }
+
         Swal.fire({ icon: 'error', title: 'Error del Servidor', text: err.message });
     }
 
@@ -703,8 +792,8 @@
         reader.onload = function(e) {
             const content = e.target.result;
             
-            google.script.run
-                .withSuccessHandler(function(response) {
+            llamarServidor('processImplantFile', [content, file.name],
+                function(response) {
                     if (response.ok) {
                         statusDiv.innerHTML = ''; // Limpiar mensaje de espera
                         buildFormFromScan(response.data);
@@ -714,13 +803,17 @@
                         Swal.fire({ icon: 'error', title: 'Error de Lectura', text: response.message });
                     }
                     input.value = ''; // Reset input
-                })
-                .withFailureHandler(function(err) {
+                },
+                function(err) {
+                    input.value = '';
+                    if (esErrorDeAutorizacion(err)) {
+                        statusDiv.innerHTML = '';
+                        avisarSesionRota(false);
+                        return;
+                    }
                     statusDiv.innerHTML = `❌ Error técnico: ${err.message}`;
                     statusDiv.style.color = '#dc2626';
-                    input.value = '';
-                })
-                .processImplantFile(content, file.name);
+                });
         };
         reader.readAsDataURL(file);
     }
