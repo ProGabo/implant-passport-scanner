@@ -320,17 +320,22 @@
       });
 
       /**
-       * POST al servidor con reintentos: un fallo de red o una respuesta que no es JSON (el
-       * servidor de Google a veces responde con una página de error) se reintenta tras una
-       * pausa, en vez de enseñar "Error de conexión" a la primera.
+       * POST al servidor con reintentos. Lo normal son 4-6 s, pero a veces Google se queda
+       * colgado un minuto y acaba devolviendo una página de error en vez de JSON. Por eso se
+       * corta a los 20 s y se reintenta tras una pausa, en vez de enseñar "Error de
+       * conexión" al cabo de un minuto.
        */
       function llamarApi(payload, reintentos) {
+        const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const corte = ctrl ? setTimeout(() => ctrl.abort(), 20000) : null;
         return fetch(API_URL, {
             method: 'POST',
             body: JSON.stringify(payload),
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            signal: ctrl ? ctrl.signal : undefined
         })
         .then(res => res.json())
+        .finally(() => { if (corte) clearTimeout(corte); })
         .catch(err => {
             if (reintentos > 0) {
               return new Promise(r => setTimeout(r, 1500)).then(() => llamarApi(payload, reintentos - 1));
