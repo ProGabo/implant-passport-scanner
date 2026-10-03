@@ -58,13 +58,20 @@ function carregar(opts) {
   return Object.assign(r, { ss, dialegs });
 }
 
+// Pacientes completos: planificarDesat (S3) valida igual que al guardar.
+const ANGELS = { codi_acces: 'ABC234', cuenta_quartup: '43000200', nombre: 'Àngels Núñez', email: 'angels@x.cat',
+  sense_email: false, dni: '12345678Z', sense_dni: false };
+const NOVA = { codi_acces: 'GENERAR', cuenta_quartup: '43000999', nombre: 'Nou Pacient', email: 'nou@x.cat',
+  sense_email: false, dni: '', sense_dni: true };
+const fd = (pac, implantes, extra) => Object.assign({}, pac, extra || {}, { implantes });
+
 const NOU = { posicion: '24', fecha_colocacion: '2026-10-01', marca: 'Ticare', modelo: 'Inhex Quattro', dimensiones: '3,75 x 11,5',
   plataforma: '3,5', conexion: 'Intrena', pilar: 'A cabeza de implante', cod_implante: 'HE37511', lote: '2302B' };
 
 test('vista previa de un paciente existente: sus filas + las nuevas, ordenadas, con avisos y sin escribir nada', () => {
   const { ctx, ss, dialegs } = carregar();
   const abans = JSON.stringify(ss.getSheetByName('Pacientes').rows());
-  const r = ctx.vistaPreviaPasaport({ codi_acces: 'ABC234', nombre: 'Àngels Núñez', implantes: [NOU] });
+  const r = ctx.vistaPreviaPasaport(fd(ANGELS, [NOU]));
   assert.equal(r.ok, true, r.message);
   assert.equal(JSON.stringify(ss.getSheetByName('Pacientes').rows()), abans, 'la vista previa no escribe');
   assert.deepEqual([...r.avisos], ["Implant 24: la connexió «Intrena» s'assembla a «Interna» (8 vegades). Està ben escrit?"]);
@@ -85,7 +92,7 @@ test('vista previa de un paciente existente: sus filas + las nuevas, ordenadas, 
 
 test('vista previa de un paciente nuevo: el codi "es generarà en desar" y lo de los demás cuenta como conocido', () => {
   const { ctx, dialegs } = carregar();
-  const r = ctx.vistaPreviaPasaport({ codi_acces: 'GENERAR', nombre: 'Nou Pacient', implantes: [Object.assign({}, NOU, { conexion: 'Interna' })] });
+  const r = ctx.vistaPreviaPasaport(fd(NOVA, [Object.assign({}, NOU, { conexion: 'Interna' })]));
   assert.equal(r.ok, true, r.message);
   assert.deepEqual([...r.avisos], []);
   assert.match(dialegs[0].out.t.pasaport, /Código de acceso:<\/b> es generarà en desar/);
@@ -93,7 +100,7 @@ test('vista previa de un paciente nuevo: el codi "es generarà en desar" y lo de
 
 test('el formData no puede cerrar el <script> de la ventana', () => {
   const { ctx, dialegs } = carregar();
-  ctx.vistaPreviaPasaport({ codi_acces: 'GENERAR', nombre: '</script><script>alert(1)</script>', implantes: [NOU] });
+  ctx.vistaPreviaPasaport(fd(NOVA, [NOU], { nombre: '</script><script>alert(1)</script>' }));
   const json = dialegs[0].out.t.formDataJson;
   assert.doesNotMatch(json, /</);
   assert.equal(JSON.parse(json).nombre, '</script><script>alert(1)</script>');
@@ -108,10 +115,11 @@ test('la vista previa solo se abre desde la hoja o el panel (ADR 0003)', () => {
 
 test('pilar pendiente: casilla Pendent + pilar vacío -> "Pendiente de colocar"; nunca sale la casilla', () => {
   const { ctx } = carregar();
-  const r = ctx.calcularVistaPrevia_({ codi_acces: 'GENERAR', nombre: 'Nou', implantes: [
+  const r = ctx.calcularVistaPrevia_(fd(NOVA, [
     Object.assign({}, NOU, { conexion: 'Interna', pilar: '', pendent: true, que_falta: 'el pilar definitiu' }),
     Object.assign({}, NOU, { conexion: 'Interna', posicion: '25', pilar: '' })
-  ] });
+  ]));
+  assert.equal(r.ok, true, r.message);
   assert.equal(r.implants[0].pilar_texto, 'Pendiente de colocar');
   assert.equal(r.implants[1].pilar_texto, '');
   r.implants.forEach(i => {

@@ -1997,17 +1997,13 @@ function include_(nom) {
   return HtmlService.createHtmlOutputFromFile(nom).getContent();
 }
 
-/** ¿Este implante espera todavía su pilar? Regla de S3 (casilla Pendent + pilar vacío). */
-function pilarPendent_(o) {
-  if (typeof PacientModel.pilarPendent === 'function') return PacientModel.pilarPendent(o);
-  // Mientras S3 no esté integrado: la misma regla acordada.
-  return PacientModel.esCert(o.pendent) && !String(o.pilar === undefined || o.pilar === null ? '' : o.pilar).trim();
-}
-
-/** Filas de un paciente -> lo que puede ver el paciente, ordenado por posición. */
+/**
+ * Filas de un paciente -> lo que puede ver el paciente, ordenado por posición. Del estado
+ * interno (casilla Pendent, S3) solo sale "pilar pendiente sí/no".
+ */
 function implantsPerAlPacient_(objetos) {
   return objetos
-    .map(o => PortalModel.perAlPortal(o, { pilarPendiente: pilarPendent_(o) }))
+    .map(o => PortalModel.perAlPortal(o, { pilarPendiente: PacientModel.pilarPendent(o) }))
     .sort((a, b) => PacientModel.ordrePosicio(a.posicion) - PacientModel.ordrePosicio(b.posicion));
 }
 
@@ -2042,31 +2038,14 @@ function pdfPasaport_(implants, codi) {
 }
 
 /**
- * Cómo quedarán las filas del paciente al guardar este formulario: la misma función que usa
- * el guardado (PacientModel.planificarDesat, de S3), para que la vista previa y lo guardado
- * no puedan ser distintos.
- */
-function planificarDesat_(headers, files, formData) {
-  if (typeof PacientModel.planificarDesat === 'function') return PacientModel.planificarDesat(headers, files, formData);
-  // Mientras S3 no esté integrado: añadir implantes a las filas que ya tenga el paciente.
-  const { idx } = PacientModel.indexarCapcaleres(headers);
-  const esNou = !formData.codi_acces || formData.codi_acces === 'GENERAR';
-  const codi = esNou ? '' : String(formData.codi_acces).trim().toUpperCase();
-  const paciente = { codi_acces: codi, nombre: String(formData.nombre || '').trim(), dni: formData.dni,
-    sense_dni: formData.sense_dni, cuenta_quartup: formData.cuenta_quartup, email: formData.email };
-  const existents = esNou ? [] : files.map(f => PacientModel.filaAObjecte(f, idx)).filter(o => mismoCodigo(o.codi_acces, codi));
-  const noves = (formData.implantes || []).map(imp => Object.assign({}, imp, paciente));
-  return { errors: [], avisos: [], mode: 'afegir', codi: codi, paciente: paciente, filas: noves, totes: existents.concat(noves) };
-}
-
-/**
  * El pasaporte que saldría al guardar este formulario y los avisos de la comprobación.
- * Sin escribir nada en la hoja.
+ * Sin escribir nada en la hoja. Las filas salen de PacientModel.planificarDesat, la misma
+ * función que usa el guardado (S3): la vista previa y lo guardado no pueden ser distintos.
  * @returns {{ok, errors?, avisos?, implants?, codi?}}
  */
 function calcularVistaPrevia_(formData) {
   const { headers, files, objetos } = leerPacientes(hojaPacientes());
-  const pla = planificarDesat_(headers, files, formData || {});
+  const pla = PacientModel.planificarDesat(headers, files, formData || {});
   if (pla.errors && pla.errors.length) return { ok: false, errors: pla.errors, message: pla.errors.join('\n') };
   // Las filas del propio paciente no cuentan como "conocidas": un error no se daría por bueno.
   const historic = pla.codi ? objetos.filter(o => !mismoCodigo(o.codi_acces, pla.codi)) : objetos;
