@@ -31,6 +31,7 @@ class FakeRange {
     return this;
   }
   setValue(v) { this.sheet.set(this.r, this.c, v); return this; }
+  getValue() { return this.sheet.get(this.r, this.c); }
   clearContent() { this.each((i, j) => this.sheet.set(i, j, '')); return this; }
   clearFormat() { this.each((i, j) => this.sheet.formats.delete(i + ',' + j)); return this; }
   clearDataValidations() { this.each((i, j) => this.sheet.checkboxes.delete(i + ',' + j)); return this; }
@@ -290,4 +291,81 @@ test('el código funciona también ANTES de migrar (cabeceras antiguas por alias
   assert.equal(ctx.getPatientDataVerbose('AAA111').implantes[0].nombre, 'Pere Vila');
   assert.equal(ctx.buscarPacient('43000001').data.codi_acces, 'AAA111');
   assert.equal(ctx.initiateLogin('BBB222').skipOTP, true);
+});
+
+test('comprovarCuenta avisa en vivo si la Cuenta ya es de otra ficha', () => {
+  const ss = libroAntiguo();
+  const { ctx } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  const r = ctx.comprovarCuenta('43000001', 'GENERAR');
+  assert.equal(r.lliure, false);
+  assert.equal(r.altre.codi_acces, 'AAA111');
+  assert.equal(r.altre.nombre, 'Pere Vila');
+  assert.equal(ctx.comprovarCuenta('43000001', 'aaa111').lliure, true, 'su propia Cuenta no es conflicto');
+  assert.equal(ctx.comprovarCuenta('43009999', 'GENERAR').lliure, true);
+  assert.equal(ctx.comprovarCuenta('12345678Z', 'GENERAR').lliure, true, 'un DNI no se comprueba aquí');
+});
+
+test('fusionarPacients deja una sola ficha con el codi del DNI y el portal ve todos los implantes', () => {
+  const ss = libroAntiguo();
+  const { ctx } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  const res = ctx.fusionarPacients('BBB222', 'AAA111');
+  assert.equal(res.ok, true, res.message);
+  assert.equal(res.filesMogudes, 1);
+
+  const sheet = ss.getSheetByName('Pacientes');
+  const objs = objetosDe(ctx, sheet);
+  assert.ok(objs.every(o => o.codi_acces === 'BBB222' && o.cuenta_quartup === '43000001' && o.dni === '12345678Z'));
+  assert.equal(sheet.formats.get('2,2'), '@', 'la Cuenta sigue como texto');
+  assert.equal(ctx.getPatientDataVerbose('BBB222').implantes.length, 3);
+  assert.equal(ctx.getPatientDataVerbose('AAA111').found, false);
+  assert.equal(ctx.buscarPacient('43000001').data.codi_acces, 'BBB222');
+});
+
+test('aplicarCuentesRevisio con "Unir" = SÍ fusiona; sin él explica cómo hacerlo', () => {
+  const ss = libroAntiguo();
+  const { ctx } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  const rev = ss.getSheetByName('Revisió migració');
+  rev.getRange(2, 7).setValue('43000001');
+  ctx.aplicarCuentesRevisio();
+  assert.match(rev.get(2, 8), /^❌ .*Pere Vila.*Unir/);
+
+  rev.getRange(2, 9).setValue('sí');
+  ctx.aplicarCuentesRevisio();
+  assert.match(rev.get(2, 8), /^✅ .*unida.*AAA111/);
+  const objs = objetosDe(ctx, ss.getSheetByName('Pacientes'));
+  assert.ok(objs.every(o => o.codi_acces === 'BBB222' && o.cuenta_quartup === '43000001'));
+});
+
+test('aplicarCuentesRevisio añade la columna "Unir" a una revisión creada antes de existir', () => {
+  const ss = libroAntiguo();
+  const { ctx } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  const rev = ss.getSheetByName('Revisió migració');
+  rev.getRange(1, 9).setValue('');
+  rev.getRange(2, 7).setValue('43000077');
+  ctx.aplicarCuentesRevisio();
+  assert.equal(rev.get(1, 9), 'Unir');
+  assert.equal(rev.get(2, 8), '✅ Aplicada');
+});
+
+test('marcarSenseDniMenu marca Sense DNI y el DNI que llega después lo desmarca', () => {
+  const ss = libroAntiguo();
+  const { ctx } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  ctx.marcarSenseDniMenu();
+  let pere = objetosDe(ctx, ss.getSheetByName('Pacientes')).find(o => o.codi_acces === 'AAA111');
+  assert.equal(pere.sense_dni, true);
+  assert.equal(objetosDe(ctx, ss.getSheetByName('Pacientes')).find(o => o.codi_acces === 'BBB222').sense_dni, false);
+
+  const res = ctx.saveNewImplant({
+    codi_acces: 'AAA111', cuenta_quartup: '43000001', nombre: 'Pere Vila', email: 'pere@x.cat', sense_email: false,
+    dni: '11111111H', sense_dni: false, sendEmail: 'false', implantes: [IMPLANT]
+  });
+  assert.equal(res.ok, true, res.message);
+  const files = objetosDe(ctx, ss.getSheetByName('Pacientes')).filter(o => o.codi_acces === 'AAA111');
+  assert.equal(files.length, 2);
+  assert.ok(files.every(o => o.dni === '11111111H' && o.sense_dni === false));
 });

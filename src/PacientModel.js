@@ -146,7 +146,7 @@ function crearPacientModel() {
         String(e.cuenta_quartup || '').trim() === cuenta &&
         String(e.codi_acces || '').trim().toUpperCase() !== codiPropi);
       if (altre) {
-        errors.push(`Aquesta Cuenta Quartup ja és de ${altre.nombre || 'un altre pacient'} (codi ${altre.codi_acces}). Cerca'l primer per afegir-hi implants.`);
+        errors.push(`Aquesta Cuenta Quartup ja és de ${altre.nombre || 'un altre pacient'} (codi ${altre.codi_acces}). Cerca'l primer per afegir-hi implants o, si és la mateixa persona, uneix les fitxes.`);
       }
     }
 
@@ -283,21 +283,26 @@ function crearPacientModel() {
   /**
    * Escribe las Cuentes rellenadas en la pestaña "Revisió migració" en todas las filas
    * de cada paciente. Valida formato y unicidad; lo que no pasa se devuelve como error.
+   * Si la Cuenta ya es de otro paciente y la revisión dice `unir`, son la misma persona:
+   * se fusionan las dos fichas y se queda el codi de la revisión (ver planificarFusio).
    * @param {string[]} headers cabeceras de la hoja Pacientes
    * @param {any[][]} files filas (sin cabecera)
-   * @param {{codi_acces: string, cuenta_quartup: any}[]} revisions
+   * @param {{codi_acces: string, cuenta_quartup: any, unir?: boolean}[]} revisions
+   * @returns {{ files, aplicats, errors, filesTocades }} cada aplicat lleva `unitAmb`
+   *   ({codi_acces, nombre}) si hubo fusión.
    */
   function aplicarRevisio(headers, files, revisions) {
     const { idx } = indexarCapcaleres(headers);
     if (idx.codi_acces === undefined || idx.cuenta_quartup === undefined) {
       throw new Error("No trobo les columnes \"Codi d'accés\" i \"Cuenta Quartup\". Has executat la migració?");
     }
-    const objectes = files.map(f => filaAObjecte(f, idx));
-    const pacients = pacientsUnics(objectes);
+    let actuals = files;
+    const pacientsActuals = () => pacientsUnics(actuals.map(f => filaAObjecte(f, idx)));
 
     const errors = [];
     const aplicats = [];
     const assignades = {};
+    const tocats = {};
     revisions.forEach(r => {
       const codi = String(r.codi_acces || '').trim().toUpperCase();
       const cuenta = String(r.cuenta_quartup === undefined || r.cuenta_quartup === null ? '' : r.cuenta_quartup).trim();
@@ -307,17 +312,34 @@ function crearPacientModel() {
         errors.push({ codi_acces: codi, motiu: tipus === 'dni' ? 'Hi has posat un DNI, no la Cuenta.' : 'La Cuenta només pot tenir xifres.' });
         return;
       }
+      const pacients = pacientsActuals();
       if (!pacients.some(p => p.codi_acces === codi)) {
         errors.push({ codi_acces: codi, motiu: "Aquest codi d'accés ja no és al full de Pacients." });
         return;
       }
-      const altre = pacients.find(p => p.codi_acces !== codi && String(p.cuenta_quartup).trim() === cuenta);
-      if (altre || (assignades[cuenta] && assignades[cuenta] !== codi)) {
-        errors.push({ codi_acces: codi, motiu: `La Cuenta ${cuenta} ja és d'un altre pacient (${altre ? altre.nombre + ', ' + altre.codi_acces : assignades[cuenta]}).` });
+      if (assignades[cuenta] && assignades[cuenta] !== codi) {
+        errors.push({ codi_acces: codi, motiu: `La Cuenta ${cuenta} ja l'has posada a un altre pacient de la revisió (${assignades[cuenta]}).` });
         return;
       }
+      const altre = pacients.find(p => p.codi_acces !== codi && String(p.cuenta_quartup).trim() === cuenta);
+      let unitAmb = null;
+      if (altre) {
+        if (!r.unir) {
+          errors.push({ codi_acces: codi, motiu: `La Cuenta ${cuenta} ja és de ${altre.nombre} (codi ${altre.codi_acces}). Si és la mateixa persona, escriu SÍ a la columna "Unir" i torna a aplicar.` });
+          return;
+        }
+        const fusio = planificarFusio(headers, actuals, codi, altre.codi_acces);
+        if (fusio.errors.length) {
+          errors.push({ codi_acces: codi, motiu: 'No es poden unir: ' + fusio.errors.join(' ') });
+          return;
+        }
+        actuals = fusio.files;
+        tocats[codi] = true;
+        unitAmb = { codi_acces: altre.codi_acces, nombre: altre.nombre };
+      }
       assignades[cuenta] = codi;
-      aplicats.push({ codi_acces: codi, cuenta_quartup: cuenta });
+      tocats[codi] = true;
+      aplicats.push({ codi_acces: codi, cuenta_quartup: cuenta, unitAmb });
     });
 
     const perCodi = {};
@@ -325,9 +347,9 @@ function crearPacientModel() {
     const iCuenta = idx.cuenta_quartup;
     const iCodi = idx.codi_acces;
     let filesTocades = 0;
-    const novesFiles = files.map(f => {
+    const novesFiles = actuals.map(f => {
       const codi = String(f[iCodi] || '').trim().toUpperCase();
-      if (perCodi[codi] === undefined) return f;
+      if (!tocats[codi]) return f;
       const copia = f.slice();
       copia[iCuenta] = perCodi[codi];
       filesTocades++;
@@ -335,6 +357,103 @@ function crearPacientModel() {
     });
 
     return { files: novesFiles, aplicats, errors, filesTocades };
+  }
+
+  // --- Fusión de dos fichas de la misma persona ---
+
+  /**
+   * Plan puro para unir dos fichas que son la misma persona (p. ej. la auxiliar la dio de
+   * alta con el DNI y ya estaba importada con su Cuenta). Todas las filas-implante pasan
+   * al `codiQueQueda` (el que el paciente ha recibido por email) y los datos de paciente se
+   * completan entre las dos fichas. Si las dos tienen Cuenta o DNI distintos, no son la
+   * misma persona: error y no se toca nada.
+   * @returns {{ files: any[][], errors: string[], avisos: string[], pacient: object, filesMogudes: number }}
+   */
+  function planificarFusio(headers, files, codiQueQueda, codiQueMarxa) {
+    const { idx } = indexarCapcaleres(headers);
+    const queda = String(codiQueQueda || '').trim().toUpperCase();
+    const marxa = String(codiQueMarxa || '').trim().toUpperCase();
+    const errors = [];
+    const avisos = [];
+    const objectes = files.map(f => filaAObjecte(f, idx));
+    const codiDe = o => String(o.codi_acces || '').trim().toUpperCase();
+    const pQueda = pacientsUnics(objectes.filter(o => codiDe(o) === queda))[0];
+    const pMarxa = pacientsUnics(objectes.filter(o => codiDe(o) === marxa))[0];
+
+    if (!queda || !marxa || queda === marxa) errors.push('Cal indicar dues fitxes diferents.');
+    if (!pQueda) errors.push(`No trobo la fitxa ${queda}.`);
+    if (!pMarxa) errors.push(`No trobo la fitxa ${marxa}.`);
+    if (errors.length) return { files, errors, avisos, pacient: null, filesMogudes: 0 };
+
+    const ambDades = (a, b) => (String(a || '').trim() ? a : b);
+    const cuentaA = String(pQueda.cuenta_quartup).trim();
+    const cuentaB = String(pMarxa.cuenta_quartup).trim();
+    if (cuentaA && cuentaB && cuentaA !== cuentaB) errors.push(`Tenen Cuentes diferents (${cuentaA} i ${cuentaB}).`);
+    const dniA = netejarDocument(pQueda.dni);
+    const dniB = netejarDocument(pMarxa.dni);
+    if (dniA && dniB && dniA !== dniB) errors.push(`Tenen DNIs diferents (${dniA} i ${dniB}).`);
+    if (errors.length) return { files, errors, avisos, pacient: null, filesMogudes: 0 };
+
+    const emailA = String(pQueda.email).trim();
+    const emailB = String(pMarxa.email).trim();
+    if (emailA && emailB && emailA.toLowerCase() !== emailB.toLowerCase()) {
+      avisos.push(`Tenen emails diferents: es queda ${emailA}.`);
+    }
+
+    const filesDe = codi => objectes.filter(o => codiDe(o) === codi);
+    const senseEmail = filesDe(queda).concat(filesDe(marxa)).some(o => o.sense_email);
+    const senseDni = filesDe(queda).concat(filesDe(marxa)).some(o => o.sense_dni);
+    const pacient = {
+      codi_acces: queda,
+      cuenta_quartup: ambDades(cuentaA, cuentaB),
+      nombre: ambDades(pQueda.nombre, pMarxa.nombre),
+      email: ambDades(emailA, emailB),
+      dni: ambDades(dniA, dniB)
+    };
+    pacient.sense_email = !pacient.email && senseEmail;
+    pacient.sense_dni = !pacient.dni && senseDni;
+
+    let filesMogudes = 0;
+    const novesFiles = files.map((f, i) => {
+      const codi = codiDe(objectes[i]);
+      if (codi !== queda && codi !== marxa) return f;
+      if (codi === marxa) filesMogudes++;
+      const copia = f.slice();
+      CLAUS_PACIENT.forEach(k => { if (idx[k] !== undefined) copia[idx[k]] = pacient[k]; });
+      return copia;
+    });
+
+    return { files: novesFiles, errors, avisos, pacient, filesMogudes };
+  }
+
+  /**
+   * Marca "Sense DNI" a todos los pacientes que no tienen DNI (no lo tenemos y no se va a
+   * pedir en el panel). Si más adelante llega el DNI, al ponerlo se desmarca.
+   * @returns {{ files: any[][], pacients: number, filesTocades: number }}
+   */
+  function marcarSenseDni(headers, files) {
+    const { idx } = indexarCapcaleres(headers);
+    if (idx.dni === undefined || idx.sense_dni === undefined || idx.codi_acces === undefined) {
+      throw new Error('No trobo les columnes "DNI" i "Sense DNI". Has executat la migració?');
+    }
+    const objectes = files.map(f => filaAObjecte(f, idx));
+    const ambDni = {};
+    objectes.forEach(o => {
+      if (String(o.dni).trim()) ambDni[String(o.codi_acces).trim().toUpperCase()] = true;
+    });
+    const pacients = {};
+    let filesTocades = 0;
+    const novesFiles = files.map((f, i) => {
+      const o = objectes[i];
+      const codi = String(o.codi_acces).trim().toUpperCase();
+      if (!codi || ambDni[codi] || o.sense_dni) return f;
+      const copia = f.slice();
+      copia[idx.sense_dni] = true;
+      pacients[codi] = true;
+      filesTocades++;
+      return copia;
+    });
+    return { files: novesFiles, pacients: Object.keys(pacients).length, filesTocades };
   }
 
   function unics(llista) {
@@ -357,7 +476,9 @@ function crearPacientModel() {
     validarPacient,
     pacientsUnics,
     planificarMigracio,
-    aplicarRevisio
+    aplicarRevisio,
+    planificarFusio,
+    marcarSenseDni
   };
 }
 

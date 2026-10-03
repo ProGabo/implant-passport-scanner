@@ -206,6 +206,7 @@
                 <input type="text" id="cuenta_quartup" inputmode="numeric" placeholder="Ex: 43001234">
                 <div class="field-help">El número de 'Cuenta' del pacient a Quartup.</div>
                 <div id="cuentaAviso" class="field-warning hidden"></div>
+                <div id="cuentaConflicte" class="field-warning hidden"></div>
             </div>
             <div class="form-group">
                 <label for="nombre">Nom complet:</label>
@@ -224,7 +225,7 @@
                 <input type="text" id="dni" placeholder="Ex: 12345678A">
                 <div class="inline-check">
                     <input type="checkbox" id="sense_dni">
-                    <label for="sense_dni">Sense DNI (el pacient no en té)</label>
+                    <label for="sense_dni">Sense DNI (no el tenim)</label>
                 </div>
             </div>
         </div>
@@ -339,6 +340,7 @@
     const pacienteCodigoInput = document.getElementById('pacienteCodigo');
     const cuentaInput = document.getElementById('cuenta_quartup');
     const cuentaAviso = document.getElementById('cuentaAviso');
+    const cuentaConflicte = document.getElementById('cuentaConflicte');
     const nombreInput = document.getElementById('nombre');
     const emailInput = document.getElementById('email');
     const senseEmailCheckbox = document.getElementById('sense_email');
@@ -652,6 +654,7 @@
     const TXT_BUSCAR = '🔍 Cercar pacient';
     const TXT_GUARDAR = '💾 Desar-ho tot';
     const CAMPOS_PACIENTE = [cuentaInput, nombreInput, emailInput, dniInput];
+    let pacienteActual = null; // datos de la ficha encontrada (null si es nueva)
 
     function buscarPaciente() {
         const termino = busquedaInput.value.trim();
@@ -700,16 +703,18 @@
 
         if (res.found) {
             const d = res.data;
+            pacienteActual = d;
             pacienteCodigoInput.value = d.codi_acces;
             patientCodeDisplay.textContent = d.codi_acces;
             patientCodeDisplay.style.color = '#166534';
 
+            // Un "Sense email/DNI" guardado no bloquea: si el dato llega, se desmarca y se pone.
             fijarCampo(cuentaInput, d.cuenta_quartup, !!d.cuenta_quartup);
             fijarCampo(nombreInput, d.nombre, !!d.nombre);
-            fijarCampo(emailInput, d.email, !!d.email || d.sense_email);
-            fijarCasilla(senseEmailCheckbox, d.sense_email, !!d.email || d.sense_email);
-            fijarCampo(dniInput, d.dni, !!d.dni || d.sense_dni);
-            fijarCasilla(senseDniCheckbox, d.sense_dni, !!d.dni || d.sense_dni);
+            fijarCampo(emailInput, d.email, !!d.email);
+            fijarCasilla(senseEmailCheckbox, d.sense_email, !!d.email);
+            fijarCampo(dniInput, d.dni, !!d.dni);
+            fijarCasilla(senseDniCheckbox, d.sense_dni, !!d.dni);
 
             if (!d.cuenta_quartup) {
                 Swal.fire({
@@ -722,6 +727,7 @@
                 Toast.fire({ icon: 'success', title: `Pacient trobat: ${d.nombre}` });
             }
         } else {
+            pacienteActual = null;
             pacienteCodigoInput.value = 'GENERAR';
             patientCodeDisplay.textContent = 'NOU (es generarà un codi)';
             patientCodeDisplay.style.color = '#d97706';
@@ -745,6 +751,7 @@
 
         actualizarCasillas();
         revisarCuenta();
+        comprovarCuentaEnViu();
     }
 
     // --- Casillas "Sense email" / "Sense DNI" y avisos de la Cuenta ------------------
@@ -799,7 +806,83 @@
         cuentaInput.focus();
     };
 
-    cuentaInput.addEventListener('input', revisarCuenta);
+    // --- ¿La Cuenta ya es de otra ficha? Se comprueba al salir del campo, antes de los implantes.
+
+    function ocultarConflicte() {
+        cuentaConflicte.innerHTML = '';
+        cuentaConflicte.classList.add('hidden');
+    }
+
+    function comprovarCuentaEnViu() {
+        ocultarConflicte();
+        const valor = cuentaInput.value.trim();
+        if (cuentaInput.disabled || PacientModel.classificarIdentificador(valor) !== 'cuenta') return;
+        llamarServidor('comprovarCuenta', [valor, pacienteCodigoInput.value], res => {
+            // El campo pudo cambiar mientras el servidor respondía.
+            if (!res || !res.ok || res.lliure || cuentaInput.value.trim() !== valor) return;
+            const a = res.altre;
+            const quien = `<b>${escapeHtml(a.nombre)}</b> (codi ${escapeHtml(a.codi_acces)}, ${a.n_implants} implant(s)${a.dni ? ', DNI ' + escapeHtml(a.dni) : ''})`;
+            if (pacienteActual) {
+                cuentaConflicte.innerHTML = `Aquesta Cuenta ja és de ${quien}.<br>
+                    Si és la mateixa persona, uneix les dues fitxes.<br>
+                    <button type="button" onclick="unirFitxes()">És la mateixa persona: unir</button>`;
+            } else {
+                cuentaConflicte.innerHTML = `Aquesta Cuenta ja és de ${quien}. No el donis d'alta de nou: obre la seva fitxa.<br>
+                    <button type="button" onclick="obrirFitxa()">Obrir la fitxa de ${escapeHtml(a.nombre)}</button>`;
+            }
+            cuentaConflicte.dataset.altre = JSON.stringify(a);
+            cuentaConflicte.classList.remove('hidden');
+        }, () => {}); // si falla, el servidor lo vuelve a comprobar al desar
+    }
+
+    window.obrirFitxa = function() {
+        busquedaInput.value = cuentaInput.value.trim();
+        ocultarConflicte();
+        buscarPaciente();
+    };
+
+    window.unirFitxes = function() {
+        const a = JSON.parse(cuentaConflicte.dataset.altre || 'null');
+        const p = pacienteActual;
+        if (!a || !p) return;
+        const fila = (titol, x) => `<tr><td style="padding:4px 8px;"><b>${titol}</b></td>
+            <td style="padding:4px 8px;">${escapeHtml(x.nombre)}</td>
+            <td style="padding:4px 8px;">${escapeHtml(x.dni || '-')}</td>
+            <td style="padding:4px 8px;">${escapeHtml(x.codi_acces)}</td>
+            <td style="padding:4px 8px;">${x.n_implants}</td></tr>`;
+        Swal.fire({
+            icon: 'question',
+            title: 'Són la mateixa persona?',
+            html: `<table style="font-size:12px; text-align:left; margin:0 auto;">
+                     <tr><th></th><th>Nom</th><th>DNI</th><th>Codi</th><th>Impl.</th></tr>
+                     ${fila('Aquesta', p)}${fila('Amb Cuenta', a)}
+                   </table>
+                   <p style="text-align:left; font-size:13px; margin-top:12px;">S'uniran en una sola fitxa amb el codi <b>${escapeHtml(p.codi_acces)}</b> (el que ja té el pacient). El codi ${escapeHtml(a.codi_acces)} deixarà d'existir.</p>`,
+            showCancelButton: true,
+            confirmButtonText: 'Sí, unir-les',
+            cancelButtonText: 'No, cancel·lar',
+            confirmButtonColor: '#0ea5e9'
+        }).then(r => {
+            if (!r.isConfirmed) return;
+            Swal.fire({ title: 'Unint les fitxes...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+            llamarServidor('fusionarPacients', [p.codi_acces, a.codi_acces], res => {
+                if (!res.ok) {
+                    Swal.fire({ icon: 'error', title: "No s'han pogut unir", html: res.errors ? listaHtml(res.errors) : `<p>${escapeHtml(res.message)}</p>` });
+                    return;
+                }
+                const avisos = (res.avisos || []).length ? listaHtml(res.avisos) : '';
+                Swal.fire({ icon: 'success', title: 'Fitxes unides', html: `<p>Ara és una sola fitxa: <b>${escapeHtml(p.codi_acces)}</b>.</p>${avisos}`, confirmButtonColor: '#0ea5e9' })
+                    .then(() => {
+                        busquedaInput.value = p.codi_acces;
+                        ocultarConflicte();
+                        buscarPaciente();
+                    });
+            }, handleError);
+        });
+    };
+
+    cuentaInput.addEventListener('input', () => { ocultarConflicte(); revisarCuenta(); });
+    cuentaInput.addEventListener('change', comprovarCuentaEnViu);
     [emailInput, dniInput].forEach(inp => inp.addEventListener('input', marcarFaltas));
     senseEmailCheckbox.addEventListener('change', actualizarCasillas);
     senseDniCheckbox.addEventListener('change', actualizarCasillas);
@@ -953,6 +1036,8 @@
         sendEmailCheckbox.disabled = false;
         sendEmailCheckbox.checked = true;
         cuentaAviso.classList.add('hidden');
+        ocultarConflicte();
+        pacienteActual = null;
         pacienteCodigoInput.value = 'GENERAR';
         patientCodeDisplay.textContent = '';
         patientSection.classList.add('hidden');

@@ -235,7 +235,7 @@ test('aplicarRevisio rechaza DNIs, Cuentes repetidas y códigos que no existen',
     { codi_acces: 'ZZZ999', cuenta_quartup: '43000051' }
   ]);
   assert.deepEqual(r.errors.map(e => e.codi_acces), ['BBB222', 'CCC333', 'ZZZ999']);
-  assert.deepEqual(r.aplicats, [{ codi_acces: 'DDD444', cuenta_quartup: '43000050' }]);
+  assert.deepEqual(r.aplicats, [{ codi_acces: 'DDD444', cuenta_quartup: '43000050', unitAmb: null }]);
 });
 
 test('pacientsUnics agrupa las filas-implante por Codi d\'accés', () => {
@@ -243,4 +243,74 @@ test('pacientsUnics agrupa las filas-implante por Codi d\'accés', () => {
   const ps = PM.pacientsUnics(hojaMixta().map(f => PM.filaAObjecte(f, idx)));
   assert.equal(ps.length, 4);
   assert.equal(ps[1].n_implants, 3);
+});
+
+// --- Fusión de fichas y "Sense DNI" ---
+
+// Hoja ya migrada: A = importado con Cuenta y sin DNI; B = la misma persona dada de alta
+// por la auxiliar con el DNI (el codi que el paciente ha recibido por email).
+function hojaDuplicada() {
+  const f = o => PM.objecteAFila(Object.assign({ posicion: '11', marca: 'Straumann' }, o), PM.CAPCALERES);
+  return [
+    f({ codi_acces: 'AAA111', cuenta_quartup: '43000001', nombre: 'Pere Vila', email: 'pere@x.cat', sense_dni: false, posicion: '11' }),
+    f({ codi_acces: 'AAA111', cuenta_quartup: '43000001', nombre: 'Pere Vila', email: 'pere@x.cat', sense_dni: false, posicion: '12' }),
+    f({ codi_acces: 'BBB222', nombre: 'PERE VILA', email: '', sense_email: true, dni: '12345678Z', posicion: '36' }),
+    f({ codi_acces: 'CCC333', cuenta_quartup: '43000003', nombre: 'Joan Mas', email: 'joan@x.cat', posicion: '21' })
+  ];
+}
+
+test('planificarFusio une las dos fichas en el codi que se queda y completa los datos', () => {
+  const r = PM.planificarFusio(PM.CAPCALERES, hojaDuplicada(), 'bbb222', 'AAA111');
+  assert.deepEqual(r.errors, []);
+  assert.equal(r.filesMogudes, 2);
+  const { idx } = PM.indexarCapcaleres(PM.CAPCALERES);
+  const objs = r.files.map(f => PM.filaAObjecte(f, idx));
+  const pere = objs.filter(o => o.codi_acces === 'BBB222');
+  assert.equal(pere.length, 3);
+  assert.ok(pere.every(o => o.cuenta_quartup === '43000001' && o.dni === '12345678Z' && o.email === 'pere@x.cat'));
+  assert.ok(pere.every(o => o.sense_email === false), 'ya tiene email: la casilla se desmarca');
+  assert.equal(pere[0].nombre, 'PERE VILA', 'se queda el nombre de la ficha que se queda');
+  assert.ok(!objs.some(o => o.codi_acces === 'AAA111'));
+  assert.equal(objs.find(o => o.codi_acces === 'CCC333').nombre, 'Joan Mas', 'las demás fichas no se tocan');
+});
+
+test('planificarFusio se niega si las fichas tienen Cuentes o DNIs distintos', () => {
+  const cuentes = PM.planificarFusio(PM.CAPCALERES, hojaDuplicada(), 'AAA111', 'CCC333');
+  assert.match(cuentes.errors.join(), /Cuentes diferents/);
+
+  const files = hojaDuplicada();
+  const { idx } = PM.indexarCapcaleres(PM.CAPCALERES);
+  files[0][idx.dni] = '87654321X';
+  const dnis = PM.planificarFusio(PM.CAPCALERES, files, 'BBB222', 'AAA111');
+  assert.match(dnis.errors.join(), /DNIs diferents/);
+  assert.equal(dnis.files, files, 'sin cambios');
+
+  assert.match(PM.planificarFusio(PM.CAPCALERES, files, 'BBB222', 'ZZZ999').errors.join(), /ZZZ999/);
+});
+
+test('aplicarRevisio une las fichas si la Cuenta es de otro paciente y la revisión dice unir', () => {
+  const files = hojaDuplicada();
+  const sinUnir = PM.aplicarRevisio(PM.CAPCALERES, files, [{ codi_acces: 'BBB222', cuenta_quartup: '43000001' }]);
+  assert.match(sinUnir.errors[0].motiu, /Pere Vila.*Unir/);
+  assert.equal(sinUnir.aplicats.length, 0);
+
+  const unint = PM.aplicarRevisio(PM.CAPCALERES, files, [{ codi_acces: 'BBB222', cuenta_quartup: '43000001', unir: true }]);
+  assert.deepEqual(unint.errors, []);
+  assert.deepEqual(unint.aplicats[0].unitAmb, { codi_acces: 'AAA111', nombre: 'Pere Vila' });
+  assert.equal(unint.filesTocades, 3);
+  const { idx } = PM.indexarCapcaleres(PM.CAPCALERES);
+  const objs = unint.files.map(f => PM.filaAObjecte(f, idx));
+  assert.equal(objs.filter(o => o.codi_acces === 'BBB222' && o.cuenta_quartup === '43000001').length, 3);
+});
+
+test('marcarSenseDni marca solo a los pacientes sin DNI en ninguna fila', () => {
+  const files = hojaDuplicada();
+  const r = PM.marcarSenseDni(PM.CAPCALERES, files);
+  assert.equal(r.pacients, 2); // AAA111 y CCC333; BBB222 tiene DNI
+  assert.equal(r.filesTocades, 3);
+  const { idx } = PM.indexarCapcaleres(PM.CAPCALERES);
+  const objs = r.files.map(f => PM.filaAObjecte(f, idx));
+  assert.ok(objs.filter(o => o.codi_acces !== 'BBB222').every(o => o.sense_dni === true));
+  assert.ok(objs.filter(o => o.codi_acces === 'BBB222').every(o => o.sense_dni === false));
+  assert.equal(PM.marcarSenseDni(PM.CAPCALERES, r.files).pacients, 0, 'idempotente');
 });

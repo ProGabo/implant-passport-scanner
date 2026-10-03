@@ -41,7 +41,8 @@ function onOpen() {
       .addItem('🩺 Comprovar-ho tot', 'comprobarTodo')
       .addSubMenu(ui.createMenu('🗂️ Migració de dades')
           .addItem('1. Migrar la fulla (una sola vegada)', 'migrarDadesS2')
-          .addItem('2. Aplicar les Cuentes de la revisió', 'aplicarCuentesRevisio'))
+          .addItem('2. Aplicar les Cuentes de la revisió', 'aplicarCuentesRevisio')
+          .addItem('3. Marcar "Sense DNI" als pacients sense DNI', 'marcarSenseDniMenu'))
       .addItem('🔑 Autoritzar el meu compte', 'autorizarCuenta')
       .addToUi();
 }
@@ -183,6 +184,62 @@ function buscarPacient(termino) {
   } catch (e) {
     Logger.log('Error en buscarPacient: ' + e);
     return { ok: false, message: 'Error intern: ' + e.message };
+  }
+}
+
+/**
+ * Comprobación en vivo del sidebar al escribir la Cuenta: ¿ya es de otro paciente?
+ * @param {string} cuenta
+ * @param {string} codiPropi Codi d'accés de la ficha abierta ('GENERAR' si es nueva)
+ * @returns {{ok, lliure, altre?: {codi_acces, nombre, dni, n_implants}}}
+ */
+function comprovarCuenta(cuenta, codiPropi) {
+  try {
+    const c = String(cuenta || '').trim();
+    if (PacientModel.classificarIdentificador(c) !== 'cuenta') return { ok: true, lliure: true };
+    const { objetos } = leerPacientes(hojaPacientes());
+    const altre = PacientModel.pacientsUnics(objetos).find(p =>
+      String(p.cuenta_quartup).trim() === c && !mismoCodigo(p.codi_acces, codiPropi));
+    if (!altre) return { ok: true, lliure: true };
+    return { ok: true, lliure: false, altre: { codi_acces: altre.codi_acces, nombre: altre.nombre, dni: altre.dni, n_implants: altre.n_implants } };
+  } catch (e) {
+    Logger.log('Error en comprovarCuenta: ' + e);
+    return { ok: false, message: 'Error intern: ' + e.message };
+  }
+}
+
+/** Escribe las columnas de paciente (y el codi) de todas las filas, como texto. */
+function escribirColumnasPaciente(sheet, headers, files) {
+  if (!files.length) return;
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  ponerFormatoTexto(sheet, headers, 2, files.length);
+  const aTexto = textoSiId(headers);
+  PacientModel.CLAUS_PACIENT.forEach(k => {
+    const i = idx[k];
+    if (i === undefined) return;
+    sheet.getRange(2, i + 1, files.length, 1).setValues(files.map(f => [aTexto(f[i], i)]));
+  });
+}
+
+/**
+ * Une dos fichas que son la misma persona: todos los implantes pasan al `codiQueQueda`
+ * (el que el paciente ya ha recibido) y los datos se completan entre las dos.
+ */
+function fusionarPacients(codiQueQueda, codiQueMarxa) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = hojaPacientes();
+    const { headers, files } = leerPacientes(sheet);
+    const fusio = PacientModel.planificarFusio(headers, files, codiQueQueda, codiQueMarxa);
+    if (fusio.errors.length) return { ok: false, message: fusio.errors.join('\n'), errors: fusio.errors };
+    escribirColumnasPaciente(sheet, headers, fusio.files);
+    return { ok: true, pacient: fusio.pacient, filesMogudes: fusio.filesMogudes, avisos: fusio.avisos };
+  } catch (e) {
+    Logger.log('Error en fusionarPacients: ' + e);
+    return { ok: false, message: 'Error en unir les fitxes: ' + e.message };
+  } finally {
+    lock.releaseLock();
   }
 }
 
@@ -330,6 +387,12 @@ function completarDatosPaciente(sheet, headers, paciente) {
         f[i] = paciente[k];
         cambios = true;
       }
+    });
+    // Ha llegado el dato que "no teníamos": la casilla deja de tener sentido.
+    [['email', 'sense_email'], ['dni', 'sense_dni']].forEach(([dato, casilla]) => {
+      const iD = idx[dato], iC = idx[casilla];
+      if (iD === undefined || iC === undefined) return;
+      if (String(f[iD]).trim() && PacientModel.esCert(f[iC])) { f[iC] = false; cambios = true; }
     });
   });
 
@@ -883,7 +946,8 @@ function eliminarDuplicados() {
 }
 
 const HOJA_REVISION = 'Revisió migració';
-const CAB_REVISION = ["Codi d'accés", 'Nom', 'DNI', 'Nº implants', 'Valor antic', 'Motiu', 'Cuenta Quartup (a omplir)', 'Resultat'];
+const CAB_REVISION = ["Codi d'accés", 'Nom', 'DNI', 'Nº implants', 'Valor antic', 'Motiu', 'Cuenta Quartup (a omplir)', 'Resultat', 'Unir'];
+const NOTA_UNIR = "Si la Cuenta ja és d'una altra fitxa i és la MATEIXA persona, escriu SÍ: s'uneixen les dues fitxes i es queda el codi d'accés d'aquesta fila.";
 
 /**
  * Migración S2 (una sola vez, idempotente): reordena la hoja al formato nuevo con
@@ -975,12 +1039,13 @@ function crearHojaRevision(ss, revisio) {
   if (!revisio.length) return;
 
   hoja = ss.insertSheet(HOJA_REVISION);
-  const filas = revisio.map(r => [r.codi_acces, r.nombre, r.dni, r.n_implants, r.valor_antic, r.motiu, '', '']);
+  const filas = revisio.map(r => [r.codi_acces, r.nombre, r.dni, r.n_implants, r.valor_antic, r.motiu, '', '', '']);
   hoja.getRange(1, 1, 1, CAB_REVISION.length).setValues([CAB_REVISION]).setFontWeight('bold');
   hoja.getRange(2, 7, filas.length, 1).setNumberFormat('@');
   hoja.getRange(2, 1, filas.length, CAB_REVISION.length).setValues(filas);
   hoja.getRange(2, 7, filas.length, 1).setBackground('#fef9c3');
   hoja.getRange(1, 7).setNote("Busca el pacient a Quartup (pel DNI o pel nom) i copia aquí el número de 'Cuenta'. Només xifres.");
+  hoja.getRange(1, 9).setNote(NOTA_UNIR);
   hoja.setFrozenRows(1);
   hoja.autoResizeColumns(1, CAB_REVISION.length);
 }
@@ -998,30 +1063,32 @@ function aplicarCuentesRevisio() {
     return;
   }
 
+  // Las pestañas de revisión creadas antes de existir la fusión no tienen la columna "Unir".
+  if (String(hojaRev.getRange(1, CAB_REVISION.length).getValue()).trim() !== CAB_REVISION[8]) {
+    hojaRev.getRange(1, CAB_REVISION.length).setValue(CAB_REVISION[8]).setFontWeight('bold').setNote(NOTA_UNIR);
+  }
+
   const rev = hojaRev.getDataRange().getValues();
   const cab = rev[0].map(h => String(h).trim());
   const iCodi = cab.indexOf(CAB_REVISION[0]);
   const iCuenta = cab.indexOf(CAB_REVISION[6]);
   const iRes = cab.indexOf(CAB_REVISION[7]);
-  if (iCodi === -1 || iCuenta === -1 || iRes === -1) {
+  const iUnir = cab.indexOf(CAB_REVISION[8]);
+  if (iCodi === -1 || iCuenta === -1 || iRes === -1 || iUnir === -1) {
     ui.alert('Error', `La pestanya "${HOJA_REVISION}" no té les columnes esperades. Torna a executar la migració.`, ui.ButtonSet.OK);
     return;
   }
-  const revisions = rev.slice(1).map(f => ({ codi_acces: f[iCodi], cuenta_quartup: f[iCuenta] }));
+  const esSi = v => ['SI', 'SÍ', 'S', 'YES', 'TRUE', 'VERDADERO'].indexOf(String(v).trim().toUpperCase()) !== -1;
+  const revisions = rev.slice(1).map(f => ({ codi_acces: f[iCodi], cuenta_quartup: f[iCuenta], unir: esSi(f[iUnir]) }));
 
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   let resultado;
   try {
     const sheet = hojaPacientes();
-    const { headers, idx, files } = leerPacientes(sheet);
+    const { headers, files } = leerPacientes(sheet);
     resultado = PacientModel.aplicarRevisio(headers, files, revisions);
-
-    if (resultado.aplicats.length && files.length) {
-      const col = idx.cuenta_quartup + 1;
-      sheet.getRange(2, col, files.length, 1).setNumberFormat('@');
-      sheet.getRange(2, col, files.length, 1).setValues(resultado.files.map(f => [String(f[idx.cuenta_quartup])]));
-    }
+    if (resultado.aplicats.length) escribirColumnasPaciente(sheet, headers, resultado.files);
   } catch (e) {
     ui.alert('Error', e.message, ui.ButtonSet.OK);
     return;
@@ -1030,7 +1097,11 @@ function aplicarCuentesRevisio() {
   }
 
   const porCodigo = {};
-  resultado.aplicats.forEach(a => { porCodigo[a.codi_acces] = '✅ Aplicada'; });
+  resultado.aplicats.forEach(a => {
+    porCodigo[a.codi_acces] = a.unitAmb
+      ? `✅ Aplicada i unida amb la fitxa de ${a.unitAmb.nombre} (el codi ${a.unitAmb.codi_acces} ja no existeix)`
+      : '✅ Aplicada';
+  });
   resultado.errors.forEach(e => { porCodigo[e.codi_acces] = '❌ ' + e.motiu; });
   const columnaRes = rev.slice(1).map((f, i) => {
     const codi = String(f[iCodi] || '').trim().toUpperCase();
@@ -1044,6 +1115,47 @@ function aplicarCuentesRevisio() {
     `Amb error (mira la columna "Resultat"): ${resultado.errors.length}\n` +
     `Encara per omplir: ${pendientes}`,
     ui.ButtonSet.OK);
+}
+
+/**
+ * Marca "Sense DNI" a todos los pacientes sin DNI: no lo tenemos, y así el panel no lo
+ * pide. Si más adelante llega (p. ej. de Quartup), al ponerlo se desmarca.
+ */
+function marcarSenseDniMenu() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = hojaPacientes();
+  let previa;
+  try {
+    const { headers, files } = leerPacientes(sheet);
+    previa = PacientModel.marcarSenseDni(headers, files);
+  } catch (e) {
+    ui.alert('Error', e.message, ui.ButtonSet.OK);
+    return;
+  }
+  if (!previa.pacients) {
+    ui.alert('Res a marcar', 'Tots els pacients ja tenen DNI o "Sense DNI".', ui.ButtonSet.OK);
+    return;
+  }
+  const ok = ui.alert('Marcar "Sense DNI"',
+    `Es marcarà "Sense DNI" a ${previa.pacients} pacients (${previa.filesTocades} files d'implants) que no tenen DNI. Vols continuar?`,
+    ui.ButtonSet.YES_NO);
+  if (ok !== ui.Button.YES) return;
+
+  // Se recalcula dentro del lock: mientras el diálogo estaba abierto el panel pudo guardar.
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  let r;
+  try {
+    const { headers, idx, files } = leerPacientes(sheet);
+    r = PacientModel.marcarSenseDni(headers, files);
+    if (r.pacients) {
+      sheet.getRange(2, idx.sense_dni + 1, r.files.length, 1).setValues(r.files.map(f => [PacientModel.esCert(f[idx.sense_dni])]));
+      ponerCasillas(sheet, headers, 2, r.files.length);
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  ui.alert('Fet ✅', `"Sense DNI" marcat a ${r.pacients} pacients.`, ui.ButtonSet.OK);
 }
 
 /**

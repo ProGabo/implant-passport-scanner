@@ -16,9 +16,19 @@ _Avoid_: NIF, identificador
 Los 6 caracteres que el paciente usa para entrar al portal y ver su pasaporte. Lo genera el sistema.
 _Avoid_: Nº Historial, código de paciente, historial
 
-**Sense email / Sense DNI**:
-Marca de que el paciente confirmadamente no tiene ese dato. Es distinto de que el dato **falte** (vacío y sin marcar), que significa que aún no se ha rellenado.
+**Sense email**:
+Marca de que el paciente no tiene email. Es distinto de que el email **falte** (vacío y sin marcar), que significa que aún no se ha rellenado.
 _Avoid_: email vacío como sinónimo de "no tiene"
+
+**Sense DNI**:
+Marca de que **no tenemos** el DNI del paciente (porque no lo tiene o porque nunca nos llegó, como los pacientes importados de Quartup). No se pide mientras esté marcada; si el DNI llega, se pone y la marca desaparece.
+
+**Ficha**:
+Todo lo que la hoja tiene de un paciente bajo un mismo Codi d'accés. Una persona debería tener una sola ficha.
+
+**Unir fichas**:
+Cuando dos fichas resultan ser la misma persona (típicamente, una importada con su Cuenta Quartup y otra dada de alta por la Auxiliar con el DNI), se convierten en una sola. Se queda el Codi d'accés que el paciente ya ha recibido, y el otro deja de existir.
+_Avoid_: fusionar pacientes, duplicado
 
 ## Pasaporte
 
