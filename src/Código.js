@@ -1989,7 +1989,7 @@ function actualizarEmailsDesdeQuartup() {
 // que siempre convierte el servidor: así los tres son iguales por construcción (ADR 0004).
 
 // Disposición elegida por el usuario viendo PDFs reales (S5, paso 1).
-const VARIANT_PASAPORT = 'A';
+const VARIANT_PASAPORT = 'C';
 const LOGO_PASAPORT_URL = 'https://i.postimg.cc/tTX6JQ42/DR-PI-ESTELLER.png';
 
 /** Incluye un archivo HTML (sin scriptlets) en una plantilla: <?!= include_('VistaPrevia') ?>. */

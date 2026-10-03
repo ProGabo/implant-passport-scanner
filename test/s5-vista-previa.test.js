@@ -178,5 +178,5 @@ test('generarPasaportePDF_ (adjunto del avís) mantiene su firma y usa el mismo 
   const b = ctx.generarPasaportePDF_('ABC234');
   assert.equal(b.getName(), 'Pasaporte_Àngels_Núñez.pdf');
   assert.match(b.getBytes(), /Registro de Implantes Colocados/);
-  assert.match(b.getBytes(), /<b>Pilar:<\/b> Multi-unit/);
+  assert.match(b.getBytes(), /Multi-unit/);
 });
