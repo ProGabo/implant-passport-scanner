@@ -64,6 +64,12 @@ The interesting engineering lives in `src/ScanEngine.js` and `test/`:
   Authorization failures are rethrown so the UI can show re-auth instructions —
   this distinction was learned the hard way when an OAuth-scope change was
   mislabeled as a quota error in production.
+- **Multi-visit records.** Implants whose abutment comes at a 2nd visit are flagged
+  "Pendent" by staff (the scanner only suggests it). The row turns orange via
+  conditional formatting, a live "Pendents" tab lists them, and a "Completar i enviar"
+  side panel completes the selected row and re-sends the passport. Saving and the
+  passport preview share one pure plan (`PacientModel.planificarDesat`), so the preview
+  always matches what gets written.
 - **Self-diagnosis in production.** A "🩺 Comprobar escáner" menu checks each layer
   (permissions, keys, Gemini, OpenRouter) with per-layer fix instructions. On its
   first run it caught a real bug: a stale API key in Script Properties returning 401.

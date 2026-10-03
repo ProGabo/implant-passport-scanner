@@ -65,6 +65,19 @@ _Avoid_: healing cap (en la interfaz)
 El implante no lleva pilar. Sustituye al antiguo "NO". No es lo mismo que el pilar vacío, que quiere decir que aún no se sabe.
 _Avoid_: NO, No
 
+## Ciclo de vida de la ficha
+
+**Pendent**:
+Un implante al que aún le falta algún dato o una modificación, típicamente el pilar definitivo que se pone en la 2ª visita. Lo marca la Auxiliar; no se deduce de los datos: un pilar vacío no implica pendent (a veces no se pone), y el sistema como mucho lo propone. Mientras está marcado, su fila se ve en naranja. Es interno: el paciente nunca lo ve, salvo como "pilar pendiente de colocar" cuando además el pilar está vacío.
+_Avoid_: pendiente (en la interfaz interna), incompleto, borrador
+
+**Què falta**:
+Nota opcional y breve, interna, de lo que espera un implante Pendent ("canvi de pilars en 4 mesos").
+
+**Completar**:
+Rellenar en la 2ª visita lo que le faltaba a un implante Pendent, directamente en su fila o con el panel "Completar i enviar", sin volver a escanear la ficha. Al completar, deja de ser Pendent.
+_Avoid_: editar la ficha, reescanear
+
 ## Envíos
 
 **Avís a la secretària**:
