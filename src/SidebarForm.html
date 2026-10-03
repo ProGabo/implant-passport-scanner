@@ -710,6 +710,9 @@
 
         patientSection.classList.remove('hidden');
 
+        // Paciente nuevo en pantalla: "Avisar la secretària" vuelve a su valor por defecto.
+        avisSecretariaGrup.classList.add('hidden');
+
         if (res.found) {
             const d = res.data;
             pacienteActual = d;

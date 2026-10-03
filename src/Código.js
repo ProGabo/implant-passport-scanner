@@ -64,6 +64,18 @@ function showSidebar() {
 //  ACCESO A LA HOJA (siempre por cabecera, vía PacientModel)
 // ==========================================
 
+/**
+ * Las funciones del panel y del menú son solo para el personal. El web app del portal es
+ * anónimo y se ejecuta como quien lo despliega, y desde su página cualquiera podría llamar
+ * con google.script.run a cualquier función global sin "_" final: ahí no hay email de
+ * usuario, y en el panel o el menú sí (los ejecuta la propia cuenta, autorizada).
+ */
+function exigirUsuariIntern_() {
+  if (!Session.getActiveUser().getEmail()) {
+    throw new Error("No s'ha pogut identificar el teu compte de Google. Obre el menú 'Pasaport Implantològic 🦷', prem '🔑 Autoritzar el meu compte' i torna-ho a provar.");
+  }
+}
+
 function hojaPacientes() {
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SHEET_NAME);
   if (!sheet) throw new Error("No existeix la pestanya '" + SHEET_NAME + "'.");
@@ -141,6 +153,7 @@ function ahoraMs() {
  * @returns {{ok, found, data?, encontradoPor?, message?}}
  */
 function buscarPacient(termino) {
+  exigirUsuariIntern_();
   try {
     const busca = String(termino || '').trim();
     if (!busca) return { ok: true, found: false };
@@ -189,6 +202,7 @@ function buscarPacient(termino) {
  * @returns {{ok, lliure, altre?: {codi_acces, nombre, dni, n_implants}}}
  */
 function comprovarCuenta(cuenta, codiPropi) {
+  exigirUsuariIntern_();
   try {
     const c = String(cuenta || '').trim();
     if (PacientModel.classificarIdentificador(c) !== 'cuenta') return { ok: true, lliure: true };
@@ -221,6 +235,7 @@ function escribirColumnasPaciente(sheet, headers, files) {
  * (el que el paciente ya ha recibido) y los datos se completan entre las dos.
  */
 function fusionarPacients(codiQueQueda, codiQueMarxa) {
+  exigirUsuariIntern_();
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -243,6 +258,7 @@ function fusionarPacients(codiQueQueda, codiQueMarxa) {
  * que no es la misma persona (su Cuenta estaba mal). Vacía = se le quita.
  */
 function corregirCuenta(codi, novaCuenta) {
+  exigirUsuariIntern_();
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -266,7 +282,7 @@ function corregirCuenta(codi, novaCuenta) {
  * solo la lista blanca de PortalModel: nunca email, Cuenta ni DNI completo.
  * @returns {{ok, found, codi_acces?, implantes?, ambigu?, message?}}
  */
-function getPatientDataVerbose(code) {
+function getPatientDataVerbose_(code) {
   try {
     const { objetos } = leerPacientes(hojaPacientes());
     const r = PortalModel.resoldreCodi(code, objetos.map(o => o.codi_acces));
@@ -282,7 +298,7 @@ function getPatientDataVerbose(code) {
     return { ok: true, found: true, codi_acces: String(r.codi).trim().toUpperCase(), implantes: implantes };
 
   } catch (err) {
-    Logger.log('ERROR en getPatientDataVerbose: ' + err);
+    Logger.log('ERROR en getPatientDataVerbose_: ' + err);
     return { ok: false, message: 'No hemos podido consultar el pasaporte. Inténtelo de nuevo más tarde.' };
   }
 }
@@ -300,6 +316,7 @@ function getPatientDataVerbose(code) {
  *   email, sense_email, dni, sense_dni, sendEmail ('true'|'false'), implantes: [] }
  */
 function saveNewImplant(formData) {
+  exigirUsuariIntern_();
   // Dos guardados a la vez podrían generar el mismo código o pisarse la última fila.
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
@@ -348,19 +365,19 @@ function saveNewImplant(formData) {
     ponerCasillas(sheet, headers, primera, filas.length);
 
     (formData.implantes || []).forEach(imp => {
-      updateCatalog({ marca: imp.marca, modelo: imp.modelo, conexion: imp.conexion });
+      updateCatalog_({ marca: imp.marca, modelo: imp.modelo, conexion: imp.conexion });
     });
 
     let emailStatus = { ok: true };
     const enviar = formData.sendEmail === 'true' && !senseEmail;
     if (enviar) {
-      emailStatus = sendPassportEmail(paciente.email, paciente.nombre, paciente.codi_acces);
+      emailStatus = sendPassportEmail_(paciente.email, paciente.nombre, paciente.codi_acces);
     }
 
     // Sin email, la Secretària hace llegar el codi (casilla marcada por defecto en el panel).
     let avisSecretaria = null;
     if (senseEmail && formData.avisSecretaria === 'true') {
-      const r = enviarAvisSecretaria(paciente);
+      const r = enviarAvisSecretaria_(paciente);
       avisSecretaria = { enviat: r.ok, error: r.ok ? null : r.message };
     }
 
@@ -443,7 +460,7 @@ const FULL_REGISTRE = "Registre d'enviaments";
  * el Registre d'enviaments.
  * @returns {{ok: boolean, message?: string}}
  */
-function enviarEmail(tipus, codi, destinatari, assumpte, text, html, extres) {
+function enviarEmail_(tipus, codi, destinatari, assumpte, text, html, extres) {
   try {
     GmailApp.sendEmail(destinatari, assumpte, text, Object.assign({
       htmlBody: html,
@@ -451,16 +468,16 @@ function enviarEmail(tipus, codi, destinatari, assumpte, text, html, extres) {
       from: EMAIL_REMITENT,
       replyTo: EMAIL_SECRETARIA
     }, extres || {}));
-    registrarEnviament(tipus, codi, destinatari, true, '');
+    registrarEnviament_(tipus, codi, destinatari, true, '');
     return { ok: true };
   } catch (e) {
     Logger.log('ERROR enviant (' + tipus + ') a ' + destinatari + ': ' + e);
-    registrarEnviament(tipus, codi, destinatari, false, String(e && e.message || e));
-    return { ok: false, message: explicarErrorEnviament(e) };
+    registrarEnviament_(tipus, codi, destinatari, false, String(e && e.message || e));
+    return { ok: false, message: explicarErrorEnviament_(e) };
   }
 }
 
-function explicarErrorEnviament(e) {
+function explicarErrorEnviament_(e) {
   const m = String(e && e.message || e);
   if (/too many times|limit|quota/i.test(m)) return "S'ha arribat al límit diari d'emails de Google. Torna-ho a provar demà.";
   if (/invalid email|invalid argument/i.test(m)) return "L'adreça d'email no és vàlida.";
@@ -471,7 +488,7 @@ function explicarErrorEnviament(e) {
  * Apunta un envío en la pestaña "Registre d'enviaments" (la crea si no existe). Nunca
  * hace fallar el envío: si no se puede apuntar, solo queda en el log.
  */
-function registrarEnviament(tipus, codi, destinatari, ok, detall) {
+function registrarEnviament_(tipus, codi, destinatari, ok, detall) {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     let sheet = ss.getSheetByName(FULL_REGISTRE);
@@ -482,7 +499,8 @@ function registrarEnviament(tipus, codi, destinatari, ok, detall) {
       sheet.setFrozenRows(1);
     }
     const fila = sheet.getLastRow() + 1;
-    sheet.getRange(fila, 3).setNumberFormat('@');
+    // Texto: un destinatario o un error que empiece por "=" no debe convertirse en fórmula.
+    sheet.getRange(fila, 2, 1, 5).setNumberFormat('@');
     sheet.getRange(fila, 1, 1, 6).setValues([[new Date(), tipus, String(codi || ''), String(destinatari || ''), ok ? 'OK' : 'ERROR', String(detall || '')]]);
   } catch (e) {
     Logger.log('No es pot escriure al registre d\'enviaments: ' + e);
@@ -495,9 +513,9 @@ function registrarEnviament(tipus, codi, destinatari, ok, detall) {
  * @param {string} patientName - El nombre del paciente.
  * @param {string} patientCode - El código único del paciente.
  */
-function sendPassportEmail(recipientEmail, patientName, patientCode) {
+function sendPassportEmail_(recipientEmail, patientName, patientCode) {
   if (!recipientEmail || recipientEmail.indexOf('@') === -1) {
-    registrarEnviament('pasaport', patientCode, recipientEmail, false, 'Email no vàlid');
+    registrarEnviament_('pasaport', patientCode, recipientEmail, false, 'Email no vàlid');
     return { ok: false, message: 'Email no vàlid.' };
   }
 
@@ -542,7 +560,7 @@ function sendPassportEmail(recipientEmail, patientName, patientCode) {
     'Guarde este código en un lugar seguro. Si tiene alguna duda, puede responder a este correo.\n\n' +
     'Atentamente,\nEl equipo de la Clínica Drs. Pi y Esteller';
 
-  return enviarEmail('pasaport', patientCode, recipientEmail, subject, bodyText, bodyHtml);
+  return enviarEmail_('pasaport', patientCode, recipientEmail, subject, bodyText, bodyHtml);
 }
 
 /**
@@ -550,7 +568,7 @@ function sendPassportEmail(recipientEmail, patientName, patientCode) {
  * reenviar (botón de WhatsApp) y el pasaporte en PDF para imprimir.
  * @param {{codi_acces, nombre, cuenta_quartup, dni}} paciente
  */
-function enviarAvisSecretaria(paciente) {
+function enviarAvisSecretaria_(paciente) {
   const a = PortalModel.avisSecretaria({
     nombre: paciente.nombre,
     cuenta_quartup: paciente.cuenta_quartup,
@@ -559,12 +577,12 @@ function enviarAvisSecretaria(paciente) {
   });
   let adjunts = [];
   try {
-    adjunts = [generarPasaportePDF(paciente.codi_acces)];
+    adjunts = [generarPasaportePDF_(paciente.codi_acces)];
   } catch (e) {
     // Sin PDF el aviso sigue siendo útil: el codi y el enlace bastan.
     Logger.log('No s\'ha pogut generar el PDF per a ' + paciente.codi_acces + ': ' + e);
   }
-  return enviarEmail('avís secretària', paciente.codi_acces, EMAIL_SECRETARIA, a.assumpte, a.text, a.html,
+  return enviarEmail_('avís secretària', paciente.codi_acces, EMAIL_SECRETARIA, a.assumpte, a.text, a.html,
     { attachments: adjunts, replyTo: EMAIL_REMITENT });
 }
 
@@ -573,8 +591,8 @@ function enviarAvisSecretaria(paciente) {
  * el portal (lista blanca, DNI enmascarado). S5 lo convertirá en el renderer único.
  * @returns {Blob}
  */
-function generarPasaportePDF(codi) {
-  const dades = getPatientDataVerbose(codi);
+function generarPasaportePDF_(codi) {
+  const dades = getPatientDataVerbose_(codi);
   if (!dades.ok || !dades.found) throw new Error('No hi ha implants per al codi ' + codi);
   const pacient = dades.implantes[0];
   const avui = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy');
@@ -584,7 +602,7 @@ function generarPasaportePDF(codi) {
 }
 
 /** Primera vez que salta el límite del portal: aviso al responsable (ALERT_EMAIL). */
-function avisarLimitPortal() {
+function avisarLimitPortal_() {
   const desti = PropertiesService.getScriptProperties().getProperty('ALERT_EMAIL');
   if (!desti) {
     Logger.log('Límit del portal assolit, però no hi ha ALERT_EMAIL a les propietats.');
@@ -595,7 +613,7 @@ function avisarLimitPortal() {
     `${l.finestraSegons / 60} minutos y se ha pausado ${l.pausaSegons / 60} minutos.\n\n` +
     'Puede ser alguien probando códigos al azar. Si se repite cada día, conviene revisarlo.\n' +
     `No se volverá a avisar en las próximas ${l.avisSegons / 3600} horas.`;
-  enviarEmail('alerta', '', desti, 'Aviso: intentos fallidos en el portal del Pasaporte', text,
+  enviarEmail_('alerta', '', desti, 'Aviso: intentos fallidos en el portal del Pasaporte', text,
     '<p>' + PortalModel.escapar(text).replace(/\n/g, '<br>') + '</p>');
 }
 
@@ -607,6 +625,7 @@ function avisarLimitPortal() {
  * Obtiene las opciones únicas de Marca, Modelo y Conexión del catálogo.
  */
 function getImplantOptions() {
+  exigirUsuariIntern_();
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = ss.getSheetByName(CATALOG_SHEET_NAME);
@@ -682,7 +701,7 @@ function getImplantOptions() {
  * Si la Marca ya existe, no la añade, aunque el modelo sea nuevo.
  * Compacta las columnas para que no queden huecos vacíos.
  */
-function updateCatalog(newItem) {
+function updateCatalog_(newItem) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   let sheet = ss.getSheetByName(CATALOG_SHEET_NAME);
   
@@ -747,10 +766,20 @@ function updateCatalog(newItem) {
 
 const MENSAJE_PAUSA = 'Demasiados intentos. Por favor, inténtelo de nuevo en unos minutos o contacte con la clínica.';
 
-/** Cuenta un intento fallido del portal y, si es la primera vez que salta el límite, avisa. */
-function contarIntentoFallido() {
-  const r = PortalModel.registrarIntentFallit(CacheService.getScriptCache(), ahoraMs());
-  if (r.nouAvis) avisarLimitPortal();
+/**
+ * Cuenta un intento fallido del portal y, si es la primera vez que salta el límite, avisa.
+ * Con lock: sin él, peticiones en paralelo leerían el mismo contador y se perderían fallos.
+ */
+function contarIntentoFallido_() {
+  const lock = LockService.getScriptLock();
+  const bloquejat = lock.tryLock(3000);
+  let r;
+  try {
+    r = PortalModel.registrarIntentFallit(CacheService.getScriptCache(), ahoraMs());
+  } finally {
+    if (bloquejat) lock.releaseLock();
+  }
+  if (r.nouAvis) avisarLimitPortal_();
   return r;
 }
 
@@ -768,10 +797,16 @@ function retrieveCodeByEmail(patientEmail) {
   const RESPUESTA = { ok: true, message: "Si el email está registrado, en unos minutos recibirá su código. Revise también la carpeta de correo no deseado." };
 
   try {
-    if (PortalModel.estaPausat(CacheService.getScriptCache())) return { ok: false, message: MENSAJE_PAUSA };
-    contarIntentoFallido();
+    const cache = CacheService.getScriptCache();
+    if (PortalModel.estaPausat(cache)) return { ok: false, message: MENSAJE_PAUSA };
+    contarIntentoFallido_();
 
     const email = String(patientEmail).trim().toLowerCase();
+    // Como mucho un envío cada 15 minutos a la misma dirección: nadie puede llenar el
+    // buzón de un paciente ni gastar la cuota diaria de emails de la clínica.
+    const clauEmail = 'RECUPERACIO_' + email.slice(0, 200);
+    if (cache.get(clauEmail)) return RESPUESTA;
+    cache.put(clauEmail, '1', 900);
     const { objetos } = leerPacientes(hojaPacientes());
     // Una familia puede compartir email: se envían todos sus códigos.
     const pacientes = PacientModel.pacientsUnics(objetos.filter(o => String(o.email).trim().toLowerCase() === email));
@@ -795,7 +830,7 @@ function retrieveCodeByEmail(patientEmail) {
       'Puede consultar su pasaporte en ' + PortalModel.URL_PORTAL + '\n\n' +
       'Si no ha solicitado este código, puede ignorar este correo.';
 
-    enviarEmail('recuperació', pacientes.map(p => p.codi_acces).join(', '), email,
+    enviarEmail_('recuperació', pacientes.map(p => p.codi_acces).join(', '), email,
       'Recuperación de su código de acceso al Pasaporte Implantológico', text, html);
     return RESPUESTA;
 
@@ -814,11 +849,15 @@ function initiateLogin(patientCode) {
   try {
     if (PortalModel.estaPausat(CacheService.getScriptCache())) return { ok: false, message: MENSAJE_PAUSA };
 
-    const datos = getPatientDataVerbose(patientCode);
+    const datos = getPatientDataVerbose_(patientCode);
     if (!datos.ok) return { ok: false, message: datos.message };
-    if (datos.ambigu) return { ok: false, message: datos.message };
+    if (datos.ambigu) {
+      // También cuenta: si no, servir de pista gratis para quien prueba códigos.
+      const r = contarIntentoFallido_();
+      return { ok: false, message: r.pausat ? MENSAJE_PAUSA : datos.message };
+    }
     if (!datos.found) {
-      const r = contarIntentoFallido();
+      const r = contarIntentoFallido_();
       return { ok: false, message: r.pausat ? MENSAJE_PAUSA : 'Código no encontrado. Revise que esté bien escrito (son 6 caracteres).' };
     }
     return { ok: true, codi_acces: datos.codi_acces, implantes: datos.implantes };
@@ -841,7 +880,7 @@ const OPENROUTER_API_KEY = PropertiesService.getScriptProperties().getProperty('
  * Synchronous httpFetch adapter ScanEngine's providers call instead of UrlFetchApp
  * directly, keeping ScanEngine.js itself GAS-agnostic.
  */
-function gasHttpFetch(url, options) {
+function gasHttpFetch_(url, options) {
   const params = { method: (options.method || 'get'), muteHttpExceptions: true };
   if (options.headers) {
     const headers = Object.assign({}, options.headers);
@@ -861,11 +900,12 @@ function gasHttpFetch(url, options) {
 }
 
 function processImplantFile(data, filename) {
+  exigirUsuariIntern_();
   try {
     const { mimeType, base64Data } = ScanEngine.parseDataUrl(data);
 
     return ScanEngine.scanPassport(base64Data, mimeType, {
-      httpFetch: gasHttpFetch,
+      httpFetch: gasHttpFetch_,
       geminiApiKey: GEMINI_API_KEY,
       openRouterApiKey: OPENROUTER_API_KEY
     });
@@ -887,6 +927,7 @@ const MENSAJE_REAUTORIZAR = "Aquest compte de Google encara no té autoritzats e
  * antiguo mensaje genérico de "límite alcanzado".
  */
 function comprobarTodo() {
+  exigirUsuariIntern_();
   const lineas = [];
 
   // Nota: aquí no se consulta ScriptApp.getAuthorizationInfo(). Llegar a ejecutar esta
@@ -905,7 +946,7 @@ function comprobarTodo() {
 
   let permisosOk = true;
   try {
-    gasHttpFetch('https://www.google.com', { method: 'get' });
+    gasHttpFetch_('https://www.google.com', { method: 'get' });
     lineas.push("✅ Permisos d'aquest compte: OK");
   } catch (e) {
     permisosOk = false;
@@ -922,7 +963,7 @@ function comprobarTodo() {
   if (permisosOk) {
     if (GEMINI_API_KEY) {
       try {
-        const res = gasHttpFetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + GEMINI_API_KEY.trim(), { method: 'get' });
+        const res = gasHttpFetch_('https://generativelanguage.googleapis.com/v1beta/models?key=' + GEMINI_API_KEY.trim(), { method: 'get' });
         if (res.status === 200) lineas.push("✅ Gemini: respon correctament");
         else if (res.status === 429) lineas.push("⚠️ Gemini: límit diari assolit (HTTP 429). L'escàner farà servir OpenRouter fins demà.");
         else lineas.push("❌ Gemini: error HTTP " + res.status + ". Avisa en Gabriel.");
@@ -932,7 +973,7 @@ function comprobarTodo() {
     }
     if (OPENROUTER_API_KEY) {
       try {
-        const res = gasHttpFetch('https://openrouter.ai/api/v1/key', {
+        const res = gasHttpFetch_('https://openrouter.ai/api/v1/key', {
           method: 'get',
           headers: { 'Authorization': 'Bearer ' + OPENROUTER_API_KEY.trim() }
         });
@@ -947,14 +988,14 @@ function comprobarTodo() {
     lineas.push("⏭️ Gemini i OpenRouter: no comprovats (primer arregla els permisos de dalt).");
   }
 
-  lineas.push(diagnosticCodis());
-  lineas.push(diagnosticRebots());
+  lineas.push(diagnosticCodis_());
+  lineas.push(diagnosticRebots_());
 
   SpreadsheetApp.getUi().alert("Diagnòstic", lineas.join("\n\n"), SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 /** Codis d'accés que el paciente no podría usar bien: convertidos a número, mal de largo o que chocan. */
-function diagnosticCodis() {
+function diagnosticCodis_() {
   try {
     const { objetos } = leerPacientes(hojaPacientes());
     const r = PortalModel.analitzarCodis(objetos.map(o => o.codi_acces), ['DEMO2026']);
@@ -971,7 +1012,7 @@ function diagnosticCodis() {
 }
 
 /** Emails rebotados en los últimos 30 días, en el Gmail de la cuenta que ejecuta el diagnóstico. */
-function diagnosticRebots() {
+function diagnosticRebots_() {
   try {
     const fils = GmailApp.search('from:(mailer-daemon OR postmaster) newer_than:30d', 0, 50);
     const adreces = {};
@@ -981,7 +1022,8 @@ function diagnosticRebots() {
       if (!llista.length) {
         const cos = String(m.getPlainBody() || '');
         const trobat = cos.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [];
-        llista = trobat.filter(a => !/mailer-daemon|postmaster|googlemail\.com$|google\.com$/i.test(a));
+        const propies = [EMAIL_REMITENT, EMAIL_SECRETARIA, Session.getActiveUser().getEmail()].map(a => String(a).toLowerCase());
+        llista = trobat.filter(a => !/mailer-daemon|postmaster|googlemail\.com$|google\.com$/i.test(a) && propies.indexOf(a.toLowerCase()) === -1);
       }
       llista.filter(Boolean).forEach(a => { adreces[a.toLowerCase()] = true; });
     }));
@@ -1005,6 +1047,7 @@ function comprobarEscaner() {
  * posiciones candidatas en el futuro. Llamado fire-and-forget desde el sidebar.
  */
 function registrarDuda(n) {
+  exigirUsuariIntern_();
   const props = PropertiesService.getScriptProperties();
   const actual = parseInt(props.getProperty('SCAN_DOUBT_COUNT'), 10) || 0;
   props.setProperty('SCAN_DOUBT_COUNT', String(actual + (parseInt(n, 10) || 1)));
@@ -1045,6 +1088,7 @@ function forzarPermisosPDF() {
  * depende de la posición de ninguna columna.
  */
 function eliminarDuplicados() {
+  exigirUsuariIntern_();
   const sheet = hojaPacientes();
   const range = sheet.getDataRange();
   const filasAntes = range.getNumRows();
@@ -1066,6 +1110,7 @@ const NOTA_UNIR = "Si la Cuenta ja és d'una altra fitxa i és la MATEIXA person
  * los pacientes que necesitan su Cuenta Quartup. Antes hace una copia de la pestaña.
  */
 function migrarDadesS2() {
+  exigirUsuariIntern_();
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = hojaPacientes();
@@ -1165,6 +1210,7 @@ function crearHojaRevision(ss, revisio) {
  * paciente. Valida formato y unicidad, y deja el resultado en la columna "Resultat".
  */
 function aplicarCuentesRevisio() {
+  exigirUsuariIntern_();
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const hojaRev = ss.getSheetByName(HOJA_REVISION);
@@ -1232,6 +1278,7 @@ function aplicarCuentesRevisio() {
  * pide. Si más adelante llega (p. ej. de Quartup), al ponerlo se desmarca.
  */
 function marcarSenseDniMenu() {
+  exigirUsuariIntern_();
   const ui = SpreadsheetApp.getUi();
   const sheet = hojaPacientes();
   let previa;
@@ -1274,6 +1321,7 @@ function marcarSenseDniMenu() {
  * "Sense email" de quien lo recibe. Base del futuro cruce automático de Cuentes.
  */
 function actualizarEmailsDesdeQuartup() {
+  exigirUsuariIntern_();
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheetQuartup = ss.getSheetByName("EmailsQuartup");

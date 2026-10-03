@@ -326,17 +326,6 @@
         return implantes;
       }
 
-      // --- RESET VIEW ---
-      window.resetView = function(e) {
-        if(e) e.preventDefault();
-        step1.style.display = 'block';
-        forgotLink.style.display = 'block';
-        status.innerHTML = '';
-        resultArea.innerHTML = '';
-        downloadAction.style.display = 'none';
-        currentPatientCode = '';
-      };
-
       // --- RENDER WEB ---
       function renderMultiImplantView(implantes) {
         if (!implantes || implantes.length === 0) return '';
@@ -414,8 +403,9 @@
         fields.forEach(f => {
             let val = imp[f.key] || imp[f.key.replace(/_/g,'')] || '';
             
-            // Si es fecha, formatear bonito en la vista web también
-            if (f.key === 'fecha_colocacion' && val) {
+            // Si es fecha, formatear bonito en la vista web también. Las que ya vienen como
+            // d/m/aaaa se dejan: new Date() las leería como m/d (3/10 -> 10 de marzo).
+            if (f.key === 'fecha_colocacion' && val && !/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(String(val).trim())) {
                  let d = new Date(val);
                  if(!isNaN(d.getTime())) val = d.toLocaleDateString('es-ES');
             }
@@ -503,7 +493,7 @@
           // Busca 'pilar', 'pilar transepitelial', etc.
           const pilar = findValueFuzzy(imp, ['pilar', 'pilartransepitelial', 'aditamentos']) || '-';
           
-          const refLote = `Ref: ${imp.cod_implante || '-'} <br> Lote: ${imp.lote || '-'}`;
+          const refLote = `Ref: ${escapeHtml(imp.cod_implante || '-')} <br> Lote: ${escapeHtml(imp.lote || '-')}`;
           
           // Busca la fecha con lupa
           const rawDate = findValueFuzzy(imp, ['fecha_de_colocacion', 'fechadecolocacion', 'fecha', 'fechaColocacion']);

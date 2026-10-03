@@ -109,12 +109,16 @@ function cargarCodigo(ss, opts) {
       newDataValidation: () => ({ requireCheckbox() { return this; }, build() { return 'checkbox'; } })
     },
     PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), setProperty() {} }) },
-    LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
+    LockService: { getScriptLock: () => ({ waitLock() {}, tryLock() { return true; }, releaseLock() {} }) },
     Utilities: {
       formatDate: () => '2026-10-03 10.00',
       newBlob: (contingut, tipus, nom) => ({ contingut, tipus, nom, getAs: t => ({ tipus: t, nom, contingut, setName(n) { this.nom = n; return this; } }) })
     },
-    Session: { getScriptTimeZone: () => 'Europe/Madrid' },
+    Session: {
+      getScriptTimeZone: () => 'Europe/Madrid',
+      // Panel y menú: la cuenta de la clínica. Visitante anónimo del web app: '' (opts.usuari).
+      getActiveUser: () => ({ getEmail: () => ('usuari' in o ? o.usuari : 'clinicapiesteller@gmail.com') })
+    },
     GmailApp: {
       sendEmail: (to, subject, body, options) => {
         if (o.gmailFalla) throw new Error(o.gmailFalla);
@@ -289,7 +293,7 @@ test('el portal recibe solo la lista blanca: ni email ni Cuenta, DNI enmascarado
   const { ctx } = cargarCodigo(ss);
   ctx.migrarDadesS2();
 
-  const datos = ctx.getPatientDataVerbose('aaa111');
+  const datos = ctx.getPatientDataVerbose_('aaa111');
   assert.equal(datos.found, true);
   const p = datos.implantes[0];
   assert.equal(p.nombre, 'Pere Vila');
@@ -298,7 +302,7 @@ test('el portal recibe solo la lista blanca: ni email ni Cuenta, DNI enmascarado
   ['email', 'cuenta_quartup', 'dni', 'sense_email', 'sense_dni'].forEach(k => assert.equal(k in p, false, k));
   assert.equal('dni_parcial' in p, false, 'Pere no tiene DNI');
 
-  const maria = ctx.getPatientDataVerbose('BBB222').implantes[0];
+  const maria = ctx.getPatientDataVerbose_('BBB222').implantes[0];
   assert.equal(maria.dni_parcial, '***4567**');
 });
 
@@ -492,10 +496,59 @@ test('comprobarTodo lista los códigos rotos y los rebotes', () => {
   assert.match(text, /anna@hotmail\.com/);
 });
 
+test('visitante anónimo del web app: el portal funciona, el panel y el menú no', () => {
+  const ss = libroAntiguo();
+  const { ctx: intern } = cargarCodigo(ss);
+  intern.migrarDadesS2();
+  const { ctx, sent } = cargarCodigo(ss, { usuari: '' });
+
+  assert.equal(ctx.initiateLogin('AAA111').ok, true);
+  assert.equal(ctx.retrieveCodeByEmail('pere@x.cat').ok, true);
+
+  const nuevo = { codi_acces: 'GENERAR', cuenta_quartup: '43000999', nombre: 'X', email: 'x@x.cat', sense_email: false,
+    dni: '', sense_dni: true, sendEmail: 'true', implantes: [IMPLANT] };
+  [
+    () => ctx.buscarPacient('43000001'),
+    () => ctx.comprovarCuenta('43000001', 'GENERAR'),
+    () => ctx.saveNewImplant(nuevo),
+    () => ctx.fusionarPacients('BBB222', 'AAA111'),
+    () => ctx.corregirCuenta('AAA111', ''),
+    () => ctx.getImplantOptions(),
+    () => ctx.processImplantFile('data:image/png;base64,AAAA', 'x.png'),
+    () => ctx.migrarDadesS2(),
+    () => ctx.aplicarCuentesRevisio(),
+    () => ctx.marcarSenseDniMenu(),
+    () => ctx.eliminarDuplicados(),
+    () => ctx.comprobarTodo(),
+    () => ctx.registrarDuda(1)
+  ].forEach(f => assert.throws(f, /identificar el teu compte/));
+  assert.equal(sent.length, 1, 'solo la recuperación de código');
+});
+
+test('las funciones internas no se pueden llamar desde el portal (terminan en "_")', () => {
+  const { ctx } = cargarCodigo(libroAntiguo());
+  ['getPatientDataVerbose', 'sendPassportEmail', 'enviarAvisSecretaria', 'generarPasaportePDF', 'enviarEmail',
+    'registrarEnviament', 'gasHttpFetch', 'updateCatalog', 'contarIntentoFallido', 'avisarLimitPortal']
+    .forEach(n => {
+      assert.equal(typeof ctx[n], 'undefined', n + ' debe ser privada');
+      assert.equal(typeof ctx[n + '_'], 'function', n + '_');
+    });
+});
+
+test('recuperar código: como mucho un email cada 15 minutos a la misma dirección', () => {
+  const ss = libroAntiguo();
+  const { ctx, sent } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  ctx.retrieveCodeByEmail('pere@x.cat');
+  const r = ctx.retrieveCodeByEmail('PERE@x.cat');
+  assert.equal(r.ok, true);
+  assert.equal(sent.length, 1);
+});
+
 test('el código funciona también ANTES de migrar (cabeceras antiguas por alias)', () => {
   const ss = libroAntiguo();
   const { ctx } = cargarCodigo(ss);
-  assert.equal(ctx.getPatientDataVerbose('AAA111').implantes[0].nombre, 'Pere Vila');
+  assert.equal(ctx.getPatientDataVerbose_('AAA111').implantes[0].nombre, 'Pere Vila');
   assert.equal(ctx.buscarPacient('43000001').data.codi_acces, 'AAA111');
   assert.equal(ctx.initiateLogin('BBB222').ok, true);
 });
@@ -525,8 +578,8 @@ test('fusionarPacients deja una sola ficha con el codi del DNI y el portal ve to
   const objs = objetosDe(ctx, sheet);
   assert.ok(objs.every(o => o.codi_acces === 'BBB222' && o.cuenta_quartup === '43000001' && o.dni === '12345678Z'));
   assert.equal(sheet.formats.get('2,2'), '@', 'la Cuenta sigue como texto');
-  assert.equal(ctx.getPatientDataVerbose('BBB222').implantes.length, 3);
-  assert.equal(ctx.getPatientDataVerbose('AAA111').found, false);
+  assert.equal(ctx.getPatientDataVerbose_('BBB222').implantes.length, 3);
+  assert.equal(ctx.getPatientDataVerbose_('AAA111').found, false);
   assert.equal(ctx.buscarPacient('43000001').data.codi_acces, 'BBB222');
 });
 
