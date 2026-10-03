@@ -13,8 +13,8 @@ El documento de identidad del paciente (DNI o NIE). Siempre acaba en letra. Es u
 _Avoid_: NIF, identificador
 
 **Codi d'accés**:
-Los 6 caracteres que el paciente usa para entrar al portal y ver su pasaporte. Lo genera el sistema.
-_Avoid_: Nº Historial, código de paciente, historial
+Los 6 caracteres que el paciente usa para entrar al portal y ver su pasaporte. Lo genera el sistema. Basta él solo para entrar: no hay segundo código por email.
+_Avoid_: Nº Historial, código de paciente, historial, PIN
 
 **Sense email**:
 Marca de que el paciente no tiene email. Es distinto de que el email **falte** (vacío y sin marcar), que significa que aún no se ha rellenado.
@@ -38,6 +38,19 @@ _Avoid_: informe, ficha (en la interfaz del paciente)
 
 **Implante**:
 Una pieza colocada en una posición dental. En la hoja, cada fila es un implante, y los datos del paciente se repiten en todas sus filas.
+
+**DNI parcial**:
+El DNI con la mayoría de cifras tapadas (`***4567**`) que el paciente ve en el portal y en el pasaporte, para reconocerse. El DNI completo nunca sale hacia el paciente.
+
+## Envíos
+
+**Avís a la secretària**:
+El email que recibe la Secretària cuando se guarda un paciente Sense email: quién es, el mensaje ya escrito para reenviárselo (por WhatsApp) y el pasaporte en PDF para imprimir.
+_Avoid_: notificación, aviso WhatsApp
+
+**Registre d'enviaments**:
+La pestaña de la hoja donde queda cada email enviado o fallido (pasaporte, recuperación de código, avís a la secretària, alerta). Sirve para responder a "a este paciente no le ha llegado".
+_Avoid_: log
 
 ## Personas
 

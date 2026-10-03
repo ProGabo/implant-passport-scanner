@@ -72,3 +72,33 @@ a pulsar **💾 Desar-ho tot**.
 Menú **Pasaport Implantològic 🦷** → **🩺 Comprovar-ho tot**. Sale una lista con un ✅ o un ❌
 por cada parte del sistema. Manda una captura de esa lista a Gabriel: con eso se sabe qué
 falla sin tener que adivinar.
+
+---
+
+## 3. El paciente y su pasaporte
+
+### Cómo entra el paciente
+
+Solo con su **Codi d'accés** (6 caracteres), sin ningún segundo código por email. Para
+comprobar que un código funciona, basta con abrir el portal y escribirlo. Da igual si el
+paciente confunde la O con el 0 o la I con el 1: el portal lo entiende.
+
+### Paciente sin email
+
+Al marcar **Sense email** aparece la casilla **Avisar la secretària**, ya marcada. Al pulsar
+**💾 Desar-ho tot**, la secretaria recibe en `consulta@doctorpiurgell.com` un email con:
+
+- quién es el paciente (nombre, Cuenta Quartup y DNI), para encontrarlo en los contactos;
+- el mensaje ya escrito, con el código y el enlace, y un botón **Enviar per WhatsApp**: se
+  pulsa, se elige el contacto del paciente y se envía;
+- el pasaporte en **PDF**, por si se quiere imprimir.
+
+### "A este paciente no le ha llegado el email"
+
+1. Mira la pestaña **Registre d'enviaments** de la hoja: cada envío sale con su fecha, el
+   email y si fue **OK** o **ERROR**.
+2. Lanza **🩺 Comprovar-ho tot**: al final avisa de los emails que han **rebotado** en los
+   últimos 30 días (direcciones mal escritas o que no existen) y de los códigos que hay que
+   revisar.
+3. Si el email está bien y no llega, pídele que mire la carpeta de **correo no deseado**
+   (pasa a veces con Hotmail y Yahoo).

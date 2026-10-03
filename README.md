@@ -14,7 +14,7 @@ lot number or reference matter when an implant is ever recalled or retreated.
 This project replaces that transcription with a scanner: staff drop the scanned chart
 into a sidebar, a dual-model vision pipeline extracts every implant with its full
 data, staff review and save, and the patient gets a permanent online passport they
-can open with a personal code + emailed one-time PIN.
+can open with their personal access code (see [ADR 0003](docs/adr/0003-acceso-al-portal-solo-con-el-codi.md)).
 
 ![Synthetic sample scan](docs/synthetic-sample.png)
 
@@ -45,7 +45,7 @@ handwritten notes that carry the tooth position and placement date.*
         v
                          PATIENT SIDE
   clinic website -> Netlify page (web/) -> Apps Script web app (Index.html)
-  patient enters personal code -> OTP PIN sent by email -> implant passport
+  patient enters personal access code -> implant passport (whitelisted fields only)
 ```
 
 The interesting engineering lives in `src/ScanEngine.js` and `test/`:
@@ -109,9 +109,7 @@ Open a real passport right now, no setup:
    [`test/synthetic-2.pdf`](test/synthetic-2.pdf), the committed sample the
    scanner reads in the test harness.
 
-The demo patient has no email on file, so the portal skips the one-time-PIN
-step for it; real patients receive a 6-digit PIN by email before anything is
-shown.
+The demo patient works exactly like a real one: the access code alone opens the\npassport. The server only ever returns whitelisted fields (no email, no internal\nIDs, the national ID masked), and a global rate limit pauses the portal after\nrepeated wrong codes.
 
 ![Scan-to-portal demo](docs/demo-preview.gif)
 
