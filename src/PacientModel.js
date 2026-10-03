@@ -623,8 +623,8 @@ function crearPacientModel() {
       treure(/mult[iy]?\s*[-.]?\s*unit|mult[iy]?\s*[-.]?\s*u\b|\bmt\s*[-.]?\s*u\b|\bmiu\b|a cabeza( de implante)?|\+?\s*\bpc\b/ig);
     }
 
-    // Conexión: "hexagon externo", "hex. interna", "externa"...
-    const mCon = resta.match(/(?:hex[aà]?g?o?n?o?\.?\s*)?\b(extern|intern)[oa]?\b/i);
+    // Conexión: "hexagon externo", "hexágono interno", "conexión externa", "externa"...
+    const mCon = resta.match(/(?:\b(?:hex[a-záàé]*|con+exi[oó]n?)\.?\s*)?\b(extern|intern)[oa]?\b/i);
     if (mCon) {
       camps.pilar_conexion = /extern/i.test(mCon[1]) ? 'Externa' : 'Interna';
       treure(mCon[0]);
@@ -647,51 +647,143 @@ function crearPacientModel() {
     const mRef = resta.match(/\b(HE\s?\d{3,}[A-Z0-9-]*|[A-Z]{1,6}\d[A-Z0-9]*-[A-Z0-9-]+|[A-Z]{1,4}\d{3,}[A-Z0-9-]*|\d{4,}[A-Z0-9-]*)\b/i);
     if (mRef && !esPC) { camps.pilar_ref = mRef[1].replace(/\s+/g, '').toUpperCase(); treure(mRef[0]); }
     // El PC es provisional: ni su altura ni su REF son las del pilar.
+    const descartatPC = esPC && camps.pilar_altura !== undefined;
     if (esPC) delete camps.pilar_altura;
 
     // Posiciones: los dientes FDI que quedan sueltos ("25,26").
     const posicions = unics((resta.match(/\b[1-4][1-8]\b/g) || []).filter(p => RE_FDI.test(p)));
 
-    return { camps, posicions, quantitat, reconegut: Object.keys(camps).length > 0 };
+    // Lo que no se ha entendido (sin palabras de relleno ni puntuación). `complet` = todo
+    // el texto ha ido a algún campo y no se ha tirado nada: la migración solo toca esos.
+    const sobrant = resta.replace(/\b(de|del|pilar|ref)\b\.?/gi, ' ').replace(/[\s+,.;:()\/#-]+/g, ' ').trim();
+    const complet = Object.keys(camps).length > 0 && !sobrant && !descartatPC && quantitat === null;
+
+    return { camps, posicions, quantitat, reconegut: Object.keys(camps).length > 0, sobrant, complet };
+  }
+
+  /** "Multi-unit · 30º · 5 mm · Avinent · Externa · REF HE48865", para los resúmenes. */
+  function descriurePilar(camps) {
+    const c = camps || {};
+    return [c.pilar, c.pilar_angulacion && c.pilar_angulacion + 'º', c.pilar_altura && c.pilar_altura + ' mm',
+      c.pilar_marca, c.pilar_conexion, c.pilar_ref && 'REF ' + c.pilar_ref].filter(Boolean).join(' · ');
+  }
+
+  function textCela(v) {
+    return String(v === undefined || v === null ? '' : v).trim();
   }
 
   /**
-   * Plan puro de la migración del pilar (S4): "NO" / "No" -> "Sin pilar";
-   * "Multi-unit 3 mm" -> tipo "Multi-unit" + alçada 3 (si la alçada estaba vacía).
-   * Vacío no se toca (puede ser que aún no se sepa). Otro texto se deja y se cuenta.
-   * Idempotente. Necesita las columnas Pilar y Pilar alçada (asegurarColumnas).
-   * @returns {{ files: any[][], filesTocades: number, sensePilar: number, multiUnit: number, altres: string[] }}
+   * Plan puro de la migración del pilar (S4). NUNCA tira información:
+   * - "NO" / "No" / "sin pilar" -> "Sin pilar".
+   * - Un texto antiguo ("Multi-unit 3 mm Avinent hexagon externo") se reparte en tipo +
+   *   detalles SOLO si se ha entendido entero (`analitzarTextPilar(...).complet`) y no pisa
+   *   un detalle ya escrito con otro valor. Si no, la fila se queda tal cual y el texto
+   *   sale en `altres` para revisarlo a mano.
+   * Vacío no se toca (puede ser que aún no se sepa). Idempotente.
+   * @param {string[]} [marques] marcas del catálogo
+   * @returns {{ files: any[][], filesTocades: number, sensePilar: number, reclassificats: number,
+   *   canvis: {abans: string, despres: string, files: number}[], altres: string[] }}
    */
-  function planificarMigracioPilars(headers, files) {
+  function planificarMigracioPilars(headers, files, marques) {
     const { idx } = indexarCapcaleres(headers);
-    if (idx.pilar === undefined || idx.pilar_altura === undefined) {
-      throw new Error('No trobo les columnes "Pilar" i "Pilar alçada (mm)".');
+    const falten = CAMPS_PILAR.filter(k => idx[k] === undefined);
+    if (falten.length) {
+      throw new Error('No trobo les columnes del pilar (' + falten.map(k => COLUMNES.find(c => c.clau === k).capcalera).join(', ') + ').');
     }
-    let filesTocades = 0, sensePilar = 0, multiUnit = 0;
+    let filesTocades = 0, sensePilar = 0, reclassificats = 0;
     const altres = [];
+    const canvis = [];
+    const anotarCanvi = (abans, despres) => {
+      const c = canvis.find(x => x.abans === abans);
+      if (c) c.files++; else canvis.push({ abans, despres, files: 1 });
+    };
     const novesFiles = files.map(f => {
       if (filaBuida(f)) return f;
-      const actual = String(f[idx.pilar] === undefined || f[idx.pilar] === null ? '' : f[idx.pilar]).trim();
-      if (!actual) return f;
-      const tipus = normalitzarTipusPilar(actual);
-      let altura = String(f[idx.pilar_altura] || '').trim();
-      if (tipus === 'Multi-unit' && !altura) {
-        const m = actual.match(/(\d+(?:[.,]\d+)?)\s*mm/i);
-        if (m) altura = numero(m[1]);
+      const actual = textCela(f[idx.pilar]);
+      if (!actual || TIPUS_PILAR.indexOf(actual) !== -1) return f;
+      if (normalitzarTipusPilar(actual) === 'Sin pilar') {
+        const copia = f.slice();
+        copia[idx.pilar] = 'Sin pilar';
+        filesTocades++;
+        sensePilar++;
+        return copia;
       }
-      if (tipus === actual && altura === String(f[idx.pilar_altura] || '').trim()) {
-        if (TIPUS_PILAR.indexOf(actual) === -1 && altres.indexOf(actual) === -1) altres.push(actual);
+      const a = analitzarTextPilar(actual, marques);
+      const xoca = Object.keys(a.camps).some(k => k !== 'pilar' && textCela(f[idx[k]]) && textCela(f[idx[k]]) !== a.camps[k]);
+      if (!a.camps.pilar || !a.complet || xoca) {
+        if (altres.indexOf(actual) === -1) altres.push(actual);
         return f;
       }
       const copia = f.slice();
-      copia[idx.pilar] = tipus;
-      copia[idx.pilar_altura] = altura;
+      Object.keys(a.camps).forEach(k => { copia[idx[k]] = a.camps[k]; });
       filesTocades++;
-      if (tipus === 'Sin pilar') sensePilar++;
-      if (tipus === 'Multi-unit') multiUnit++;
+      reclassificats++;
+      anotarCanvi(actual, descriurePilar(a.camps));
       return copia;
     });
-    return { files: novesFiles, filesTocades, sensePilar, multiUnit, altres };
+    return { files: novesFiles, filesTocades, sensePilar, reclassificats, canvis, altres };
+  }
+
+  /**
+   * Deshace la primera migración de pilares (2026-10-03), que dejaba "Multi-unit" + alçada y
+   * tiraba el resto del texto (marca, conexión...). Recupera el texto original de una
+   * copia anterior de la hoja (la pestaña "Còpia abans S2" o una copia del historial).
+   * Solo toca las filas cuyo pilar es justo lo que dejó aquella migración a partir del
+   * original: lo que se haya cambiado después a mano no se toca.
+   * Las filas se emparejan por Codi + REF + lote + posición, y si no, por REF + lote +
+   * posición o por nombre + posición (solo si el emparejamiento es único).
+   * @returns {{ files: any[][], restaurades: number, noTrobades: number, canviadesDespres: number }}
+   */
+  function planificarRecuperacioPilars(headers, files, headersCopia, filesCopia) {
+    const { idx } = indexarCapcaleres(headers);
+    const { idx: idxC } = indexarCapcaleres(headersCopia);
+    if (idxC.pilar === undefined) throw new Error('La còpia no té la columna "Pilar".');
+    if (idx.pilar === undefined || idx.pilar_altura === undefined) {
+      throw new Error('No trobo les columnes "Pilar" i "Pilar alçada (mm)".');
+    }
+    const t = (o, k) => textCela(o[k]).toUpperCase();
+    const claus = [
+      o => [t(o, 'codi_acces'), t(o, 'cod_implante'), t(o, 'lote'), t(o, 'posicion')].join('|'),
+      o => (t(o, 'cod_implante') || t(o, 'lote')) ? [t(o, 'cod_implante'), t(o, 'lote'), t(o, 'posicion')].join('|') : '',
+      o => t(o, 'nombre') ? [t(o, 'nombre'), t(o, 'posicion')].join('|') : ''
+    ];
+    const objsC = filesCopia.filter(f => !filaBuida(f)).map(f => filaAObjecte(f, idxC));
+    const mapes = claus.map(clau => {
+      const m = {};
+      objsC.forEach(o => { const k = clau(o); if (k) (m[k] = m[k] || []).push(o); });
+      return m;
+    });
+    const buscar = o => {
+      for (let i = 0; i < claus.length; i++) {
+        const k = claus[i](o);
+        const trobats = k ? mapes[i][k] || [] : [];
+        if (trobats.length === 1) return trobats[0];
+        // Mismo implante repetido igual en la copia: vale si todos dicen el mismo pilar.
+        if (trobats.length > 1 && trobats.every(x => textCela(x.pilar) === textCela(trobats[0].pilar))) return trobats[0];
+      }
+      return null;
+    };
+    let restaurades = 0, noTrobades = 0, canviadesDespres = 0;
+    const novesFiles = files.map(f => {
+      if (filaBuida(f)) return f;
+      const actual = textCela(f[idx.pilar]);
+      if (!actual) return f;
+      const o = filaAObjecte(f, idx);
+      const c = buscar(o);
+      if (!c) { noTrobades++; return f; }
+      const original = textCela(c.pilar);
+      if (!original || original === actual || normalitzarTipusPilar(original) === 'Sin pilar') return f;
+      if (normalitzarTipusPilar(original) !== actual) { canviadesDespres++; return f; }
+      const copia = f.slice();
+      copia[idx.pilar] = original;
+      // La alçada la escribió aquella migración (si la copia ya la tenía, se respeta).
+      const m = original.match(/(\d+(?:[.,]\d+)?)\s*mm/i);
+      const alturaCopia = idxC.pilar_altura !== undefined ? textCela(c.pilar_altura) : '';
+      if (m && textCela(f[idx.pilar_altura]) === numero(m[1])) copia[idx.pilar_altura] = alturaCopia;
+      restaurades++;
+      return copia;
+    });
+    return { files: novesFiles, restaurades, noTrobades, canviadesDespres };
   }
 
   function unics(llista) {
@@ -727,7 +819,9 @@ function crearPacientModel() {
     CAMPS_PILAR,
     normalitzarTipusPilar,
     analitzarTextPilar,
-    planificarMigracioPilars
+    descriurePilar,
+    planificarMigracioPilars,
+    planificarRecuperacioPilars
   };
 }
 

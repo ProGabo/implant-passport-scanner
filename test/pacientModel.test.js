@@ -405,27 +405,94 @@ test('analitzarTextPilar no se inventa nada con un texto que no entiende', () =>
   assert.deepEqual(PM.analitzarTextPilar(null).posicions, []);
 });
 
-test('planificarMigracioPilars: "NO" -> "Sin pilar", "Multi-unit 3 mm" -> tipo + alçada; idempotente', () => {
-  const headers = PM.CAPCALERES.slice();
+const filaPilar = (headers, pilar, detalls, extra) => {
   const { idx } = PM.indexarCapcaleres(headers);
-  const fila = (pilar, altura) => {
-    const f = headers.map(() => '');
-    f[idx.codi_acces] = 'AAA111';
-    f[idx.posicion] = '21';
-    f[idx.pilar] = pilar;
-    f[idx.pilar_altura] = altura || '';
-    return f;
-  };
-  const files = [fila('NO'), fila('No'), fila('Multi-unit 3 mm'), fila('Multi-unit 1.5 mm', '2'), fila(''), fila('Locator'), fila('Sin pilar')];
+  const f = headers.map(() => '');
+  f[idx.codi_acces] = 'AAA111';
+  f[idx.posicion] = '21';
+  f[idx.pilar] = pilar;
+  Object.entries(Object.assign({}, detalls, extra)).forEach(([k, v]) => { f[idx[k]] = v; });
+  return f;
+};
+const pilarDe = (headers, f) => {
+  const { idx } = PM.indexarCapcaleres(headers);
+  return PM.CAMPS_PILAR.reduce((o, k) => (f[idx[k]] ? Object.assign(o, { [k]: f[idx[k]] }) : o), {});
+};
+
+test('planificarMigracioPilars: "NO" -> "Sin pilar" y el texto antiguo se reparte entero en tipo + detalles; idempotente', () => {
+  const headers = PM.CAPCALERES.slice();
+  const files = [
+    filaPilar(headers, 'NO'), filaPilar(headers, 'No'),
+    filaPilar(headers, 'Multi-unit 3 mm'),
+    filaPilar(headers, 'Multi-unit 3 mm Avinent hexagon externo'),
+    filaPilar(headers, 'Multi-unit Ticare hexágono interno'),
+    filaPilar(headers, ''), filaPilar(headers, 'Locator'), filaPilar(headers, 'Sin pilar')
+  ];
   const r = PM.planificarMigracioPilars(headers, files);
-  assert.deepEqual(r.files.map(f => [f[idx.pilar], f[idx.pilar_altura]]), [
-    ['Sin pilar', ''], ['Sin pilar', ''], ['Multi-unit', '3'], ['Multi-unit', '2'], ['', ''], ['Locator', ''], ['Sin pilar', '']
+  assert.deepEqual(r.files.map(f => pilarDe(headers, f)), [
+    { pilar: 'Sin pilar' }, { pilar: 'Sin pilar' },
+    { pilar: 'Multi-unit', pilar_altura: '3' },
+    { pilar: 'Multi-unit', pilar_altura: '3', pilar_marca: 'Avinent', pilar_conexion: 'Externa' },
+    { pilar: 'Multi-unit', pilar_marca: 'Ticare', pilar_conexion: 'Interna' },
+    {}, { pilar: 'Locator' }, { pilar: 'Sin pilar' }
   ]);
-  assert.equal(r.filesTocades, 4);
+  assert.equal(r.filesTocades, 5);
   assert.equal(r.sensePilar, 2);
-  assert.equal(r.multiUnit, 2);
+  assert.equal(r.reclassificats, 3);
+  assert.equal(r.canvis[1].despres, 'Multi-unit · 3 mm · Avinent · Externa');
   assert.deepEqual(r.altres, ['Locator']);
   assert.equal(PM.planificarMigracioPilars(headers, r.files).filesTocades, 0, 'idempotente');
+});
+
+test('planificarMigracioPilars NO tira nada: lo que no entiende entero, o que pisaría un detalle, se queda tal cual', () => {
+  const headers = PM.CAPCALERES.slice();
+  const files = [
+    filaPilar(headers, 'Multi-unit 3 mm Avinent, pendiente de cambiar'),
+    filaPilar(headers, 'Multi-unit 1.5 mm', { pilar_altura: '2' }),
+    filaPilar(headers, '+PC 4 HE41404'),
+    filaPilar(headers, 'Multi-unit 2 mm : 2.00')
+  ];
+  const r = PM.planificarMigracioPilars(headers, files);
+  assert.equal(r.filesTocades, 0);
+  assert.deepEqual(r.files, files);
+  assert.equal(r.altres.length, 4);
+});
+
+test('planificarRecuperacioPilars devuelve el texto original que la primera migración recortó', () => {
+  const headers = PM.CAPCALERES.slice();
+  // Copia antigua (cabeceras de antes de S2, por alias), con el texto entero.
+  const antigues = ['Código', 'Nombre', 'Posición', 'Pilar', 'Código de implante', 'Lote'];
+  const copia = [
+    ['AAA111', 'Pere', 21, 'Multi-unit 3 mm Avinent hexagon externo', 'REF1', 'L1'],
+    ['AAA111', 'Pere', 22, 'NO', 'REF2', 'L2'],
+    ['BBB222', 'Maria', 36, 'Multi-unit 2 mm Ticare', 'REF3', 'L3'],
+    ['CCC333', 'Joan', 11, 'Multi-unit 1 mm externo', 'REF4', 'L4']
+  ];
+  const actual = [
+    filaPilar(headers, 'Multi-unit', { pilar_altura: '3' }, { posicion: '21', cod_implante: 'REF1', lote: 'L1', nombre: 'Pere' }),
+    filaPilar(headers, 'Sin pilar', {}, { posicion: '22', cod_implante: 'REF2', lote: 'L2', nombre: 'Pere' }),
+    // Ficha fusionada después: otro código, se empareja por REF + lote + posición.
+    filaPilar(headers, 'Multi-unit', { pilar_altura: '2' }, { codi_acces: 'ZZZ999', posicion: '36', cod_implante: 'REF3', lote: 'L3' }),
+    // Cambiada a mano después de migrar: no se toca.
+    filaPilar(headers, 'A cabeza de implante', {}, { codi_acces: 'CCC333', posicion: '11', cod_implante: 'REF4', lote: 'L4' }),
+    // Añadida después: no está en la copia.
+    filaPilar(headers, 'Multi-unit', { pilar_altura: '5' }, { posicion: '25', cod_implante: 'NOVA', lote: 'L9' })
+  ];
+  const r = PM.planificarRecuperacioPilars(headers, actual, antigues, copia);
+  assert.equal(r.restaurades, 2);
+  assert.equal(r.canviadesDespres, 1);
+  assert.equal(r.noTrobades, 1);
+  assert.deepEqual(r.files.map(f => pilarDe(headers, f)), [
+    { pilar: 'Multi-unit 3 mm Avinent hexagon externo' },
+    { pilar: 'Sin pilar' },
+    { pilar: 'Multi-unit 2 mm Ticare' },
+    { pilar: 'A cabeza de implante' },
+    { pilar: 'Multi-unit', pilar_altura: '5' }
+  ]);
+  // Y la migración nueva lo reparte sin perder nada.
+  const m = PM.planificarMigracioPilars(headers, r.files, ['Ticare']);
+  assert.deepEqual(pilarDe(headers, m.files[0]), { pilar: 'Multi-unit', pilar_altura: '3', pilar_marca: 'Avinent', pilar_conexion: 'Externa' });
+  assert.deepEqual(pilarDe(headers, m.files[2]), { pilar: 'Multi-unit', pilar_altura: '2', pilar_marca: 'Ticare' });
 });
 
 // Casos de la revisión adversarial (2026-10-03)
@@ -454,5 +521,5 @@ test('normalitzarTipusPilar no convierte una negación en Multi-unit', () => {
 });
 
 test('planificarMigracioPilars explica qué falta si no están las columnas', () => {
-  assert.throws(() => PM.planificarMigracioPilars(["Codi d'accés", 'Pilar'], []), /Pilar alçada/);
+  assert.throws(() => PM.planificarMigracioPilars(["Codi d'accés", 'Pilar'], []), /Pilar alçada \(mm\), Pilar angulació/);
 });

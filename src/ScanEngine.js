@@ -51,9 +51,11 @@ var ScanEngine = (function () {
       - fecha_colocacion: (Fecha superior izquierda, Formato estricto YYYY-MM-DD, ej "2024-09-09")
       - marca: (Southern Implants, Ticare, etc. Mira el logo)
       - modelo: (ExHex Zygan, Internal Hex, Co-Axis, Inhex, etc. lo pone en la ficha)
+      - conexion: (OBLIGATORIO, deducida con la regla B de arriba, ej "Hexágono Externo").
+      - plataforma: (OBLIGATORIO, calculada con la regla A de arriba a partir del diámetro, ej "RP (Regular)").
       - referencia: (REF). Cuidado: NO confundir con la REF del pilar/implante vecino (si hay).
       - lote: (LOT).
-      - diámetro: (Número decimal, ej 4.3)
+      - diametro: (Diámetro. Número decimal, ej 4.3. La clave del JSON es "diametro", sin acento)
       - longitud: (Número > 6, ej 13, 47.5)
       - posicion: (Número de diente 11-48, busca anotaciones a mano cercanas después de la letra zeta 'Z' o CUADRANTES; o "Fisura pterigoidea (cuadrante 1)" / "Fisura pterigoidea (cuadrante 2)" según la regla de la fisura pterigoidea. Si no hay anotación fiable para esta pegatina en concreto, usa "No especificado" — nunca la dejes vacía ni la copies de otra pegatina).
       - pilar: ("Multi-unit", "A cabeza de implante" o "Sin pilar" según la regla del pilar).
@@ -125,7 +127,8 @@ var ScanEngine = (function () {
           plataforma: item.plataforma,
           cod_implante: item.referencia,
           lote: item.lote,
-          diametro: item.diametro,
+          // A veces el modelo copia la etiqueta del prompt con acento ("diámetro").
+          diametro: item.diametro !== undefined ? item.diametro : item['diámetro'],
           longitud: item.longitud,
           posicion: model.normalitzarPosicio(item.posicion),
           pilar: pilar,
@@ -233,6 +236,7 @@ var ScanEngine = (function () {
   const OPENROUTER_PDF_ENGINE = "native";
 
   function callOpenRouterApi(httpFetch, base64Data, mimeType, prompt, apiKey) {
+    if (!apiKey) throw new Error("falta la clau d'OpenRouter");
     const isImage = mimeType.indexOf('image/') === 0;
     const filePart = isImage
       ? { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Data}` } }

@@ -45,7 +45,8 @@ function onOpen() {
           .addItem('1. Migrar la fulla (una sola vegada)', 'migrarDadesS2')
           .addItem('2. Aplicar les Cuentes de la revisió', 'aplicarCuentesRevisio')
           .addItem('3. Marcar "Sense DNI" als pacients sense DNI', 'marcarSenseDniMenu')
-          .addItem('4. Posar al dia els pilars ("NO" -> "Sin pilar")', 'migrarPilarsMenu'))
+          .addItem('4. Posar al dia els pilars ("NO" -> "Sin pilar")', 'migrarPilarsMenu')
+          .addItem("5. Recuperar el text original dels pilars d'una còpia", 'recuperarPilarsMenu'))
       .addItem('🔑 Autoritzar el meu compte', 'autorizarCuenta')
       .addToUi();
 }
@@ -1456,36 +1457,67 @@ function marcarSenseDniMenu() {
   ui.alert('Fet ✅', `"Sense DNI" marcat a ${r.pacients} pacients.`, ui.ButtonSet.OK);
 }
 
+/** Marcas del catálogo, para reconocerlas dentro del texto del pilar. */
+function marquesCataleg_() {
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(CATALOG_SHEET_NAME);
+  if (!sheet) return [];
+  const data = sheet.getDataRange().getValues();
+  const iMarca = (data[0] || []).map(h => String(h).trim()).indexOf('Marca');
+  if (iMarca === -1) return [];
+  return data.slice(1).map(f => String(f[iMarca] || '').trim()).filter((m, i, a) => m && a.indexOf(m) === i);
+}
+
+/** Escribe las 6 columnas del pilar (tipo + detalles) de todas las filas, como texto. */
+function escribirColumnasPilar_(sheet, headers, files) {
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  if (!files.length) return;
+  ponerFormatoTexto(sheet, headers, 2, files.length);
+  PacientModel.CAMPS_PILAR.forEach(k => {
+    sheet.getRange(2, idx[k] + 1, files.length, 1).setValues(files.map(f => [f[idx[k]] === undefined ? '' : f[idx[k]]]));
+  });
+}
+
+/** Resumen de lo que hará la migración de pilares, para el diálogo de confirmación. */
+function resumenMigracioPilars_(m) {
+  const linies = [];
+  if (m.sensePilar) linies.push(`- ${m.sensePilar} files amb "NO" passen a "Sin pilar"`);
+  if (m.reclassificats) {
+    linies.push(`- ${m.reclassificats} files es reparteixen en tipus + detalls (columnes "Pilar ..."):`);
+    m.canvis.slice(0, 12).forEach(c => linies.push(`    "${c.abans}" -> ${c.despres}${c.files > 1 ? ` (${c.files} files)` : ''}`));
+    if (m.canvis.length > 12) linies.push(`    ... i ${m.canvis.length - 12} textos més`);
+  }
+  if (m.altres.length) {
+    linies.push('', `No es toquen (no els entenc del tot; el text es queda tal qual a "Pilar"): ${m.altres.slice(0, 15).join(' | ')}${m.altres.length > 15 ? '...' : ''}`);
+  }
+  return linies.join('\n');
+}
+
 /**
- * S4: pone el pilar de las filas antiguas en el vocabulario nuevo ("NO" -> "Sin pilar",
- * "Multi-unit 3 mm" -> "Multi-unit" + alçada 3) y crea las columnas de detalles del pilar.
+ * S4: pone el pilar de las filas antiguas en el vocabulario nuevo ("NO" -> "Sin pilar";
+ * "Multi-unit 3 mm Avinent hexagon externo" -> tipo + alçada + marca + connexió) y crea las
+ * columnas de detalles del pilar. Un texto que no entiende entero NO lo toca.
  * Idempotente: se puede volver a lanzar sin cambiar nada.
  */
 function migrarPilarsMenu() {
   exigirUsuariIntern_();
   const ui = SpreadsheetApp.getUi();
   const sheet = hojaPacientes();
+  const marques = marquesCataleg_();
   let previa;
   try {
     asegurarColumnas(sheet);
     const { headers, files } = leerPacientes(sheet);
-    previa = PacientModel.planificarMigracioPilars(headers, files);
+    previa = PacientModel.planificarMigracioPilars(headers, files, marques);
   } catch (e) {
     ui.alert('Error', e.message, ui.ButtonSet.OK);
     return;
   }
-  const altres = previa.altres.length
-    ? `\n\nAquests valors no es toquen (revisa'ls a mà si cal): ${previa.altres.slice(0, 15).join(' | ')}${previa.altres.length > 15 ? '...' : ''}`
-    : '';
   if (!previa.filesTocades) {
-    ui.alert('Res a canviar', 'Els pilars ja estan al dia.' + altres, ui.ButtonSet.OK);
+    ui.alert('Res a canviar', 'Els pilars ja estan al dia.\n' + resumenMigracioPilars_(previa), ui.ButtonSet.OK);
     return;
   }
   const ok = ui.alert('Posar al dia els pilars',
-    `Es canviaran ${previa.filesTocades} files d'implants:\n` +
-    `- ${previa.sensePilar} amb "NO" passen a "Sin pilar"\n` +
-    `- ${previa.multiUnit} Multi-unit passen a tipus + alçada (mm) a la seva columna` +
-    altres + '\n\nVols continuar?',
+    `Es canviaran ${previa.filesTocades} files d'implants:\n` + resumenMigracioPilars_(previa) + '\n\nVols continuar?',
     ui.ButtonSet.YES_NO);
   if (ok !== ui.Button.YES) return;
 
@@ -1494,17 +1526,90 @@ function migrarPilarsMenu() {
   lock.waitLock(30000);
   let r;
   try {
-    const { headers, idx, files } = leerPacientes(sheet);
-    r = PacientModel.planificarMigracioPilars(headers, files);
-    if (r.filesTocades) {
-      ponerFormatoTexto(sheet, headers, 2, r.files.length);
-      sheet.getRange(2, idx.pilar + 1, r.files.length, 1).setValues(r.files.map(f => [f[idx.pilar]]));
-      sheet.getRange(2, idx.pilar_altura + 1, r.files.length, 1).setValues(r.files.map(f => [f[idx.pilar_altura]]));
-    }
+    const { headers, files } = leerPacientes(sheet);
+    r = PacientModel.planificarMigracioPilars(headers, files, marques);
+    if (r.filesTocades) escribirColumnasPilar_(sheet, headers, r.files);
   } finally {
     lock.releaseLock();
   }
   ui.alert('Fet ✅', `${r.filesTocades} files d'implants actualitzades.`, ui.ButtonSet.OK);
+}
+
+/**
+ * Arregla la primera versión del paso 4 (2026-10-03), que dejó "Multi-unit" + alçada y
+ * tiró la marca y la conexión: recupera el texto original del pilar de una copia anterior
+ * (la pestaña "Còpia abans S2 ..." de este mismo libro, o una copia hecha desde el
+ * historial de versiones) y lo vuelve a clasificar con el paso 4 nuevo, que no tira nada.
+ */
+function recuperarPilarsMenu() {
+  exigirUsuariIntern_();
+  const ui = SpreadsheetApp.getUi();
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const pestanyaS2 = ss.getSheets().map(s => s.getName()).filter(n => /^Còpia abans S2/.test(n)).sort().pop();
+  const resp = ui.prompt('Recuperar els pilars',
+    "Enganxa l'enllaç d'una còpia del full feta des de l'historial de versions (Fitxer -> Historial de versions -> la versió d'abans de posar al dia els pilars -> Fes una còpia).\n\n" +
+    (pestanyaS2 ? `O deixa-ho en blanc per fer servir la pestanya "${pestanyaS2}".` : 'No he trobat cap pestanya "Còpia abans S2".'),
+    ui.ButtonSet.OK_CANCEL);
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+  const enllac = String(resp.getResponseText() || '').trim();
+
+  let hojaCopia;
+  try {
+    if (enllac) {
+      const m = enllac.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      const copia = SpreadsheetApp.openById(m ? m[1] : enllac);
+      hojaCopia = copia.getSheetByName(SHEET_NAME) || copia.getSheets()[0];
+    } else {
+      if (!pestanyaS2) throw new Error('Enganxa l\'enllaç d\'una còpia del full.');
+      hojaCopia = ss.getSheetByName(pestanyaS2);
+    }
+  } catch (e) {
+    ui.alert('Error', 'No puc obrir la còpia: ' + e.message, ui.ButtonSet.OK);
+    return;
+  }
+  const dadesCopia = hojaCopia.getDataRange().getValues();
+  const sheet = hojaPacientes();
+  const marques = marquesCataleg_();
+
+  const planificar = () => {
+    const { headers, files } = leerPacientes(sheet);
+    const rec = PacientModel.planificarRecuperacioPilars(headers, files, dadesCopia[0] || [], dadesCopia.slice(1));
+    const mig = PacientModel.planificarMigracioPilars(headers, rec.files, marques);
+    return { headers, rec, mig };
+  };
+  let previa;
+  try {
+    asegurarColumnas(sheet);
+    previa = planificar();
+  } catch (e) {
+    ui.alert('Error', e.message, ui.ButtonSet.OK);
+    return;
+  }
+  const { rec } = previa;
+  const avisos = [];
+  if (rec.canviadesDespres) avisos.push(`- ${rec.canviadesDespres} files s'han canviat després a mà: no es toquen.`);
+  if (rec.noTrobades) avisos.push(`- ${rec.noTrobades} files no són a la còpia (p. ex. afegides després): no es toquen.`);
+  if (!rec.restaurades) {
+    ui.alert('Res a recuperar', 'Cap pilar de la còpia és diferent del que hi ha ara.\n' + avisos.join('\n'), ui.ButtonSet.OK);
+    return;
+  }
+  const ok = ui.alert('Recuperar els pilars',
+    `Es recupera el text original del pilar de ${rec.restaurades} files i es torna a classificar:\n` +
+    resumenMigracioPilars_(previa.mig) + (avisos.length ? '\n\n' + avisos.join('\n') : '') + '\n\nVols continuar?',
+    ui.ButtonSet.YES_NO);
+  if (ok !== ui.Button.YES) return;
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  let r;
+  try {
+    r = planificar();
+    escribirColumnasPilar_(sheet, r.headers, r.mig.files);
+  } finally {
+    lock.releaseLock();
+  }
+  ui.alert('Fet ✅', `${r.rec.restaurades} pilars recuperats. ${r.mig.reclassificats} repartits en tipus + detalls; ` +
+    `${r.mig.altres.length} textos es queden tal qual a "Pilar" per revisar-los a mà.`, ui.ButtonSet.OK);
 }
 
 /**

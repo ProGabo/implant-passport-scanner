@@ -63,6 +63,11 @@ test('parseResponse renames referencia to cod_implante and keeps diametro/longit
   assert.equal(result[0].dimensiones, undefined);
 });
 
+test('parseResponse acepta "diámetro" con acento (lo devuelve así Gemini vía OpenRouter)', () => {
+  const result = ScanEngine.parseResponse(JSON.stringify([{ referencia: 'A', 'diámetro': 3.75, longitud: 10 }]));
+  assert.equal(result[0].diametro, 3.75);
+});
+
 test('parseResponse lleva la IA al vocabulario canónico: pterigoidea, "NO", "Multi-unit 3 mm" y +PC', () => {
   const raw = JSON.stringify([
     { referencia: 'A', posicion: 'Fisura pterigoidea (cuadrante 2)', pilar: '+PC', pilar_altura: '4', pilar_ref: 'HE41404' },

@@ -86,6 +86,7 @@ class FakeSpreadsheet {
   getId() { return 'fake-id'; }
   getName() { return 'fake'; }
   getSheetByName(n) { return this.sheets.find(s => s.name === n) || null; }
+  getSheets() { return this.sheets.slice(); }
   insertSheet(n) { const s = new FakeSheet(n); this.sheets.push(s); return s; }
   deleteSheet(s) { this.sheets = this.sheets.filter(x => x !== s); }
 }
@@ -100,7 +101,7 @@ function cargarCodigo(ss, opts) {
     console,
     SpreadsheetApp: {
       getActiveSpreadsheet: () => ss,
-      openById: () => ss,
+      openById: id => (o.libres && o.libres[id]) || ss,
       getUi: () => {
         // Como Apps Script: desde el web app (visitante anónimo) no hay interfaz de Sheets.
         if (o.usuari === '') throw new Error('Cannot call SpreadsheetApp.getUi() from this context.');
@@ -532,6 +533,7 @@ test('visitante anónimo del web app: el portal funciona, el panel y el menú no
     () => ctx.aplicarCuentesRevisio(),
     () => ctx.marcarSenseDniMenu(),
     () => ctx.migrarPilarsMenu(),
+    () => ctx.recuperarPilarsMenu(),
     () => ctx.eliminarDuplicados(),
     () => ctx.comprobarTodo(),
     () => ctx.registrarDuda(1),
@@ -668,14 +670,15 @@ test('corregirCuenta cambia la Cuenta equivocada de otra ficha y libera la buena
 test('migrarPilarsMenu crea las columnas del pilar y pone al día los pilares antiguos', () => {
   const ss = libroAntiguo();
   const sheet = ss.getSheetByName('Pacientes');
-  sheet.set(3, 12, 'Multi-unit 1.5 mm'); // Maria, 36
+  sheet.set(3, 12, 'Multi-unit 1.5 mm Straumann hexágono externo'); // Maria, 36
   const { ctx, alerts } = cargarCodigo(ss);
   ctx.migrarDadesS2();
   ctx.migrarPilarsMenu();
 
   const objs = objetosDe(ctx, ss.getSheetByName('Pacientes'));
-  assert.deepEqual(objs.map(o => [o.posicion, o.pilar, o.pilar_altura]),
-    [[11, 'Sin pilar', ''], [36, 'Multi-unit', '1.5'], [46, 'Sin pilar', '']]);
+  assert.deepEqual(objs.map(o => [o.posicion, o.pilar, o.pilar_altura, o.pilar_marca, o.pilar_conexion]),
+    [[11, 'Sin pilar', '', '', ''], [36, 'Multi-unit', '1.5', 'Straumann', 'Externa'], [46, 'Sin pilar', '', '', '']]);
+  assert.match(alerts[alerts.length - 2][1], /"Multi-unit 1.5 mm Straumann hexágono externo" -> Multi-unit · 1.5 mm · Straumann · Externa/);
   const headers = ss.getSheetByName('Pacientes').rows()[0];
   const { idx } = ctx.PacientModel.indexarCapcaleres(headers);
   // La alçada como texto: "1.5" no puede acabar siendo una fecha.
@@ -684,6 +687,47 @@ test('migrarPilarsMenu crea las columnas del pilar y pone al día los pilares an
 
   ctx.migrarPilarsMenu(); // idempotente
   assert.match(alerts[alerts.length - 1][1], /ja estan al dia/);
+});
+
+// Lo que pasó en vivo el 2026-10-03: la primera versión del paso 4 dejó "Multi-unit" + alçada
+// y tiró la marca y la conexión.
+function libroConPilarRecortado(original) {
+  const ss = libroAntiguo();
+  ss.getSheetByName('Pacientes').set(3, 12, original);
+  const { ctx } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  const sheet = ss.getSheetByName('Pacientes');
+  const headers = ctx.asegurarColumnas(sheet);
+  const { idx } = ctx.PacientModel.indexarCapcaleres(headers);
+  sheet.set(3, idx.pilar + 1, 'Multi-unit');
+  sheet.set(3, idx.pilar_altura + 1, '1.5');
+  [2, 4].forEach(r => sheet.set(r, idx.pilar + 1, 'Sin pilar'));
+  return ss;
+}
+
+test('recuperarPilarsMenu recupera el texto de la pestaña "Còpia abans S2" y lo reparte sin perder nada', () => {
+  const ss = libroConPilarRecortado('Multi-unit 1.5 mm Straumann hexágono externo');
+  const { ctx, alerts } = cargarCodigo(ss, { prompts: [''] });
+  ctx.recuperarPilarsMenu();
+  const objs = objetosDe(ctx, ss.getSheetByName('Pacientes'));
+  assert.deepEqual([objs[1].pilar, objs[1].pilar_altura, objs[1].pilar_marca, objs[1].pilar_conexion],
+    ['Multi-unit', '1.5', 'Straumann', 'Externa']);
+  assert.deepEqual([objs[0].pilar, objs[2].pilar], ['Sin pilar', 'Sin pilar']);
+  assert.match(alerts[0][1], /de 1 files/);
+  assert.match(alerts[alerts.length - 1][1], /1 pilars recuperats/);
+});
+
+test('recuperarPilarsMenu con el enlace de una copia del historial; lo que no entiende se queda entero', () => {
+  const ss = libroConPilarRecortado('Multi-unit 1.5 mm Straumann, revisar en 4 meses');
+  const copiaHistorial = libroAntiguo();
+  copiaHistorial.getSheetByName('Pacientes').set(3, 12, 'Multi-unit 1.5 mm Straumann, revisar en 4 meses');
+  const { ctx, alerts } = cargarCodigo(ss, {
+    prompts: ['https://docs.google.com/spreadsheets/d/COPIA_123/edit#gid=0'], libres: { COPIA_123: copiaHistorial }
+  });
+  ctx.recuperarPilarsMenu();
+  const objs = objetosDe(ctx, ss.getSheetByName('Pacientes'));
+  assert.deepEqual([objs[1].pilar, objs[1].pilar_altura], ['Multi-unit 1.5 mm Straumann, revisar en 4 meses', '']);
+  assert.match(alerts[0][1], /No es toquen.*revisar en 4 meses/s);
 });
 
 test('saveNewImplant guarda la pterigoidea y los detalles del pilar, y el portal los recibe', () => {
