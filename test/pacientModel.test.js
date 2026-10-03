@@ -444,6 +444,24 @@ test('planificarMigracioPilars: "NO" -> "Sin pilar" y el texto antiguo se repart
   assert.equal(PM.planificarMigracioPilars(headers, r.files).filesTocades, 0, 'idempotente');
 });
 
+test('planificarMigracioPilars entiende los multi-unit que quedaban en la hoja (2026-10-03)', () => {
+  const headers = PM.CAPCALERES.slice();
+  const files = [
+    filaPilar(headers, 'pilar multiunit recto inhex std alt.2mm'),
+    filaPilar(headers, 'avinent hexagon externo 2mm'),
+    filaPilar(headers, 'recto 2 mm')
+  ];
+  const r = PM.planificarMigracioPilars(headers, files);
+  assert.deepEqual(r.files.map(f => pilarDe(headers, f)), [
+    { pilar: 'Multi-unit', pilar_altura: '2', pilar_angulacion: '0', pilar_marca: 'Ticare', pilar_conexion: 'Interna' },
+    { pilar: 'Multi-unit', pilar_altura: '2', pilar_marca: 'Avinent', pilar_conexion: 'Externa' },
+    { pilar: 'Multi-unit', pilar_altura: '2', pilar_angulacion: '0' }
+  ]);
+  assert.deepEqual(r.altres, []);
+  assert.match(r.canvis[1].despres, /\(suposo Multi-unit\)$/);
+  assert.doesNotMatch(r.canvis[0].despres, /suposo/);
+});
+
 test('planificarMigracioPilars NO tira nada: lo que no entiende entero, o que pisaría un detalle, se queda tal cual', () => {
   const headers = PM.CAPCALERES.slice();
   const files = [

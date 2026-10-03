@@ -614,6 +614,17 @@ function crearPacientModel() {
       const mMm = resta.match(/\b(\d+(?:[.,]\d+)?)\s*mm\b/i);
       if (mMm) { camps.pilar_altura = numero(mMm[1]); treure(mMm[0]); }
     }
+    // "recto" = sin angulación.
+    if (/\brect[oa]\b/i.test(resta)) {
+      if (!camps.pilar_angulacion) camps.pilar_angulacion = '0';
+      treure(/\brect[oa]\b/ig);
+    }
+    // "Inhex" es la conexión hexagonal interna de Ticare.
+    if (/\binhex\b/i.test(resta)) {
+      camps.pilar_conexion = 'Interna';
+      camps.pilar_marca = 'Ticare';
+      treure(/\binhex\b/ig);
+    }
 
     const tipus = normalitzarTipusPilar(resta);
     // "+PC 4 (HE41404)" es el pilar de cicatrización (provisional): su REF no es la del pilar.
@@ -625,7 +636,7 @@ function crearPacientModel() {
 
     // Conexión: "hexagon externo", "hexágono interno", "conexión externa", "externa"...
     const mCon = resta.match(/(?:\b(?:hex[a-záàé]*|con+exi[oó]n?)\.?\s*)?\b(extern|intern)[oa]?\b/i);
-    if (mCon) {
+    if (mCon && !camps.pilar_conexion) {
       camps.pilar_conexion = /extern/i.test(mCon[1]) ? 'Externa' : 'Interna';
       treure(mCon[0]);
     }
@@ -637,7 +648,7 @@ function crearPacientModel() {
       return nm.length >= 4 && nResta.indexOf(nm) !== -1;
     });
     if (marca) {
-      camps.pilar_marca = marca;
+      camps.pilar_marca = camps.pilar_marca || marca;
       const primera = String(marca).split(/\s+/)[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       treure(new RegExp(primera + '\\w*', 'i'));
     }
@@ -655,7 +666,8 @@ function crearPacientModel() {
 
     // Lo que no se ha entendido (sin palabras de relleno ni puntuación). `complet` = todo
     // el texto ha ido a algún campo y no se ha tirado nada: la migración solo toca esos.
-    const sobrant = resta.replace(/\b(de|del|pilar|ref)\b\.?/gi, ' ').replace(/[\s+,.;:()\/#-]+/g, ' ').trim();
+    // "alt." / "altura" (la cifra ya está en pilar_altura) y "std" (estándar) no añaden nada.
+    const sobrant = resta.replace(/\b(de|del|pilar|ref|alt|altura|alçada|std|standard|estándar|estandar)\b\.?/gi, ' ').replace(/[\s+,.;:()\/#-]+/g, ' ').trim();
     const complet = Object.keys(camps).length > 0 && !sobrant && !descartatPC && quantitat === null;
 
     return { camps, posicions, quantitat, reconegut: Object.keys(camps).length > 0, sobrant, complet };
@@ -709,6 +721,10 @@ function crearPacientModel() {
         return copia;
       }
       const a = analitzarTextPilar(actual, marques);
+      // En la hoja antigua, un pilar con detalles y sin tipo ("avinent hexagon externo 2mm",
+      // "recto 2 mm") era un multi-unit: se supone, y el diálogo lo dice.
+      const suposat = !a.camps.pilar && a.complet;
+      if (suposat) a.camps.pilar = 'Multi-unit';
       const xoca = Object.keys(a.camps).some(k => k !== 'pilar' && textCela(f[idx[k]]) && textCela(f[idx[k]]) !== a.camps[k]);
       if (!a.camps.pilar || !a.complet || xoca) {
         if (altres.indexOf(actual) === -1) altres.push(actual);
@@ -718,7 +734,7 @@ function crearPacientModel() {
       Object.keys(a.camps).forEach(k => { copia[idx[k]] = a.camps[k]; });
       filesTocades++;
       reclassificats++;
-      anotarCanvi(actual, descriurePilar(a.camps));
+      anotarCanvi(actual, descriurePilar(a.camps) + (suposat ? ' (suposo Multi-unit)' : ''));
       return copia;
     });
     return { files: novesFiles, filesTocades, sensePilar, reclassificats, canvis, altres };
