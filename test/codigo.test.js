@@ -90,9 +90,12 @@ class FakeSpreadsheet {
   deleteSheet(s) { this.sheets = this.sheets.filter(x => x !== s); }
 }
 
-function cargarCodigo(ss) {
+function cargarCodigo(ss, opts) {
+  const o = opts || {};
   const sent = [];
   const alerts = [];
+  const cache = new Map();
+  const props = Object.assign({ ALERT_EMAIL: 'responsable@example.com' }, o.props);
   const ctx = {
     console,
     SpreadsheetApp: {
@@ -105,26 +108,41 @@ function cargarCodigo(ss) {
       }),
       newDataValidation: () => ({ requireCheckbox() { return this; }, build() { return 'checkbox'; } })
     },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), setProperty() {} }) },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
-    Utilities: { formatDate: () => '2026-10-03 10.00' },
+    Utilities: {
+      formatDate: () => '2026-10-03 10.00',
+      newBlob: (contingut, tipus, nom) => ({ contingut, tipus, nom, getAs: t => ({ tipus: t, nom, contingut, setName(n) { this.nom = n; return this; } }) })
+    },
     Session: { getScriptTimeZone: () => 'Europe/Madrid' },
-    GmailApp: { sendEmail: (to, subject) => sent.push({ to, subject }) },
+    GmailApp: {
+      sendEmail: (to, subject, body, options) => {
+        if (o.gmailFalla) throw new Error(o.gmailFalla);
+        sent.push({ to, subject, body, options: options || {} });
+      },
+      search: () => o.rebots || []
+    },
     Logger: { log() {} },
-    CacheService: { getScriptCache: () => ({ put() {}, get() {}, remove() {} }) }
+    CacheService: { getScriptCache: () => ({
+      put: (k, v) => { cache.set(k, String(v)); },
+      get: k => (cache.has(k) ? cache.get(k) : null),
+      remove: k => { cache.delete(k); }
+    }) }
   };
   vm.createContext(ctx);
   // Mismo orden de carga que da igual en GAS: todos los archivos comparten el global.
-  ['PacientModel.js', 'ScanEngine.js', 'Código.js'].forEach(f => {
+  ['PacientModel.js', 'PortalModel.js', 'ScanEngine.js', 'Código.js'].forEach(f => {
     vm.runInContext(fs.readFileSync(path.join(SRC, f), 'utf8'), ctx, { filename: f });
   });
+  // Reloj fijo: el límite de intentos cuenta por ventanas de 10 minutos.
+  ctx.ahoraMs = () => 1000000000000;
   // Las sheets clonadas por copyTo se registran en el libro.
   FakeSheet.prototype.copyTo = function (book) {
     const c = new FakeSheet(this.name + ' (còpia)', this.rows());
     book.sheets.push(c);
     return c;
   };
-  return { ctx, sent, alerts };
+  return { ctx, sent, alerts, cache };
 }
 
 // --- Datos: la hoja tal como está antes de S2 ------------------------------------------
@@ -266,23 +284,212 @@ test('buscarPacient busca solo en Cuenta, DNI y Codi d\'accés, y exacto', () =>
   assert.equal(ctx.buscarPacient('4300000').found, false);
 });
 
-test('el portal recibe las claves estables y Sense email entra sin PIN', () => {
+test('el portal recibe solo la lista blanca: ni email ni Cuenta, DNI enmascarado', () => {
   const ss = libroAntiguo();
-  const { ctx, sent } = cargarCodigo(ss);
+  const { ctx } = cargarCodigo(ss);
   ctx.migrarDadesS2();
 
   const datos = ctx.getPatientDataVerbose('aaa111');
   assert.equal(datos.found, true);
   const p = datos.implantes[0];
-  assert.equal(p.cuenta_quartup, '43000001');
   assert.equal(p.nombre, 'Pere Vila');
   assert.equal(p.posicion, '11');
   assert.equal(p.cod_implante, '021.5310');
+  ['email', 'cuenta_quartup', 'dni', 'sense_email', 'sense_dni'].forEach(k => assert.equal(k in p, false, k));
+  assert.equal('dni_parcial' in p, false, 'Pere no tiene DNI');
 
-  const login = ctx.initiateLogin('BBB222');
-  assert.equal(login.skipOTP, true);
-  assert.equal(login.implantes.length, 2);
+  const maria = ctx.getPatientDataVerbose('BBB222').implantes[0];
+  assert.equal(maria.dni_parcial, '***4567**');
+});
+
+test('login sin PIN: con email o sin él, entra directo y no se envía nada', () => {
+  const ss = libroAntiguo();
+  const { ctx, sent } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+
+  const pere = ctx.initiateLogin('AAA111'); // tiene email
+  assert.equal(pere.ok, true);
+  assert.equal(pere.implantes.length, 1);
+  assert.equal(pere.codi_acces, 'AAA111');
+  assert.equal('requiresOTP' in pere, false);
+  assert.equal('maskedEmail' in pere, false);
+
+  const maria = ctx.initiateLogin('BBB222'); // Sense email
+  assert.equal(maria.implantes.length, 2);
   assert.equal(sent.length, 0);
+  assert.equal(typeof ctx.verifyOTPAndGetData, 'undefined', 'el OTP ya no existe');
+});
+
+test('login tolerante: O/0, I/L/1, minúsculas y espacios', () => {
+  const ss = libroAntiguo();
+  const { ctx } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  const r = ctx.initiateLogin(' aaa l1I ');
+  assert.equal(r.ok, true, r.message);
+  assert.equal(r.codi_acces, 'AAA111');
+  assert.equal(ctx.initiateLogin('BBB-222').codi_acces, 'BBB222');
+});
+
+test('login: dos códigos que chocan al normalizar no enseñan ninguno', () => {
+  const ss = libroAntiguo();
+  const sheet = ss.getSheetByName('Pacientes');
+  sheet.getRange(2, 1).setValue('KKOZ2L');
+  sheet.getRange(3, 1).setValue('KK0Z21');
+  sheet.getRange(4, 1).setValue('KK0Z21');
+  const { ctx } = cargarCodigo(ss);
+  const r = ctx.initiateLogin('KK0Z2I');
+  assert.equal(r.ok, false);
+  assert.match(r.message, /clínica/);
+  assert.equal(ctx.initiateLogin('KK0Z21').implantes.length, 2, 'el exacto sí entra');
+});
+
+test('límite: 20 códigos fallidos pausan el portal y avisan una vez al responsable', () => {
+  const ss = libroAntiguo();
+  const { ctx, sent } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  for (let i = 0; i < 19; i++) {
+    const r = ctx.initiateLogin('ZZZZ' + String(10 + i));
+    assert.equal(r.ok, false);
+    assert.doesNotMatch(r.message, /Demasiados/);
+  }
+  assert.equal(sent.length, 0);
+  assert.match(ctx.initiateLogin('ZZZZ99').message, /Demasiados intentos/);
+  assert.match(ctx.initiateLogin('AAA111').message, /Demasiados intentos/, 'en pausa ni el bueno entra');
+  ctx.initiateLogin('ZZZZ98');
+  const avisos = sent.filter(s => s.to === 'responsable@example.com');
+  assert.equal(avisos.length, 1);
+  const registre = ss.getSheetByName("Registre d'enviaments").rows();
+  assert.ok(registre.some(r => r.includes('alerta')));
+});
+
+test('límite: sin ALERT_EMAIL pausa igual y no falla', () => {
+  const ss = libroAntiguo();
+  const { ctx, sent } = cargarCodigo(ss, { props: { ALERT_EMAIL: null } });
+  for (let i = 0; i < 21; i++) ctx.initiateLogin('ZZZZ' + String(10 + i));
+  assert.equal(sent.length, 0);
+  assert.match(ctx.initiateLogin('AAA111').message, /Demasiados intentos/);
+});
+
+test('recuperar código: misma respuesta exista o no el email, y queda en el registro', () => {
+  const ss = libroAntiguo();
+  const { ctx, sent } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  const si = ctx.retrieveCodeByEmail(' PERE@x.cat ');
+  const no = ctx.retrieveCodeByEmail('nadie@x.cat');
+  assert.equal(si.ok, true);
+  assert.equal(no.ok, true);
+  assert.equal(si.message, no.message);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, 'pere@x.cat');
+  assert.match(sent[0].body, /AAA111/, 'lleva versión en texto plano');
+  assert.match(sent[0].options.htmlBody, /AAA111/);
+  const registre = ss.getSheetByName("Registre d'enviaments").rows();
+  assert.deepEqual(registre[0], ['Data', 'Tipus', "Codi d'accés", 'Destinatari', 'Resultat', 'Detall']);
+  assert.equal(registre[1][1], 'recuperació');
+  assert.equal(registre[1][2], 'AAA111');
+  assert.equal(registre[1][4], 'OK');
+});
+
+test('envío de pasaporte que falla: el sidebar recibe el error y queda en el registro', () => {
+  const ss = libroAntiguo();
+  const { ctx } = cargarCodigo(ss, { gmailFalla: 'Service invoked too many times for one day: email.' });
+  ctx.migrarDadesS2();
+  const res = ctx.saveNewImplant({
+    codi_acces: 'GENERAR', cuenta_quartup: '43000500', nombre: 'Anna Puig', email: 'anna@hotmail.com',
+    sense_email: false, dni: '87654321x', sense_dni: false, sendEmail: 'true', implantes: [IMPLANT]
+  });
+  assert.equal(res.ok, true, res.message);
+  assert.equal(res.emailSent, false);
+  assert.match(res.emailError, /quota|cuota|límit/i);
+  const fila = ss.getSheetByName("Registre d'enviaments").rows()[1];
+  assert.equal(fila[1], 'pasaport');
+  assert.equal(fila[3], 'anna@hotmail.com');
+  assert.equal(fila[4], 'ERROR');
+  assert.match(fila[5], /too many times/);
+});
+
+test('saveNewImplant genera códigos del alfabeto nuevo', () => {
+  const ss = libroAntiguo();
+  const { ctx } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  const res = ctx.saveNewImplant({
+    codi_acces: 'GENERAR', cuenta_quartup: '43000501', nombre: 'Joan Mas', email: '', sense_email: true,
+    dni: '', sense_dni: true, sendEmail: 'false', avisSecretaria: 'false', implantes: [IMPLANT]
+  });
+  assert.equal(res.ok, true, res.message);
+  assert.match(res.newCode, /^[A-HJKMNP-Z2-9]{6}$/);
+});
+
+test('Sense email + avís: email a la secretaria con quién es, WhatsApp y el PDF adjunto', () => {
+  const ss = libroAntiguo();
+  const { ctx, sent } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  const res = ctx.saveNewImplant({
+    codi_acces: 'BBB222', cuenta_quartup: '43000222', nombre: 'Maria Roca', email: '', sense_email: true,
+    dni: '12345678Z', sense_dni: false, sendEmail: 'false', avisSecretaria: 'true', implantes: [IMPLANT]
+  });
+  assert.equal(res.ok, true, res.message);
+  assert.equal(res.avisSecretaria.enviat, true);
+  assert.equal(sent.length, 1);
+  const e = sent[0];
+  assert.equal(e.to, 'consulta@doctorpiurgell.com');
+  assert.match(e.options.htmlBody, /43000222/);
+  assert.match(e.options.htmlBody, /12345678Z/);
+  assert.match(e.options.htmlBody, /wa\.me/);
+  assert.equal(e.options.attachments.length, 1);
+  const pdf = e.options.attachments[0];
+  assert.equal(pdf.tipus, 'application/pdf');
+  assert.match(pdf.nom, /\.pdf$/);
+  assert.match(pdf.contingut, /Código de acceso/);
+  assert.match(pdf.contingut, /\*\*\*4567\*\*/, 'el PDF lleva el DNI enmascarado');
+  assert.equal(pdf.contingut.includes('43000222'), false, 'el PDF no lleva la Cuenta');
+  const fila = ss.getSheetByName("Registre d'enviaments").rows()[1];
+  assert.equal(fila[1], 'avís secretària');
+});
+
+test('Sense email con el avís desmarcado: no se envía nada', () => {
+  const ss = libroAntiguo();
+  const { ctx, sent } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  const res = ctx.saveNewImplant({
+    codi_acces: 'BBB222', cuenta_quartup: '43000222', nombre: 'Maria Roca', email: '', sense_email: true,
+    dni: '12345678Z', sense_dni: false, sendEmail: 'false', avisSecretaria: 'false', implantes: [IMPLANT]
+  });
+  assert.equal(res.ok, true, res.message);
+  assert.equal(res.avisSecretaria, null);
+  assert.equal(sent.length, 0);
+});
+
+test('con email, el avís a la secretaria no se envía aunque llegue marcado', () => {
+  const ss = libroAntiguo();
+  const { ctx, sent } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  ctx.saveNewImplant({
+    codi_acces: 'AAA111', cuenta_quartup: '43000001', nombre: 'Pere Vila', email: 'pere@x.cat', sense_email: false,
+    dni: '', sense_dni: true, sendEmail: 'false', avisSecretaria: 'true', implantes: [IMPLANT]
+  });
+  assert.equal(sent.length, 0);
+});
+
+test('comprobarTodo lista los códigos rotos y los rebotes', () => {
+  const ss = libroAntiguo();
+  const sheet = ss.getSheetByName('Pacientes');
+  sheet.getRange(2, 1).setValue(12345);
+  sheet.getRange(3, 1).setValue('ABCO12');
+  sheet.getRange(4, 1).setValue('ABC012');
+  const rebot = {
+    getMessages: () => [{
+      getHeader: h => (h === 'X-Failed-Recipients' ? 'anna@hotmail.com' : ''),
+      getPlainBody: () => '',
+      getDate: () => new Date(2026, 9, 1)
+    }]
+  };
+  const { ctx, alerts } = cargarCodigo(ss, { rebots: [rebot] });
+  ctx.comprobarTodo();
+  const text = alerts[0][1];
+  assert.match(text, /12345/);
+  assert.match(text, /ABCO12.*ABC012|ABC012.*ABCO12/);
+  assert.match(text, /anna@hotmail\.com/);
 });
 
 test('el código funciona también ANTES de migrar (cabeceras antiguas por alias)', () => {
@@ -290,7 +497,7 @@ test('el código funciona también ANTES de migrar (cabeceras antiguas por alias
   const { ctx } = cargarCodigo(ss);
   assert.equal(ctx.getPatientDataVerbose('AAA111').implantes[0].nombre, 'Pere Vila');
   assert.equal(ctx.buscarPacient('43000001').data.codi_acces, 'AAA111');
-  assert.equal(ctx.initiateLogin('BBB222').skipOTP, true);
+  assert.equal(ctx.initiateLogin('BBB222').ok, true);
 });
 
 test('comprovarCuenta avisa en vivo si la Cuenta ya es de otra ficha', () => {

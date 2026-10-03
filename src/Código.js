@@ -119,20 +119,15 @@ function ponerFormatoTexto(sheet, headers, filaInicio, numFilas) {
 }
 
 /**
- * Genera un Codi d'accés de 6 caracteres que no exista ya.
+ * Genera un Codi d'accés de 6 caracteres que no exista ya (sin O/0/I/1/L, ver PortalModel).
  * @param {string[]} existentes códigos ya usados
  */
 function generarCodigoUnico(existentes) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  const usados = existentes.map(c => String(c).trim().toUpperCase());
-  let code;
-  do {
-    code = '';
-    for (let i = 0; i < 6; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-  } while (usados.includes(code));
-  return code;
+  return PortalModel.generarCodi(existentes);
+}
+
+function ahoraMs() {
+  return Date.now();
 }
 
 
@@ -266,34 +261,29 @@ function corregirCuenta(codi, novaCuenta) {
 }
 
 /**
- * Busca TODAS las filas-implante de un Codi d'accés (portal del paciente). Devuelve las
- * claves estables del registro, independientes del texto de las cabeceras.
+ * Busca TODAS las filas-implante de un Codi d'accés (portal del paciente). Acepta el
+ * código con O/0, I/L/1, minúsculas o espacios (PortalModel.resoldreCodi) y devuelve
+ * solo la lista blanca de PortalModel: nunca email, Cuenta ni DNI completo.
+ * @returns {{ok, found, codi_acces?, implantes?, ambigu?, message?}}
  */
 function getPatientDataVerbose(code) {
   try {
     const { objetos } = leerPacientes(hojaPacientes());
-    const busca = String(code === undefined || code === null ? '' : code).trim();
-    if (!busca) return { ok: true, found: false, message: 'No se encontraron implantes para este código.' };
+    const r = PortalModel.resoldreCodi(code, objetos.map(o => o.codi_acces));
+    if (r.ambigu) {
+      Logger.log('Codi ambigu al portal: ' + code);
+      return { ok: true, found: false, ambigu: true, message: 'No podemos identificar este código. Por favor, contacte con la clínica.' };
+    }
+    if (!r.codi) return { ok: true, found: false, message: 'No se encontraron implantes para este código.' };
 
     const implantes = objetos
-      .filter(o => mismoCodigo(o.codi_acces, busca))
-      .map(o => {
-        const out = {};
-        PacientModel.COLUMNES.forEach(c => {
-          const v = o[c.clau];
-          out[c.clau] = v instanceof Date ? v.toLocaleDateString('es-ES') : String(v);
-        });
-        return out;
-      });
-
-    if (implantes.length > 0) {
-      return { ok: true, found: true, implantes: implantes };
-    }
-    return { ok: true, found: false, message: 'No se encontraron implantes para este código.' };
+      .filter(o => mismoCodigo(o.codi_acces, r.codi))
+      .map(o => PortalModel.perAlPortal(o));
+    return { ok: true, found: true, codi_acces: String(r.codi).trim().toUpperCase(), implantes: implantes };
 
   } catch (err) {
-    Logger.log('ERROR: ' + err);
-    return { ok: false, message: 'Error del sistema: ' + err };
+    Logger.log('ERROR en getPatientDataVerbose: ' + err);
+    return { ok: false, message: 'No hemos podido consultar el pasaporte. Inténtelo de nuevo más tarde.' };
   }
 }
 
@@ -367,12 +357,20 @@ function saveNewImplant(formData) {
       emailStatus = sendPassportEmail(paciente.email, paciente.nombre, paciente.codi_acces);
     }
 
+    // Sin email, la Secretària hace llegar el codi (casilla marcada por defecto en el panel).
+    let avisSecretaria = null;
+    if (senseEmail && formData.avisSecretaria === 'true') {
+      const r = enviarAvisSecretaria(paciente);
+      avisSecretaria = { enviat: r.ok, error: r.ok ? null : r.message };
+    }
+
     return {
       ok: true,
       newCode: paciente.codi_acces,
       implantsCount: filas.length,
       emailSent: enviar && emailStatus.ok,
       emailError: emailStatus.ok ? null : emailStatus.message,
+      avisSecretaria: avisSecretaria,
       avisos: avisos
     };
 
@@ -429,6 +427,68 @@ function completarDatosPaciente(sheet, headers, paciente) {
   }
 }
 
+// ==========================================
+//  ENVÍOS DE EMAIL (pasaporte, recuperación, avís secretària, alerta)
+// ==========================================
+
+const EMAIL_REMITENT = 'clinicapiesteller@gmail.com';
+const NOM_REMITENT = 'Drs. Pi y Esteller';
+// Adonde responden los pacientes y adonde llegan los avisos para la Secretària.
+const EMAIL_SECRETARIA = 'consulta@doctorpiurgell.com';
+const FULL_REGISTRE = "Registre d'enviaments";
+
+/**
+ * Envía un email con las opciones comunes de la clínica (remitente, respuesta a la
+ * clínica, versión en texto plano: Hotmail penaliza los emails solo HTML) y lo apunta en
+ * el Registre d'enviaments.
+ * @returns {{ok: boolean, message?: string}}
+ */
+function enviarEmail(tipus, codi, destinatari, assumpte, text, html, extres) {
+  try {
+    GmailApp.sendEmail(destinatari, assumpte, text, Object.assign({
+      htmlBody: html,
+      name: NOM_REMITENT,
+      from: EMAIL_REMITENT,
+      replyTo: EMAIL_SECRETARIA
+    }, extres || {}));
+    registrarEnviament(tipus, codi, destinatari, true, '');
+    return { ok: true };
+  } catch (e) {
+    Logger.log('ERROR enviant (' + tipus + ') a ' + destinatari + ': ' + e);
+    registrarEnviament(tipus, codi, destinatari, false, String(e && e.message || e));
+    return { ok: false, message: explicarErrorEnviament(e) };
+  }
+}
+
+function explicarErrorEnviament(e) {
+  const m = String(e && e.message || e);
+  if (/too many times|limit|quota/i.test(m)) return "S'ha arribat al límit diari d'emails de Google. Torna-ho a provar demà.";
+  if (/invalid email|invalid argument/i.test(m)) return "L'adreça d'email no és vàlida.";
+  return "No s'ha pogut enviar el correu.";
+}
+
+/**
+ * Apunta un envío en la pestaña "Registre d'enviaments" (la crea si no existe). Nunca
+ * hace fallar el envío: si no se puede apuntar, solo queda en el log.
+ */
+function registrarEnviament(tipus, codi, destinatari, ok, detall) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    let sheet = ss.getSheetByName(FULL_REGISTRE);
+    if (!sheet) {
+      sheet = ss.insertSheet(FULL_REGISTRE);
+      sheet.getRange(1, 1, 1, 6).setValues([['Data', 'Tipus', "Codi d'accés", 'Destinatari', 'Resultat', 'Detall']]);
+      sheet.getRange(1, 1, 1, 6).setFontWeight('bold');
+      sheet.setFrozenRows(1);
+    }
+    const fila = sheet.getLastRow() + 1;
+    sheet.getRange(fila, 3).setNumberFormat('@');
+    sheet.getRange(fila, 1, 1, 6).setValues([[new Date(), tipus, String(codi || ''), String(destinatari || ''), ok ? 'OK' : 'ERROR', String(detall || '')]]);
+  } catch (e) {
+    Logger.log('No es pot escriure al registre d\'enviaments: ' + e);
+  }
+}
+
 /**
  * Envía un correo electrónico al paciente con su código de acceso.
  * @param {string} recipientEmail - El correo electrónico del paciente.
@@ -437,62 +497,106 @@ function completarDatosPaciente(sheet, headers, paciente) {
  */
 function sendPassportEmail(recipientEmail, patientName, patientCode) {
   if (!recipientEmail || recipientEmail.indexOf('@') === -1) {
-    Logger.log("Error: No se puede enviar el correo. Email no válido: " + recipientEmail);
-    // Puedes devolver un error, pero lo manejamos de forma silenciosa si es un error de formato.
+    registrarEnviament('pasaport', patientCode, recipientEmail, false, 'Email no vàlid');
     return { ok: false, message: 'Email no vàlid.' };
   }
 
-  // --- CONFIGURACIÓN DEL MENSAJE ---
-  const subject = `Código de Acceso de Pasaporte Implantológico - Drs. Pi y Esteller `;
-  
-  // URL de la aplicación web donde el paciente puede consultar (Usamos el script ID de doGet)
-  // IMPORTANTE: Debes reemplazar esta URL con la URL pública de tu implementación de doGet.
-  // Por ahora, usamos un placeholder, pero es crucial que lo cambies.
-  const webAppUrl = "https://clinicapiestellercom.netlify.app/"; 
-  
+  const subject = 'Su Pasaporte Implantológico - Clínica Drs. Pi y Esteller';
+  const webAppUrl = PortalModel.URL_PORTAL;
+  const nom = PortalModel.escapar(patientName);
+  const codi = PortalModel.escapar(patientCode);
+
   const bodyHtml = `
     <html>
       <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f8fc;">
-        <p>Estimado/a ${patientName},</p>
-        
-        <p>Gracias por confiar en el equipo de la <strong>Clínica Dental Dr. Pi Esteller</strong>. Para garantizar la máxima calidad y trazabilidad de su tratamiento, hemos generado su documentación técnica digital.</p>
-        
-        <p>A continuación encontrará su clave de acceso personal. Con ella podrá consultar en cualquier momento la marca, modelo, lote y fecha de sus implantes.</p>
+        <p>Estimado/a ${nom},</p>
+
+        <p>Gracias por confiar en el equipo de la <strong>Clínica Dental Drs. Pi y Esteller</strong>. Para garantizar la máxima calidad y trazabilidad de su tratamiento, hemos generado su documentación técnica digital.</p>
+
+        <p>A continuación encontrará su código de acceso personal. Con él podrá consultar en cualquier momento la marca, el modelo, el lote y la fecha de sus implantes.</p>
         <div style="background-color: #eef4fb; border-left: 5px solid #02234f; padding: 20px; margin: 30px 0; border-radius: 4px;">
-          <p style="margin: 0; color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; font-weight: bold;">Su Código de Paciente</p>
-          <p style="margin: 5px 0 0 0; color: #02234f; font-size: 32px; font-weight: bold; letter-spacing: 2px;">${patientCode}</p>
+          <p style="margin: 0; color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; font-weight: bold;">Su código de acceso</p>
+          <p style="margin: 5px 0 0 0; color: #02234f; font-size: 32px; font-weight: bold; letter-spacing: 2px;">${codi}</p>
         </div>
-        
-        <p style="margin-bottom: 25px;">Para ver y descargar su certificado oficial (PDF), haga clic en el siguiente botón:</p>
-        
+
+        <p style="margin-bottom: 25px;">Para ver y descargar su pasaporte (PDF), pulse el siguiente botón e introduzca el código:</p>
+
         <div style="text-align: center; margin-bottom: 30px;">
           <a href="${webAppUrl}" style="background-color: #02234f; color: #ffffff; text-decoration: none; padding: 15px 30px; border-radius: 6px; font-weight: bold; display: inline-block; font-size: 16px;">
                 Acceder a mi Pasaporte
           </a>
         </div>
-        
-        <p>Guarde este código en un lugar seguro. Si tiene alguna duda, no dude en contactarnos.</p>
-        
+
+        <p>Guarde este código en un lugar seguro. Si tiene alguna duda, puede responder a este correo.</p>
+
         <p>Atentamente,<br>
         El equipo de la Clínica Drs. Pi y Esteller</p>
       </body>
     </html>
   `;
-  // ------------------------------------
+  const bodyText = `Estimado/a ${patientName}:\n\n` +
+    'Hemos generado el Pasaporte Implantológico de su tratamiento en la Clínica Dental Drs. Pi y Esteller. ' +
+    'Con él podrá consultar en cualquier momento la marca, el modelo, el lote y la fecha de sus implantes.\n\n' +
+    `Su código de acceso: ${patientCode}\n` +
+    `Entre aquí e introduzca el código: ${webAppUrl}\n\n` +
+    'Guarde este código en un lugar seguro. Si tiene alguna duda, puede responder a este correo.\n\n' +
+    'Atentamente,\nEl equipo de la Clínica Drs. Pi y Esteller';
 
+  return enviarEmail('pasaport', patientCode, recipientEmail, subject, bodyText, bodyHtml);
+}
+
+/**
+ * Paciente Sense email: avisa a la Secretària con quién es, el mensaje listo para
+ * reenviar (botón de WhatsApp) y el pasaporte en PDF para imprimir.
+ * @param {{codi_acces, nombre, cuenta_quartup, dni}} paciente
+ */
+function enviarAvisSecretaria(paciente) {
+  const a = PortalModel.avisSecretaria({
+    nombre: paciente.nombre,
+    cuenta_quartup: paciente.cuenta_quartup,
+    dni: paciente.dni,
+    codi: paciente.codi_acces
+  });
+  let adjunts = [];
   try {
-    GmailApp.sendEmail(recipientEmail, subject, "", {
-      htmlBody: bodyHtml,
-      name: "Drs. Pi y Esteller", // Nombre que verá el paciente
-      from: "clinicapiesteller@gmail.com"  // Tu dirección específica
-    });
-    Logger.log('Email de pasaporte enviado con éxito a: %s', recipientEmail);
-    return { ok: true };
-
+    adjunts = [generarPasaportePDF(paciente.codi_acces)];
   } catch (e) {
-    Logger.log('ERROR al enviar correo a %s: %s', recipientEmail, e);
-    return { ok: false, message: "No s'ha pogut enviar el correu." };
+    // Sin PDF el aviso sigue siendo útil: el codi y el enlace bastan.
+    Logger.log('No s\'ha pogut generar el PDF per a ' + paciente.codi_acces + ': ' + e);
   }
+  return enviarEmail('avís secretària', paciente.codi_acces, EMAIL_SECRETARIA, a.assumpte, a.text, a.html,
+    { attachments: adjunts, replyTo: EMAIL_REMITENT });
+}
+
+/**
+ * Pasaporte en PDF generado en el servidor, con los mismos datos que ve el paciente en
+ * el portal (lista blanca, DNI enmascarado). S5 lo convertirá en el renderer único.
+ * @returns {Blob}
+ */
+function generarPasaportePDF(codi) {
+  const dades = getPatientDataVerbose(codi);
+  if (!dades.ok || !dades.found) throw new Error('No hi ha implants per al codi ' + codi);
+  const pacient = dades.implantes[0];
+  const avui = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy');
+  const html = PortalModel.htmlPasaporte(pacient, dades.implantes, dades.codi_acces, avui);
+  const nom = 'Pasaporte_' + String(pacient.nombre || 'Paciente').trim().replace(/\s+/g, '_') + '.pdf';
+  return Utilities.newBlob(html, 'text/html', nom).getAs('application/pdf').setName(nom);
+}
+
+/** Primera vez que salta el límite del portal: aviso al responsable (ALERT_EMAIL). */
+function avisarLimitPortal() {
+  const desti = PropertiesService.getScriptProperties().getProperty('ALERT_EMAIL');
+  if (!desti) {
+    Logger.log('Límit del portal assolit, però no hi ha ALERT_EMAIL a les propietats.');
+    return;
+  }
+  const l = PortalModel.LIMIT;
+  const text = `El portal del Pasaporte Implantológico ha recibido ${l.fallits} códigos incorrectos en menos de ` +
+    `${l.finestraSegons / 60} minutos y se ha pausado ${l.pausaSegons / 60} minutos.\n\n` +
+    'Puede ser alguien probando códigos al azar. Si se repite cada día, conviene revisarlo.\n' +
+    `No se volverá a avisar en las próximas ${l.avisSegons / 3600} horas.`;
+  enviarEmail('alerta', '', desti, 'Aviso: intentos fallidos en el portal del Pasaporte', text,
+    '<p>' + PortalModel.escapar(text).replace(/\n/g, '<br>') + '</p>');
 }
 
 // ==========================================
@@ -637,151 +741,91 @@ function updateCatalog(newItem) {
   });
 }
 
+// ==========================================
+//  PORTAL DEL PACIENTE (entrada solo con el Codi d'accés, ADR 0003)
+// ==========================================
+
+const MENSAJE_PAUSA = 'Demasiados intentos. Por favor, inténtelo de nuevo en unos minutos o contacte con la clínica.';
+
+/** Cuenta un intento fallido del portal y, si es la primera vez que salta el límite, avisa. */
+function contarIntentoFallido() {
+  const r = PortalModel.registrarIntentFallit(CacheService.getScriptCache(), ahoraMs());
+  if (r.nouAvis) avisarLimitPortal();
+  return r;
+}
+
 /**
- * Portal: busca el Codi d'accés asociado a un email y lo envía por correo al paciente.
+ * Portal: envía el Codi d'accés al email indicado, si está registrado. Responde siempre
+ * lo mismo, para no revelar qué emails existen. Cuenta para el límite de intentos: así
+ * nadie puede gastar la cuota diaria de emails ni llenar el buzón de un paciente.
  * @param {string} patientEmail - El email introducido por el paciente.
  * @returns {object} Resultado de la operación (ok: boolean, message: string).
  */
 function retrieveCodeByEmail(patientEmail) {
-  if (!patientEmail || patientEmail.trim() === "") {
-    return { ok: false, message: "Por favor, introduce tu dirección de correo." };
+  if (!patientEmail || String(patientEmail).trim() === "") {
+    return { ok: false, message: "Por favor, introduzca su dirección de correo." };
   }
-
-  const EMAIL_ADDRESS = patientEmail.trim().toLowerCase();
+  const RESPUESTA = { ok: true, message: "Si el email está registrado, en unos minutos recibirá su código. Revise también la carpeta de correo no deseado." };
 
   try {
+    if (PortalModel.estaPausat(CacheService.getScriptCache())) return { ok: false, message: MENSAJE_PAUSA };
+    contarIntentoFallido();
+
+    const email = String(patientEmail).trim().toLowerCase();
     const { objetos } = leerPacientes(hojaPacientes());
-    const paciente = objetos.find(o => String(o.email).trim().toLowerCase() === EMAIL_ADDRESS);
+    // Una familia puede compartir email: se envían todos sus códigos.
+    const pacientes = PacientModel.pacientsUnics(objetos.filter(o => String(o.email).trim().toLowerCase() === email));
+    if (!pacientes.length) return RESPUESTA;
 
-    if (!paciente) {
-      return { ok: false, message: "El email introducido no se encuentra registrado en nuestra base de datos." };
-    }
-
-    const code = paciente.codi_acces;
-    const name = paciente.nombre || 'Paciente';
-
-    GmailApp.sendEmail(EMAIL_ADDRESS, "Recuperación de Código de Pasaporte de Implantes", "", {
-      from: "clinicapiesteller@gmail.com",
-      name: "Drs. Pi i Esteller",
-      htmlBody: `
-        <p>Estimado/a ${name},</p>
-        <p>Hemos recibido una solicitud para recuperar tu código de paciente para el Pasaporte de Implantes de la <strong>Clínica Dental Dr. Pi Esteller</strong>.</p>
-
+    const lineasHtml = pacientes.map(p =>
+      `<p style="margin:5px 0;">${PortalModel.escapar(p.nombre || 'Paciente')}: <strong style="font-size:22px;color:#02234f;letter-spacing:2px;">${PortalModel.escapar(p.codi_acces)}</strong></p>`).join('');
+    const lineasText = pacientes.map(p => `${p.nombre || 'Paciente'}: ${p.codi_acces}`).join('\n');
+    const html = `
+        <p>Estimado/a paciente,</p>
+        <p>Hemos recibido una solicitud para recuperar su código de acceso al Pasaporte Implantológico de la <strong>Clínica Dental Drs. Pi y Esteller</strong>.</p>
         <div style="background-color: #eef4fb; padding: 15px; border-radius: 8px; text-align: center; margin: 20px 0;">
-          <p style="font-size: 18px; font-weight: bold; color: #02234f; margin: 0;">Tu Código de Paciente es:</p>
-          <h2 style="font-size: 28px; color: #02234f; margin: 5px 0;">${code}</h2>
+          <p style="font-size: 16px; font-weight: bold; color: #02234f; margin: 0 0 8px 0;">Su código de acceso:</p>
+          ${lineasHtml}
         </div>
+        <p>Puede consultar su pasaporte en <a href="${PortalModel.URL_PORTAL}">${PortalModel.URL_PORTAL}</a>.</p>
+        <p>Si no ha solicitado este código, puede ignorar este correo.</p>
+        <p>Atentamente,<br>El equipo de la Clínica Dental Drs. Pi y Esteller</p>`;
+    const text = 'Hemos recibido una solicitud para recuperar su código de acceso al Pasaporte Implantológico de la Clínica Dental Drs. Pi y Esteller.\n\n' +
+      lineasText + '\n\n' +
+      'Puede consultar su pasaporte en ' + PortalModel.URL_PORTAL + '\n\n' +
+      'Si no ha solicitado este código, puede ignorar este correo.';
 
-        <p>Puedes usar este código para acceder a todos los detalles técnicos de tus implantes en nuestra web.</p>
-        <p>Atentamente,<br>Equipo de la Clínica Dental Dr. Pi Esteller</p>
-      `
-    });
-
-    return { ok: true, message: "El código ha sido enviado con éxito a tu correo electrónico." };
+    enviarEmail('recuperació', pacientes.map(p => p.codi_acces).join(', '), email,
+      'Recuperación de su código de acceso al Pasaporte Implantológico', text, html);
+    return RESPUESTA;
 
   } catch (e) {
-    Logger.log("Error en retrieveCodeByEmail: " + e.toString());
-    // Mensaje genérico hacia el paciente; el detalle queda en el log.
-    return { ok: false, message: "Error en la ejecución del script. Contacte con la clínica." };
+    Logger.log("Error en retrieveCodeByEmail: " + e);
+    return { ok: false, message: "No hemos podido procesar la solicitud. Inténtelo de nuevo más tarde o contacte con la clínica." };
   }
 }
 
-// ==========================================
-//  SEGURIDAD Y AUTENTICACIÓN (2FA)
-// ==========================================
-
 /**
- * PASO 1: Iniciar sesión.
- * Verifica si el código existe y envía un OTP al email asociado.
+ * Entrada al portal: con el Codi d'accés basta (sin PIN por email desde S1). El código
+ * se acepta con O/0, I/L/1, minúsculas o espacios.
+ * @returns {{ok, codi_acces?, implantes?, message?}}
  */
 function initiateLogin(patientCode) {
   try {
-    const { objetos } = leerPacientes(hojaPacientes());
-    const paciente = objetos.find(o => mismoCodigo(o.codi_acces, patientCode));
+    if (PortalModel.estaPausat(CacheService.getScriptCache())) return { ok: false, message: MENSAJE_PAUSA };
 
-    // 1. Si no existe en la base de datos:
-    if (!paciente) {
-      return { ok: false, message: 'Código de paciente no encontrado.' };
+    const datos = getPatientDataVerbose(patientCode);
+    if (!datos.ok) return { ok: false, message: datos.message };
+    if (datos.ambigu) return { ok: false, message: datos.message };
+    if (!datos.found) {
+      const r = contarIntentoFallido();
+      return { ok: false, message: r.pausat ? MENSAJE_PAUSA : 'Código no encontrado. Revise que esté bien escrito (son 6 caracteres).' };
     }
-
-    const targetEmail = String(paciente.email || '').trim();
-    const targetName = paciente.nombre;
-
-    // 2. "Sense email" o sin email válido: acceso directo, sin PIN (comportamiento
-    //    previo a S2; quitar o no el 2FA se decide en S1).
-    if (paciente.sense_email || !targetEmail || targetEmail.indexOf('@') === -1) {
-      // Obtenemos los datos del paciente directamente
-      const dataResponse = getPatientDataVerbose(patientCode); 
-      return { 
-        ok: true, 
-        skipOTP: true, 
-        message: 'Acceso directo (sin email).',
-        implantes: dataResponse.implantes // Enviamos los implantes para mostrar el pasaporte
-      };
-    }
-
-    // 3. Si existe y SÍ tiene email, hacemos el OTP (tu código original intacto):
-    const pin = Math.floor(100000 + Math.random() * 900000).toString();
-    const cache = CacheService.getScriptCache();
-    cache.put('OTP_' + patientCode.toUpperCase(), pin, 600);
-    
-    // Enviar Email
-    GmailApp.sendEmail(targetEmail, `Su código de seguridad: ${pin}`, "", {
-      from: "clinicapiesteller@gmail.com",
-      name: "Drs. Pi i Esteller",
-      htmlBody: `
-        <div style="font-family: sans-serif; padding: 20px; color: #02234f;">
-          <h3>Verificación de Seguridad</h3>
-          <p>Hola ${targetName},</p>
-          <p>Para acceder a su Pasaporte Implantológico, introduzca el siguiente código de seguridad en la web:</p>
-          <div style="background: #eef4fb; padding: 15px; font-size: 24px; font-weight: bold; letter-spacing: 5px; text-align: center; border-radius: 8px;">
-            ${pin}
-          </div>
-          <p style="font-size: 12px; color: #666;">Este código expira en 10 minutos.</p>
-        </div>
-      `
-    });
-
-    const maskedEmail = targetEmail.replace(/^(.)(.*)(.@.*)$/, (match, a, b, c) => a + '***' + c);
-
-    return { 
-      ok: true, 
-      requiresOTP: true, 
-      skipOTP: false,
-      maskedEmail: maskedEmail, 
-      message: 'Código encontrado. Verificación enviada.' 
-    };
+    return { ok: true, codi_acces: datos.codi_acces, implantes: datos.implantes };
 
   } catch (e) {
     Logger.log("Error Login: " + e);
-    return { ok: false, message: 'Error real: ' + e.message };
-  }
-}
-
-function verifyOTPAndGetData(patientCode, inputPin) {
-  try {
-    const cache = CacheService.getScriptCache();
-    const storedPin = cache.get('OTP_' + patientCode.toUpperCase());
-    
-    if (!storedPin) {
-      return { ok: false, message: 'El código de seguridad ha caducado. Vuelve a empezar.' };
-    }
-    
-    if (storedPin !== inputPin) {
-      return { ok: false, message: 'Código de seguridad incorrecto.' };
-    }
-    
-    // ¡ÉXITO! Borramos el PIN para que no se pueda reusar (opcional, pero buena práctica)
-    cache.remove('OTP_' + patientCode.toUpperCase());
-    
-    // AHORA sí llamamos a la función que busca los datos (la que ya tenías)
-    // Reutilizamos tu función getPatientDataVerbose existente
-    const dataResponse = getPatientDataVerbose(patientCode);
-    
-    return dataResponse; // Devuelve { ok: true, implantes: [...] }
-
-  } catch (e) {
-    return { ok: false, message: 'Error verificando credenciales.' };
+    return { ok: false, message: 'No hemos podido consultar el pasaporte. Inténtelo de nuevo más tarde.' };
   }
 }
 
@@ -903,7 +947,51 @@ function comprobarTodo() {
     lineas.push("⏭️ Gemini i OpenRouter: no comprovats (primer arregla els permisos de dalt).");
   }
 
+  lineas.push(diagnosticCodis());
+  lineas.push(diagnosticRebots());
+
   SpreadsheetApp.getUi().alert("Diagnòstic", lineas.join("\n\n"), SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+/** Codis d'accés que el paciente no podría usar bien: convertidos a número, mal de largo o que chocan. */
+function diagnosticCodis() {
+  try {
+    const { objetos } = leerPacientes(hojaPacientes());
+    const r = PortalModel.analitzarCodis(objetos.map(o => o.codi_acces), ['DEMO2026']);
+    const problemes = [];
+    if (r.numerics.length) problemes.push("convertits en número per Sheets (cal tornar a escriure'ls com a text): " + r.numerics.join(', '));
+    if (r.llargadaRara.length) problemes.push('sense 6 caràcters: ' + r.llargadaRara.join(', '));
+    if (r.xocs.length) problemes.push('es confonen entre ells (O/0, I/1): ' + r.xocs.map(x => x.join(' = ')).join('; ') + ". El portal no deixarà entrar amb cap d'aquests si no s'escriu exacte.");
+    return problemes.length
+      ? "⚠️ Codis d'accés a revisar:\n- " + problemes.join('\n- ')
+      : "✅ Codis d'accés: tots correctes";
+  } catch (e) {
+    return "❌ Codis d'accés: no s'han pogut revisar (" + e.message + ')';
+  }
+}
+
+/** Emails rebotados en los últimos 30 días, en el Gmail de la cuenta que ejecuta el diagnóstico. */
+function diagnosticRebots() {
+  try {
+    const fils = GmailApp.search('from:(mailer-daemon OR postmaster) newer_than:30d', 0, 50);
+    const adreces = {};
+    fils.forEach(f => f.getMessages().forEach(m => {
+      const capcalera = String(m.getHeader('X-Failed-Recipients') || '').trim();
+      let llista = capcalera ? capcalera.split(/[,\s]+/) : [];
+      if (!llista.length) {
+        const cos = String(m.getPlainBody() || '');
+        const trobat = cos.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [];
+        llista = trobat.filter(a => !/mailer-daemon|postmaster|googlemail\.com$|google\.com$/i.test(a));
+      }
+      llista.filter(Boolean).forEach(a => { adreces[a.toLowerCase()] = true; });
+    }));
+    const ll = Object.keys(adreces);
+    return ll.length
+      ? '⚠️ Emails que han rebotat (últims 30 dies, en aquest compte de Gmail): ' + ll.join(', ') + ". Comprova que estiguin ben escrits o fes-los arribar el codi d'una altra manera."
+      : '✅ Emails rebotats: cap en els últims 30 dies (en aquest compte de Gmail)';
+  } catch (e) {
+    return "⏭️ Emails rebotats: no s'han pogut revisar (" + e.message + ')';
+  }
 }
 
 // Alias de compatibilidad con el nombre anterior del diagnóstico.
@@ -1254,10 +1342,7 @@ function doPost(e) {
       
     } else if (action === 'initiateLogin') {
       result = initiateLogin(params.code);
-      
-    } else if (action === 'verifyOTPAndGetData') {
-      result = verifyOTPAndGetData(params.currentPatientCode, params.pin);
-      
+
     } else {
       result = { ok: false, message: 'Acción no reconocida por el servidor.' };
     }
@@ -1267,8 +1352,9 @@ function doPost(e) {
       .setMimeType(ContentService.MimeType.JSON);
       
   } catch (error) {
-    // Si hay un fallo, le avisamos a Netlify
-    return ContentService.createTextOutput(JSON.stringify({ok: false, message: error.toString()}))
+    // Si hay un fallo, le avisamos a Netlify (sin detalles internos: el portal es público)
+    Logger.log('Error en doPost: ' + error);
+    return ContentService.createTextOutput(JSON.stringify({ok: false, message: 'No hemos podido procesar la solicitud. Inténtelo de nuevo más tarde.'}))
       .setMimeType(ContentService.MimeType.JSON);
   }
 }
