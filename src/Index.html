@@ -53,15 +53,6 @@
       }
       input[type=text]:focus, input[type=email]:focus { border-color: #02234f; }
 
-      /* Estilo especial para el PIN OTP */
-      .otp-input {
-        text-align: center;
-        letter-spacing: 4px;
-        font-weight: bold;
-        font-size: 18px !important;
-        width: 180px !important;
-      }
-
       button {
         padding: 12px 20px;
         font-size: 15px;
@@ -151,23 +142,12 @@
       <div id="step-1-code" class="fade-in">
         <p>Introduce tu código para verificar tu identidad.</p>
         <form id="formCode">
-          <input id="codigoInput" type="text" placeholder="Ej: ABC1234" autocomplete="off" />
+          <input id="codigoInput" type="text" placeholder="Ej: ABC234" autocomplete="off" />
           <button id="btnCode" type="submit">Siguiente</button>
         </form>
         
         <div style="margin-top: 15px;">
             <a href="#" id="forgotCodeLink" style="font-size: 14px; color: #02234f;">¿He olvidado mi código?</a>
-        </div>
-      </div>
-
-      <div id="step-2-otp" style="display:none;" class="fade-in">
-        <p>Por seguridad, hemos enviado un código a: <br><strong id="emailDisplay" style="color:#02234f;">...</strong></p>
-        <form id="formOtp">
-          <input id="otpInput" class="otp-input" type="text" placeholder="######" maxlength="6" inputmode="numeric" autocomplete="off" />
-          <button id="btnOtp" type="submit">Ver Pasaporte</button>
-        </form>
-        <div style="margin-top: 15px;">
-          <a href="#" onclick="resetView(event)" style="font-size: 13px; color: #777;">¿No lo has recibido? Volver atrás</a>
         </div>
       </div>
 
@@ -210,11 +190,11 @@
             <table style="width:100%; border:none;">
               <tr>
                 <td style="width:50%; padding:5px;"><strong>Paciente:</strong> <span id="pdf-nombre"></span></td>
-                <td style="width:50%; padding:5px;"><strong>id_quartup:</strong> <span id="pdf-id_quartup"></span></td>
+                <td style="width:50%; padding:5px;"><span id="pdf-dni-fila"><strong>DNI:</strong> <span id="pdf-dni"></span></span></td>
               </tr>
               <tr>
                 <td style="padding:5px;"><strong>Fecha Emisión:</strong> <span id="pdf-fecha"></span></td>
-                <td style="padding:5px;"><strong>Nº Historial:</strong> <span id="pdf-codigo"></span></td>
+                <td style="padding:5px;"><strong>Código de acceso:</strong> <span id="pdf-codigo"></span></td>
               </tr>
             </table>
           </div>
@@ -247,8 +227,8 @@
 
       // Variables de Estado
       let currentPatientCode = '';
-      // Código del paciente de demostración (datos sintéticos, sin email => acceso
-      // directo sin OTP). Publicado en el README para que cualquiera pruebe el portal.
+      // Código del paciente de demostración (datos sintéticos). Publicado en el README
+      // para que cualquiera pruebe el portal.
       const DEMO_CODE = 'DEMO2026';
       const API_URL = "https://script.google.com/macros/s/AKfycbymkCc2Bf0pW82p6wUbpCIzIigaeYX9g7P-wTQxgTMpbAsqjF9JyB-W7LyCatuepz3O/exec";
       // Referencias DOM
@@ -256,12 +236,6 @@
       const formCode = document.getElementById('formCode');
       const codigoInput = document.getElementById('codigoInput');
       const btnCode = document.getElementById('btnCode');
-
-      const step2 = document.getElementById('step-2-otp');
-      const formOtp = document.getElementById('formOtp');
-      const otpInput = document.getElementById('otpInput');
-      const btnOtp = document.getElementById('btnOtp');
-      const emailDisplay = document.getElementById('emailDisplay');
 
       const status = document.getElementById('status');
       const resultArea = document.getElementById('resultArea');
@@ -313,44 +287,26 @@
             btnCode.disabled = false;
             btnCode.textContent = 'Siguiente';
 
-            if (res.ok) {
-              currentPatientCode = code; 
+            // Desde S1 no hay PIN: con el código basta.
+            if (res.ok && res.implantes && res.implantes.length > 0) {
+              currentPatientCode = res.codi_acces || code.toUpperCase();
+              step1.style.display = 'none';
+              forgotLink.style.display = 'none';
+              status.innerHTML = '<span class="ok">Identidad verificada. ✅</span>';
 
-              // --- CASO A: NO TIENE EMAIL (ACCESO DIRECTO) ---
-              if (res.skipOTP) {
-                step1.style.display = 'none';
-                status.innerHTML = '<span class="ok">Identidad verificada. ✅</span>';
-                
-                if (res.implantes && res.implantes.length > 0) {
-                    res.implantes.sort((a, b) => {
-                        let posA = parseInt(String(a.posicion || a.posiciondiente).replace(/\D/g, '')) || 0;
-                        let posB = parseInt(String(b.posicion || b.posiciondiente).replace(/\D/g, '')) || 0;
-                        return posA - posB;
-                    });
-
-                    resultArea.innerHTML = renderMultiImplantView(res.implantes);
-                    if (code.toUpperCase() === DEMO_CODE) {
-                      resultArea.insertAdjacentHTML('afterbegin',
-                        '<div class="fade-in" style="background:#fffbeb; border:2px dashed #b45309; color:#92400e; padding:12px 16px; border-radius:8px; margin-top:20px; font-size:13px; text-align:center;">' +
-                        '🧪 <strong>Modo demo</strong>: paciente ficticio con datos sintéticos. ' +
-                        '<em>Demo mode: fictitious patient, synthetic data.</em></div>');
-                    }
-                    downloadAction.style.display = 'block';
-                } else {
-                    status.innerHTML = '<span class="error">No se encontraron implantes.</span>';
-                }
-
-              // --- CASO B: SÍ TIENE EMAIL (PEDIR PIN) ---
-              } else if (res.requiresOTP) {
-                step1.style.display = 'none';
-                step2.style.display = 'block';
-                emailDisplay.textContent = res.maskedEmail;
-                otpInput.focus();
-                status.innerHTML = '<span class="ok">Código correcto. Revisa tu email.</span>';
+              ordenarImplantes(res.implantes);
+              resultArea.innerHTML = renderMultiImplantView(res.implantes);
+              if (currentPatientCode === DEMO_CODE) {
+                resultArea.insertAdjacentHTML('afterbegin',
+                  '<div class="fade-in" style="background:#fffbeb; border:2px dashed #b45309; color:#92400e; padding:12px 16px; border-radius:8px; margin-top:20px; font-size:13px; text-align:center;">' +
+                  '🧪 <strong>Modo demo</strong>: paciente ficticio con datos sintéticos. ' +
+                  '<em>Demo mode: fictitious patient, synthetic data.</em></div>');
               }
-              
+              downloadAction.style.display = 'block';
+            } else if (res.ok) {
+              status.innerHTML = '<span class="error">No se encontraron implantes para este código.</span>';
             } else {
-              status.innerHTML = '<span class="error">' + (res.message || 'Error desconocido') + '</span>';
+              status.innerHTML = '<span class="error">' + escapeHtml(res.message || 'Error desconocido') + '</span>';
             }
         })
         .catch(err => {
@@ -360,64 +316,24 @@
         });
       });
 
-      // --- PASO 2 ---
-      formOtp.addEventListener('submit', function(e){
-        e.preventDefault();
-        const pin = otpInput.value.trim();
-        status.innerHTML = '';
-
-        if (!pin || pin.length < 6) {
-          status.innerHTML = '<span class="error">Introduce el código de 6 dígitos del email.</span>';
-          return;
-        }
-
-        btnOtp.disabled = true;
-        btnOtp.textContent = 'Validando...';
-
-        fetch(API_URL, {
-            method: 'POST',
-            body: JSON.stringify({ action: 'verifyOTPAndGetData', currentPatientCode: currentPatientCode, pin: pin }),
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' }
-        })
-        .then(res => res.json())
-        .then(res => {
-            btnOtp.disabled = false;
-            btnOtp.textContent = 'Ver Pasaporte';
-
-            if (res.ok && res.implantes && res.implantes.length > 0) {
-              
-              res.implantes.sort((a, b) => {
-                  let posA = parseInt(String(a.posicion || a.posiciondiente).replace(/\D/g, '')) || 0;
-                  let posB = parseInt(String(b.posicion || b.posiciondiente).replace(/\D/g, '')) || 0;
-                  return posA - posB;
-              });
-
-              step2.style.display = 'none';
-              status.innerHTML = '<span class="ok">Identidad verificada correctamente ✅</span>';
-              
-              resultArea.innerHTML = renderMultiImplantView(res.implantes);
-              downloadAction.style.display = 'block';
-
-            } else {
-              status.innerHTML = '<span class="error">' + (res.message || 'Código de seguridad incorrecto.') + '</span>';
-            }
-        })
-        .catch(err => {
-            btnOtp.disabled = false;
-            btnOtp.textContent = 'Ver Pasaporte';
-            status.innerHTML = '<span class="error">Error de conexión.</span>';
+      // --- ORDEN DE LOS IMPLANTES (por posición dental) ---
+      function ordenarImplantes(implantes) {
+        implantes.sort((a, b) => {
+          let posA = parseInt(String(a.posicion || a.posiciondiente).replace(/\D/g, '')) || 0;
+          let posB = parseInt(String(b.posicion || b.posiciondiente).replace(/\D/g, '')) || 0;
+          return posA - posB;
         });
-      });
+        return implantes;
+      }
 
       // --- RESET VIEW ---
       window.resetView = function(e) {
         if(e) e.preventDefault();
         step1.style.display = 'block';
-        step2.style.display = 'none';
+        forgotLink.style.display = 'block';
         status.innerHTML = '';
         resultArea.innerHTML = '';
-        downloadAction.style.display = 'none'; 
-        otpInput.value = '';
+        downloadAction.style.display = 'none';
         currentPatientCode = '';
       };
 
@@ -425,14 +341,12 @@
       function renderMultiImplantView(implantes) {
         if (!implantes || implantes.length === 0) return '';
         const p = implantes[0];
-        
+
+        // Solo lo que el servidor deja ver (lista blanca): nombre y, si lo hay, el DNI parcial.
         let html = `
           <div style="background:#eef4fb; padding:15px; border-radius:8px; margin-top:20px; text-align:left;" class="fade-in">
             <h3 style="margin:0; color:#02234f;">👤 ${escapeHtml(p.nombre)}</h3>
-            <p style="margin:5px 0; font-size:14px;">
-                <strong>id_quartup:</strong> ${escapeHtml(p.cuenta_quartup)} <br> 
-                <strong>Email:</strong> ${escapeHtml(p.email)}
-            </p>
+            ${p.dni_parcial ? `<p style="margin:5px 0; font-size:14px;"><strong>DNI:</strong> ${escapeHtml(p.dni_parcial)}</p>` : ''}
           </div>
         `;
 
@@ -525,7 +439,8 @@
 
         // 1. Rellenar datos Cabecera
         document.getElementById('pdf-nombre').textContent = p.nombre || '';
-        document.getElementById('pdf-id_quartup').textContent = p.cuenta_quartup || '';
+        document.getElementById('pdf-dni').textContent = p.dni_parcial || '';
+        document.getElementById('pdf-dni-fila').style.display = p.dni_parcial ? '' : 'none';
         document.getElementById('pdf-codigo').textContent = currentPatientCode;
         document.getElementById('pdf-fecha').textContent = new Date().toLocaleDateString('es-ES');
 

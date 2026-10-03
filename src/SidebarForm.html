@@ -256,6 +256,11 @@
                 <label for="sendEmail">Enviar el pasaport per email al pacient</label>
             </div>
 
+            <div class="checkbox-group form-group hidden" id="avisSecretariaGrup" style="margin-bottom: 15px;">
+                <input type="checkbox" id="avisSecretaria" value="true">
+                <label for="avisSecretaria">Avisar la secretària (li arriba un email amb el codi, el missatge per WhatsApp i el PDF)</label>
+            </div>
+
             <button type="submit" class="btn-primary" id="save-btn" style="font-size: 14px; padding: 12px;">💾 Desar-ho tot</button>
         </form>
     </div>
@@ -350,6 +355,8 @@
     const statusDiv = document.getElementById('status');
     const saveBtn = document.getElementById('save-btn');
     const sendEmailCheckbox = document.getElementById('sendEmail');
+    const avisSecretariaCheckbox = document.getElementById('avisSecretaria');
+    const avisSecretariaGrup = document.getElementById('avisSecretariaGrup');
     const implantContainer = document.getElementById('implantContainer'); 
 
     // Variable global para almacenar las opciones del catálogo
@@ -774,9 +781,12 @@
             input.disabled = casilla.checked;
         });
 
-        // Sin email no hay a quién enviar el pasaporte.
+        // Sin email no hay a quién enviar el pasaporte: se avisa a la secretària (por defecto).
         sendEmailCheckbox.disabled = senseEmailCheckbox.checked;
         if (senseEmailCheckbox.checked) sendEmailCheckbox.checked = false;
+        const eraVisible = !avisSecretariaGrup.classList.contains('hidden');
+        avisSecretariaGrup.classList.toggle('hidden', !senseEmailCheckbox.checked);
+        if (senseEmailCheckbox.checked && !eraVisible) avisSecretariaCheckbox.checked = true;
 
         marcarFaltas();
     }
@@ -1046,6 +1056,7 @@
 
         const formData = Object.assign({}, paciente, {
             sendEmail: sendEmailCheckbox.checked ? 'true' : 'false',
+            avisSecretaria: senseEmailCheckbox.checked && avisSecretariaCheckbox.checked ? 'true' : 'false',
             implantes: implantsArray
         });
         const enviar = () => llamarServidor('saveNewImplant', [formData], handleSaveResponse, handleError);
@@ -1087,6 +1098,10 @@
             msg += `<p style="color: #166534; margin-top: 10px;">✅ Pasaport enviat per email a ${escapeHtml(emailInput.value)}.</p>`;
         } else if (res.emailError) {
             msg += `<p style="color: #991b1b; margin-top: 10px;">⚠️ ERROR en enviar l'email: ${escapeHtml(res.emailError)}</p>`;
+        } else if (res.avisSecretaria && res.avisSecretaria.enviat) {
+            msg += `<p style="color: #166534; margin-top: 10px;">✅ Avís enviat a la secretària, amb el codi, el missatge per WhatsApp i el PDF.</p>`;
+        } else if (res.avisSecretaria) {
+            msg += `<p style="color: #991b1b; margin-top: 10px;">⚠️ No s'ha pogut avisar la secretària: ${escapeHtml(res.avisSecretaria.error)} Fes-li arribar el codi d'accés d'una altra manera.</p>`;
         } else if (senseEmailCheckbox.checked) {
             msg += `<p style="color: #b45309; margin-top: 10px;">ℹ️ El pacient no té email: fes-li arribar el codi d'accés d'una altra manera.</p>`;
         }
@@ -1105,6 +1120,8 @@
         fijarCasilla(senseDniCheckbox, false, false);
         sendEmailCheckbox.disabled = false;
         sendEmailCheckbox.checked = true;
+        avisSecretariaGrup.classList.add('hidden');
+        avisSecretariaCheckbox.checked = false;
         cuentaAviso.classList.add('hidden');
         ocultarConflicte();
         pacienteActual = null;
