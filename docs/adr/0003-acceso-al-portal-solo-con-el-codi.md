@@ -24,8 +24,11 @@
    `doGet`.** El web app es anónimo y, desde su página, cualquiera puede llamar con
    `google.script.run` a cualquier función global de `Código.js` que no termine en `_`. Por
    eso las funciones solo del servidor terminan en `_`, y las del panel y del menú empiezan
-   por `exigirUsuariIntern_()`, que exige una cuenta de Google identificada: el visitante
-   anónimo no la tiene. Esto ya era un agujero antes de S1 (`buscarPacient` devolvía email,
+   por `exigirUsuariIntern_()`, que exige que la llamada venga de la hoja:
+   `SpreadsheetApp.getUi()` existe en el panel y en el menú, y no en el web app. No se usa
+   `Session.getActiveUser()` como prueba, porque exige el permiso `userinfo.email`, que el
+   manifiesto no declara. Añadirlo obligaría a todas las cuentas a volver a autorizar. Se
+   probó en vivo y el panel dejó de funcionar. Esto ya era un agujero antes de S1 (`buscarPacient` devolvía email,
    Cuenta y DNI completo), pero sin PIN pasaba a ser la puerta principal.
 
 ## Por qué
