@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="ca">
 <head>
     <base target="_top">
-    <title>Añadir Nuevo Implante</title>
+    <title>Afegir implant</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     
@@ -146,6 +146,23 @@
             font-weight: 600;
             margin-top: 4px;
         }
+        /* Identidad del paciente: avisos junto al campo y datos que faltan */
+        .field-help { font-size: 11px; color: #64748b; margin-top: 3px; }
+        .field-warning {
+            font-size: 12px;
+            color: #b45309;
+            background: #fffbeb;
+            border: 1px solid #fcd34d;
+            border-radius: 6px;
+            padding: 6px 8px;
+            margin-top: 6px;
+        }
+        .field-warning button { width: auto; margin-top: 6px; padding: 4px 8px; font-size: 12px; background: #f59e0b; color: white; }
+        input.falta { border: 2px solid #f59e0b; background: #fffbeb; }
+        .inline-check { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; font-weight: 500; color: #475569; }
+        .inline-check input { width: 16px; height: 16px; margin: 0; accent-color: #0ea5e9; cursor: pointer; }
+        .inline-check label { margin: 0; font-weight: 500; cursor: pointer; }
+        input:disabled { background: #f1f5f9; color: #64748b; }
     </style>
 </head>
 <body>
@@ -153,73 +170,92 @@
     <!-- Sesión rota (multi-login o cuenta sin autorizar): se muestra ANTES de que nadie
          empiece a escanear, para no perder trabajo contra un panel muerto. -->
     <div id="authBanner" class="hidden" style="background:#fef2f2; border:2px solid #dc2626; border-radius:8px; padding:14px; margin-bottom:14px; color:#7f1d1d;">
-        <div style="font-weight:700; font-size:14px; margin-bottom:6px;">⛔ Este panel no puede conectar con la hoja</div>
+        <div style="font-weight:700; font-size:14px; margin-bottom:6px;">⛔ Aquest panell no pot connectar amb la fulla</div>
         <div style="font-size:12px; line-height:1.5;">
-            Tu navegador tiene <b>más de una cuenta de Google abierta</b>, o esta cuenta aún no ha
-            autorizado la herramienta.
+            El navegador té <b>més d'un compte de Google obert</b>, o aquest compte encara no ha
+            autoritzat l'eina.
             <ol style="margin:8px 0 0 18px; padding:0;">
-                <li>Cierra las demás cuentas de Google (o abre la hoja en una ventana de incógnito con la cuenta de la clínica).</li>
-                <li>En el menú <b>Pasaporte Implantológico 🦷</b>, pulsa <b>🔑 Autorizar mi cuenta</b> y acepta los permisos.</li>
-                <li>Cierra este panel y vuelve a abrirlo desde el menú.</li>
+                <li>Tanca els altres comptes de Google (o obre la fulla en una finestra d'incògnit amb el compte de la clínica).</li>
+                <li>Al menú <b>Pasaport Implantològic 🦷</b>, prem <b>🔑 Autoritzar el meu compte</b> i accepta els permisos.</li>
+                <li>Tanca aquest panell i torna'l a obrir des del menú.</li>
             </ol>
         </div>
     </div>
 
     <div class="card">
         <div class="form-group">
-            <label for="id_quartup">1. Introducir id_quartup/Identificador:</label>
-            <input type="text" id="id_quartup" placeholder="Ej: 12345678A" required>
-            <button class="btn-primary" id="search-id_quartup-btn" style="margin-top: 8px;" onclick="searchid_quartup()">🔍 Buscar Paciente</button>
+            <label for="busqueda">1. Cerca el pacient:</label>
+            <input type="text" id="busqueda" placeholder="Cuenta Quartup, DNI o codi d'accés">
+            <div class="field-help">Si és nou, posa-hi la seva Cuenta Quartup.</div>
+            <button class="btn-primary" id="search-btn" style="margin-top: 8px;" onclick="buscarPaciente()">🔍 Cercar pacient</button>
         </div>
         <div id="status"></div>
     </div>
 
     <div id="patientSection" class="hidden">
-        
+
         <div class="card" style="background: #f8fafc; border-color: #bae6fd;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <label style="margin: 0; color: #0369a1;">Código Paciente:</label>
+                <label style="margin: 0; color: #0369a1;">Codi d'accés:</label>
                 <strong id="patientCodeDisplay" style="font-size: 14px;"></strong>
             </div>
             <input type="hidden" id="pacienteCodigo" value="GENERAR">
 
             <div class="form-group">
-                <label for="nombre">Nombre Completo:</label>
-                <input type="text" id="nombre" required>
+                <label for="cuenta_quartup">Cuenta Quartup:</label>
+                <input type="text" id="cuenta_quartup" inputmode="numeric" placeholder="Ex: 43001234">
+                <div class="field-help">El número de 'Cuenta' del pacient a Quartup.</div>
+                <div id="cuentaAviso" class="field-warning hidden"></div>
+            </div>
+            <div class="form-group">
+                <label for="nombre">Nom complet:</label>
+                <input type="text" id="nombre">
             </div>
             <div class="form-group">
                 <label for="email">Email:</label>
-                <input type="email" id="email" required>
+                <input type="email" id="email">
+                <div class="inline-check">
+                    <input type="checkbox" id="sense_email">
+                    <label for="sense_email">Sense email (el pacient no en té)</label>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="dni">DNI / NIE:</label>
+                <input type="text" id="dni" placeholder="Ex: 12345678A">
+                <div class="inline-check">
+                    <input type="checkbox" id="sense_dni">
+                    <label for="sense_dni">Sense DNI (el pacient no en té)</label>
+                </div>
             </div>
         </div>
-        
+
         <div class="card" style="background: #f0f9ff; border: 2px dashed #7dd3fc; text-align: center;">
-            <h4 style="margin-top:0; color:#0369a1; font-weight: 700;">📷 Escáner IA de Cirugía</h4>
-            <p style="font-size:12px; margin-bottom:12px; color:#475569;">Sube una foto de la hoja con todas las pegatinas. Detectaremos todos los implantes automáticamente.</p>
-            
+            <h4 style="margin-top:0; color:#0369a1; font-weight: 700;">📷 Escàner IA de la cirurgia</h4>
+            <p style="font-size:12px; margin-bottom:12px; color:#475569;">Puja una foto del full amb totes les etiquetes. Detectarem tots els implants automàticament.</p>
+
             <input type="file" id="masterFileInput" accept="image/*,application/pdf" style="display:none" onchange="handleMasterScan(this)">
-            
+
             <button type="button" class="btn-scan" onclick="document.getElementById('masterFileInput').click()">
-                ✨ Escanear Hoja Completa
+                ✨ Escanejar el full sencer
             </button>
             <div id="masterScanStatus" style="font-size:12px; margin-top:10px; font-weight:600;"></div>
         </div>
-        
+
         <form id="implantForm">
-            <h4 style="margin-bottom: 12px;">2. Datos Técnicos del Implante(s)</h4>
-            
+            <h4 style="margin-bottom: 12px;">2. Dades tècniques dels implants</h4>
+
             <div id="implantContainer"></div>
-            
-            <button type="button" class="btn-add" onclick="addImplantSection()">➕ Añadir Implante Manualmente</button>
-            
-            <hr> 
-            
+
+            <button type="button" class="btn-add" onclick="addImplantSection()">➕ Afegir un implant a mà</button>
+
+            <hr>
+
             <div class="checkbox-group form-group" style="margin-top: 20px; margin-bottom: 15px;">
                 <input type="checkbox" id="sendEmail" value="true" checked>
-                <label for="sendEmail">Enviar Pasaporte por Email al paciente</label>
+                <label for="sendEmail">Enviar el pasaport per email al pacient</label>
             </div>
 
-            <button type="submit" class="btn-primary" id="save-btn" style="font-size: 14px; padding: 12px;">💾 Guardar Todo</button>
+            <button type="submit" class="btn-primary" id="save-btn" style="font-size: 14px; padding: 12px;">💾 Desar-ho tot</button>
         </form>
     </div>
 
@@ -229,31 +265,31 @@
 
 <template id="implant-template">
     <div class="implant-section" data-index="0">
-        <h5 style="margin-top: 0; display: inline-block; font-size: 14px; color: #0f172a;">Implante #<span class="implant-number">1</span></h5>
+        <h5 style="margin-top: 0; display: inline-block; font-size: 14px; color: #0f172a;">Implant #<span class="implant-number">1</span></h5>
         <button type="button" class="btn-remove remove-implant-btn">❌ Eliminar</button>
         <hr style="margin: 8px 0 12px 0;">
 
         <div class="form-group">
-            <label for="posicion">Posición (Diente):</label>
-            <input type="text" class="implant-field" name="posicion" placeholder="Ej: 14 o 46" required>
+            <label>Posició (dent):</label>
+            <input type="text" class="implant-field" name="posicion" placeholder="Ex: 14 o 46" required>
         </div>
         <div class="form-group">
-            <label for="fechaColocacion">Fecha de Colocación:</label>
+            <label>Data de col·locació:</label>
             <input type="date" class="implant-field" name="fecha_colocacion" required>
         </div>
-        
+
         <div class="form-group">
-            <label for="marca">Marca:</label>
+            <label>Marca:</label>
             <input type="text" class="implant-field" name="marca" list="marcaOptions" required>
         </div>
-        
+
         <div class="form-group">
-            <label for="modelo">Modelo:</label>
+            <label>Model:</label>
             <input type="text" class="implant-field" name="modelo" list="modeloOptions" required>
         </div>
-        
+
         <div class="form-group">
-            <label>Dimensiones (Diámetro x Longitud):</label>
+            <label>Dimensions (diàmetre x longitud):</label>
             <div class="dim-wrapper">
                 <input type="number" step="0.01" placeholder="Ø" class="dim-calc-diameter" required>
                 <span>x</span>
@@ -263,39 +299,51 @@
             <input type="hidden" class="implant-field" name="dimensiones" >
         </div>
         <div class="form-group">
-            <label for="plataforma">Plataforma:</label>
+            <label>Plataforma:</label>
             <input type="text" class="implant-field" name="plataforma" required>
         </div>
-        
+
         <div class="form-group">
-            <label for="conexion">Conexión:</label>
+            <label>Connexió:</label>
             <input type="text" class="implant-field" name="conexion" list="conexionOptions" required>
         </div>
-        
+
         <div class="form-group">
-            <label for="pilar">Pilar transepitelial:</label>
+            <label>Pilar transepitelial:</label>
             <input type="text" class="implant-field" name="pilar" required>
         </div>
         <div class="form-group">
-            <label for="codImplante">Código de Implante (Ref. Interna):</label>
+            <label>Codi d'implant (ref.):</label>
             <input type="text" class="implant-field" name="cod_implante" required>
         </div>
         <div class="form-group">
-            <label for="lote">Lote:</label>
+            <label>Lot:</label>
             <input type="text" class="implant-field" name="lote" required>
         </div>
     </div>
 </template>
 
+<!-- Mismas reglas de validación que el servidor: el código de PacientModel.js lo inyecta
+     showSidebar() (Código.js), así que no hay una segunda copia que mantener. -->
+<script>
+    <?!= pacientModelJs ?>
+    var PacientModel = crearPacientModel();
+</script>
+
 <script>
     // Variables globales
-    const id_quartupInput = document.getElementById('id_quartup');
-    const searchBtn = document.getElementById('search-id_quartup-btn');
+    const busquedaInput = document.getElementById('busqueda');
+    const searchBtn = document.getElementById('search-btn');
     const patientSection = document.getElementById('patientSection');
     const patientCodeDisplay = document.getElementById('patientCodeDisplay');
     const pacienteCodigoInput = document.getElementById('pacienteCodigo');
+    const cuentaInput = document.getElementById('cuenta_quartup');
+    const cuentaAviso = document.getElementById('cuentaAviso');
     const nombreInput = document.getElementById('nombre');
     const emailInput = document.getElementById('email');
+    const senseEmailCheckbox = document.getElementById('sense_email');
+    const dniInput = document.getElementById('dni');
+    const senseDniCheckbox = document.getElementById('sense_dni');
     const implantForm = document.getElementById('implantForm');
     const statusDiv = document.getElementById('status');
     const saveBtn = document.getElementById('save-btn');
@@ -336,13 +384,13 @@
 
         Swal.fire({
             icon: 'error',
-            title: 'Cuenta de Google incorrecta',
+            title: 'Compte de Google incorrecte',
             html: bloquear
-                ? `<p style="text-align:left; font-size:14px;">Este panel no puede conectar con la hoja.</p>
-                   <p style="text-align:left; font-size:14px;">Suele pasar cuando hay <b>más de una cuenta de Google abierta</b> en el navegador: el panel se conecta con la cuenta equivocada.</p>
-                   <p style="text-align:left; font-size:14px;">Cierra las demás cuentas (o usa una ventana de incógnito con la cuenta de la clínica), autoriza desde el menú si hace falta, y vuelve a abrir el panel.</p>`
-                : `<p style="text-align:left; font-size:14px;"><b>No cierres este panel: tus datos siguen aquí.</b></p>
-                   <p style="text-align:left; font-size:14px;">La conexión con la hoja se ha perdido porque hay más de una cuenta de Google abierta en el navegador. Ciérralas en otra pestaña (o autoriza esta cuenta desde el menú <b>Pasaporte Implantológico 🦷 → 🔑 Autorizar mi cuenta</b>) y vuelve a pulsar el botón.</p>`,
+                ? `<p style="text-align:left; font-size:14px;">Aquest panell no pot connectar amb la fulla.</p>
+                   <p style="text-align:left; font-size:14px;">Sol passar quan hi ha <b>més d'un compte de Google obert</b> al navegador: el panell es connecta amb el compte equivocat.</p>
+                   <p style="text-align:left; font-size:14px;">Tanca els altres comptes (o fes servir una finestra d'incògnit amb el compte de la clínica), autoritza des del menú si cal, i torna a obrir el panell.</p>`
+                : `<p style="text-align:left; font-size:14px;"><b>No tanquis aquest panell: les teves dades continuen aquí.</b></p>
+                   <p style="text-align:left; font-size:14px;">S'ha perdut la connexió amb la fulla perquè hi ha més d'un compte de Google obert al navegador. Tanca'ls en una altra pestanya (o autoritza aquest compte des del menú <b>Pasaport Implantològic 🦷 → 🔑 Autoritzar el meu compte</b>) i torna a prémer el botó.</p>`,
             confirmButtonColor: '#dc2626',
             allowOutsideClick: false
         });
@@ -424,7 +472,7 @@
             sectionElement.remove();
             updateImplantNumbers();
         } else {
-            Toast.fire({ icon: 'warning', title: 'Debe haber al menos un implante.' });
+            Toast.fire({ icon: 'warning', title: 'Hi ha d\'haver almenys un implant.' });
         }
     };
 
@@ -462,7 +510,7 @@
     }
 
     function loadImplantOptions() {
-        showStatus('Cargando catálogo...', 'info');
+        showStatus('Carregant el catàleg...', 'info');
         // Esta llamada, que ya existía, hace de autodiagnóstico al abrir el panel: si la
         // sesión está rota, se sabe aquí, antes de que nadie escanee nada.
         llamarServidor('getImplantOptions', [], handleOptionsResponse, handleErrorCarga);
@@ -490,7 +538,7 @@
             }
             showStatus('', 'info'); // Limpiar status de carga
         } else {
-            showStatus(res.message || 'Error al cargar el catálogo.', 'error');
+            showStatus(res.message || 'Error en carregar el catàleg.', 'error');
         }
     }
 
@@ -514,16 +562,16 @@
 
         const placeholder = document.createElement('option');
         placeholder.value = '';
-        placeholder.textContent = '— Elegir diente —';
+        placeholder.textContent = '— Tria la dent —';
         placeholder.disabled = true;
         placeholder.selected = true;
         select.appendChild(placeholder);
 
         const quadrants = [
-            ['Superior derecha (1x)', [18, 17, 16, 15, 14, 13, 12, 11]],
-            ['Superior izquierda (2x)', [21, 22, 23, 24, 25, 26, 27, 28]],
-            ['Inferior izquierda (3x)', [31, 32, 33, 34, 35, 36, 37, 38]],
-            ['Inferior derecha (4x)', [41, 42, 43, 44, 45, 46, 47, 48]]
+            ['Superior dreta (1x)', [18, 17, 16, 15, 14, 13, 12, 11]],
+            ['Superior esquerra (2x)', [21, 22, 23, 24, 25, 26, 27, 28]],
+            ['Inferior esquerra (3x)', [31, 32, 33, 34, 35, 36, 37, 38]],
+            ['Inferior dreta (4x)', [41, 42, 43, 44, 45, 46, 47, 48]]
         ];
         quadrants.forEach(([label, teeth]) => {
             const group = document.createElement('optgroup');
@@ -539,7 +587,7 @@
 
         const hint = document.createElement('div');
         hint.className = 'posicion-doubt-hint';
-        hint.textContent = '⚠️ La IA no pudo leer la posición. Elige el diente mirando el documento.';
+        hint.textContent = '⚠️ La IA no ha pogut llegir la posició. Tria la dent mirant el document.';
 
         posInput.replaceWith(select);
         select.insertAdjacentElement('afterend', hint);
@@ -599,27 +647,50 @@
         }
     }
 
-    // --- Lógica de Búsqueda y Guardado ---
+    // --- Búsqueda del paciente -----------------------------------------------------
 
-    function searchid_quartup() {
-        const id_quartup = id_quartupInput.value.trim();
-        if (!id_quartup) {
-            Toast.fire({ icon: 'warning', title: 'Introduce el id_quartup.' });
+    const TXT_BUSCAR = '🔍 Cercar pacient';
+    const TXT_GUARDAR = '💾 Desar-ho tot';
+    const CAMPOS_PACIENTE = [cuentaInput, nombreInput, emailInput, dniInput];
+
+    function buscarPaciente() {
+        const termino = busquedaInput.value.trim();
+        if (!termino) {
+            Toast.fire({ icon: 'warning', title: "Escriu la Cuenta Quartup, el DNI o el codi d'accés." });
             return;
         }
-        
+
         searchBtn.disabled = true;
-        searchBtn.innerHTML = '⏳ Buscando...';
+        searchBtn.innerHTML = '⏳ Cercant...';
         patientSection.classList.add('hidden');
         showStatus('');
-        
-        llamarServidor('getPatientByid_quartup', [id_quartup], handleid_quartupResponse, handleError);
+
+        llamarServidor('buscarPacient', [termino], res => mostrarPaciente(res, termino), handleError);
     }
 
-    function handleid_quartupResponse(res) {
+    busquedaInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); buscarPaciente(); }
+    });
+
+    /**
+     * Un dato de identidad ya guardado queda bloqueado (editar datos existentes es cosa de
+     * S3); uno que falta se puede completar ahora y se resalta en naranja.
+     */
+    function fijarCampo(input, valor, guardado) {
+        input.value = valor || '';
+        input.disabled = !!guardado;
+        input.dataset.guardado = guardado ? '1' : '';
+    }
+
+    function fijarCasilla(checkbox, marcada, guardada) {
+        checkbox.checked = !!marcada;
+        checkbox.disabled = !!guardada;
+    }
+
+    function mostrarPaciente(res, termino) {
         searchBtn.disabled = false;
-        searchBtn.innerHTML = '🔍 Buscar Paciente';
-        
+        searchBtn.innerHTML = TXT_BUSCAR;
+
         if (res.ok === false) {
             Swal.fire({ icon: 'error', title: 'Error', text: res.message });
             return;
@@ -628,39 +699,149 @@
         patientSection.classList.remove('hidden');
 
         if (res.found) {
-            const data = res.data;
-            nombreInput.value = data.nombre || '';
-            emailInput.value = data.email || '';
-            pacienteCodigoInput.value = data.codigo; 
-            
-            patientCodeDisplay.textContent = data.codigo;
-            patientCodeDisplay.style.color = '#166534'; // Verde oscuro
-            
-            Toast.fire({ icon: 'success', title: `Paciente encontrado: ${data.nombre}` });
-            
-            nombreInput.disabled = true;
-            emailInput.disabled = true;
-            
+            const d = res.data;
+            pacienteCodigoInput.value = d.codi_acces;
+            patientCodeDisplay.textContent = d.codi_acces;
+            patientCodeDisplay.style.color = '#166534';
+
+            fijarCampo(cuentaInput, d.cuenta_quartup, !!d.cuenta_quartup);
+            fijarCampo(nombreInput, d.nombre, !!d.nombre);
+            fijarCampo(emailInput, d.email, !!d.email || d.sense_email);
+            fijarCasilla(senseEmailCheckbox, d.sense_email, !!d.email || d.sense_email);
+            fijarCampo(dniInput, d.dni, !!d.dni || d.sense_dni);
+            fijarCasilla(senseDniCheckbox, d.sense_dni, !!d.dni || d.sense_dni);
+
+            if (!d.cuenta_quartup) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Falta la Cuenta Quartup',
+                    html: `<p style="text-align:left; font-size:14px;">${escapeHtml(d.nombre)} no té la Cuenta Quartup guardada. Busca'l a Quartup i escriu-la ara: sense ella no es pot desar.</p>`,
+                    confirmButtonColor: '#0ea5e9'
+                }).then(() => cuentaInput.focus());
+            } else {
+                Toast.fire({ icon: 'success', title: `Pacient trobat: ${d.nombre}` });
+            }
         } else {
-            nombreInput.value = '';
-            emailInput.value = '';
-            pacienteCodigoInput.value = 'GENERAR'; 
-            
-            patientCodeDisplay.textContent = 'NUEVO (Se generará un código)';
-            patientCodeDisplay.style.color = '#d97706'; // Naranja oscuro
-            
-            Toast.fire({ icon: 'info', title: 'Paciente nuevo. Rellena los datos.' });
-            
-            nombreInput.disabled = false;
-            emailInput.disabled = false;
+            pacienteCodigoInput.value = 'GENERAR';
+            patientCodeDisplay.textContent = 'NOU (es generarà un codi)';
+            patientCodeDisplay.style.color = '#d97706';
+
+            CAMPOS_PACIENTE.forEach(inp => fijarCampo(inp, '', false));
+            fijarCasilla(senseEmailCheckbox, false, false);
+            fijarCasilla(senseDniCheckbox, false, false);
+
+            // Lo buscado se aprovecha: dígitos = Cuenta Quartup; DNI/NIE = campo DNI.
+            const tipo = PacientModel.classificarIdentificador(termino);
+            if (tipo === 'cuenta') cuentaInput.value = termino;
+            if (tipo === 'dni') dniInput.value = PacientModel.netejarDocument(termino);
+
+            Toast.fire({
+                icon: 'info',
+                title: tipo === 'dni'
+                    ? "Pacient nou. Has cercat un DNI: afegeix-hi també la Cuenta Quartup."
+                    : 'Pacient nou. Omple les dades.'
+            });
         }
+
+        actualizarCasillas();
+        revisarCuenta();
     }
+
+    // --- Casillas "Sense email" / "Sense DNI" y avisos de la Cuenta ------------------
+
+    function actualizarCasillas() {
+        [[senseEmailCheckbox, emailInput], [senseDniCheckbox, dniInput]].forEach(([casilla, input]) => {
+            if (input.dataset.guardado === '1') return;
+            if (casilla.checked) input.value = '';
+            input.disabled = casilla.checked;
+        });
+
+        // Sin email no hay a quién enviar el pasaporte.
+        sendEmailCheckbox.disabled = senseEmailCheckbox.checked;
+        if (senseEmailCheckbox.checked) sendEmailCheckbox.checked = false;
+
+        marcarFaltas();
+    }
+
+    function marcarFaltas() {
+        cuentaInput.classList.toggle('falta', !cuentaInput.disabled && !cuentaInput.value.trim());
+        emailInput.classList.toggle('falta', !emailInput.disabled && !emailInput.value.trim());
+        dniInput.classList.toggle('falta', !dniInput.disabled && !dniInput.value.trim());
+    }
+
+    function revisarCuenta() {
+        const valor = cuentaInput.value.trim();
+        const tipo = PacientModel.classificarIdentificador(valor);
+        let html = '';
+
+        if (tipo === 'dni') {
+            html = `Això sembla un DNI. Aquí va el número de 'Cuenta' de Quartup (només xifres).<br>
+                    <button type="button" onclick="moverADni()">Moure-ho al camp DNI</button>`;
+        } else if (tipo === 'revisar') {
+            html = 'La Cuenta Quartup només pot tenir xifres (ex: 43001234).';
+        } else if (tipo === 'cuenta' && valor.indexOf('430') !== 0) {
+            html = 'Les Cuentes de Quartup solen començar per 430. Comprova que sigui correcta.';
+        }
+
+        cuentaAviso.innerHTML = html;
+        cuentaAviso.classList.toggle('hidden', !html);
+        marcarFaltas();
+    }
+
+    window.moverADni = function() {
+        if (dniInput.dataset.guardado !== '1') {
+            dniInput.value = PacientModel.netejarDocument(cuentaInput.value);
+            senseDniCheckbox.checked = false;
+            dniInput.disabled = false;
+        }
+        cuentaInput.value = '';
+        revisarCuenta();
+        cuentaInput.focus();
+    };
+
+    cuentaInput.addEventListener('input', revisarCuenta);
+    [emailInput, dniInput].forEach(inp => inp.addEventListener('input', marcarFaltas));
+    senseEmailCheckbox.addEventListener('change', actualizarCasillas);
+    senseDniCheckbox.addEventListener('change', actualizarCasillas);
+
+    function datosPaciente() {
+        return {
+            codi_acces: pacienteCodigoInput.value,
+            cuenta_quartup: cuentaInput.value.trim(),
+            nombre: nombreInput.value.trim(),
+            email: emailInput.value.trim(),
+            sense_email: senseEmailCheckbox.checked,
+            dni: dniInput.value.trim(),
+            sense_dni: senseDniCheckbox.checked
+        };
+    }
+
+    function listaHtml(items) {
+        return '<ul style="text-align:left; font-size:14px;">' + items.map(i => `<li>${escapeHtml(i)}</li>`).join('') + '</ul>';
+    }
+
+    function reactivarGuardar() {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = TXT_GUARDAR;
+    }
+
+    // --- Guardado -------------------------------------------------------------------
 
     implantForm.addEventListener('submit', function(e) {
         e.preventDefault();
-        
+
         saveBtn.disabled = true;
-        saveBtn.innerHTML = '⏳ Guardando...';
+        saveBtn.innerHTML = '⏳ Desant...';
+
+        // Mismas reglas que el servidor (PacientModel). La unicidad de la Cuenta solo la
+        // puede comprobar el servidor, que tiene la hoja.
+        const paciente = datosPaciente();
+        const { errors, avisos } = PacientModel.validarPacient(paciente);
+        if (errors.length) {
+            reactivarGuardar();
+            Swal.fire({ icon: 'warning', title: 'Falten dades del pacient', html: listaHtml(errors), confirmButtonColor: '#0ea5e9' });
+            return;
+        }
 
         // Bloqueo duro: ningún implante puede guardarse sin diente resuelto. Sin esto,
         // una sección con posición pendiente se descartaría en silencio más abajo.
@@ -672,13 +853,12 @@
             }
         });
         if (pendingSections.length > 0) {
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = '💾 Guardar Todo';
+            reactivarGuardar();
             const nums = pendingSections.map(p => p.num).join(', ');
             Swal.fire({
                 icon: 'warning',
-                title: 'Falta la posición del diente',
-                text: `Elige el diente en el desplegable naranja del implante ${nums} antes de guardar. La posición está en el documento en papel (anotación junto a la pegatina).`
+                title: 'Falta la posició de la dent',
+                text: `Tria la dent al desplegable taronja de l'implant ${nums} abans de desar. La posició és al document en paper (anotació al costat de l'etiqueta).`
             }).then(() => {
                 pendingSections[0].el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 pendingSections[0].el.focus();
@@ -692,7 +872,7 @@
         sections.forEach(section => {
             const impData = {};
             let isValid = true;
-            
+
             section.querySelectorAll('.implant-field').forEach(input => {
                 if (input.required && !input.value.trim()) {
                     isValid = false;
@@ -706,65 +886,85 @@
         });
 
         if (implantsArray.length === 0) {
-            Swal.fire({ icon: 'error', title: 'Faltan datos', text: 'Rellena al menos un implante válido.' });
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = '💾 Guardar Todo';
+            reactivarGuardar();
+            Swal.fire({ icon: 'error', title: 'Falten dades', text: 'Omple almenys un implant complet.' });
             return;
         }
 
-        const formData = {
-            id_quartup: id_quartupInput.value.trim(),
-            codigo_paciente: pacienteCodigoInput.value,
-            nombre: nombreInput.value.trim(),
-            email: emailInput.value.trim(),
-            sendEmail: sendEmailCheckbox.checked ? 'true' : 'false', 
-            implantes: implantsArray 
-        };
-        
-        llamarServidor('saveNewImplant', [formData], handleSaveResponse, handleError);
+        const formData = Object.assign({}, paciente, {
+            sendEmail: sendEmailCheckbox.checked ? 'true' : 'false',
+            implantes: implantsArray
+        });
+        const enviar = () => llamarServidor('saveNewImplant', [formData], handleSaveResponse, handleError);
+
+        if (avisos.length) {
+            Swal.fire({
+                icon: 'question',
+                title: 'Comprova-ho',
+                html: listaHtml(avisos),
+                showCancelButton: true,
+                confirmButtonText: 'Sí, és correcte',
+                cancelButtonText: 'Corregir',
+                confirmButtonColor: '#0ea5e9'
+            }).then(r => {
+                if (r.isConfirmed) enviar();
+                else { reactivarGuardar(); cuentaInput.focus(); }
+            });
+        } else {
+            enviar();
+        }
     });
 
     function handleSaveResponse(res) {
-        saveBtn.disabled = false;
-        saveBtn.innerHTML = '💾 Guardar Todo';
-        
-        if (res.ok) {
-            let msg = `<p><b>${res.implantsCount}</b> implante(s) guardado(s) correctamente.</p>`;
-            msg += `<p>Código de paciente: <b>${res.newCode}</b></p>`;
-            
-            if (res.emailSent) {
-                 msg += `<p style="color: #166534; margin-top: 10px;">✅ Correo de pasaporte enviado a ${emailInput.value}.</p>`;
-            } else if (res.emailError) {
-                 msg += `<p style="color: #991b1b; margin-top: 10px;">⚠️ ERROR al enviar email: ${res.emailError}</p>`;
-            }
-            
+        reactivarGuardar();
+
+        if (!res.ok) {
             Swal.fire({
-                icon: 'success',
-                title: '¡Operación Exitosa!',
-                html: msg,
-                confirmButtonColor: '#0ea5e9'
+                icon: 'error',
+                title: 'No s\'ha pogut desar',
+                html: res.errors ? listaHtml(res.errors) : `<p>${escapeHtml(res.message)}</p>`
             });
-            
-            // Limpiar formulario
-            id_quartupInput.value = '';
-            nombreInput.value = '';
-            emailInput.value = '';
-            pacienteCodigoInput.value = 'GENERAR'; 
-            patientCodeDisplay.textContent = '';
-            patientSection.classList.add('hidden'); 
-            implantContainer.innerHTML = '';
-            addImplantSection(); 
-            
-        } else {
-            Swal.fire({ icon: 'error', title: 'Error al guardar', text: res.message });
+            return;
         }
+
+        let msg = `<p><b>${res.implantsCount}</b> implant(s) desat(s) correctament.</p>`;
+        msg += `<p>Codi d'accés: <b>${escapeHtml(res.newCode)}</b></p>`;
+
+        if (res.emailSent) {
+            msg += `<p style="color: #166534; margin-top: 10px;">✅ Pasaport enviat per email a ${escapeHtml(emailInput.value)}.</p>`;
+        } else if (res.emailError) {
+            msg += `<p style="color: #991b1b; margin-top: 10px;">⚠️ ERROR en enviar l'email: ${escapeHtml(res.emailError)}</p>`;
+        } else if (senseEmailCheckbox.checked) {
+            msg += `<p style="color: #b45309; margin-top: 10px;">ℹ️ El pacient no té email: fes-li arribar el codi d'accés d'una altra manera.</p>`;
+        }
+
+        Swal.fire({
+            icon: 'success',
+            title: 'Fet!',
+            html: msg,
+            confirmButtonColor: '#0ea5e9'
+        });
+
+        // Limpiar formulario
+        busquedaInput.value = '';
+        CAMPOS_PACIENTE.forEach(inp => fijarCampo(inp, '', false));
+        fijarCasilla(senseEmailCheckbox, false, false);
+        fijarCasilla(senseDniCheckbox, false, false);
+        sendEmailCheckbox.disabled = false;
+        sendEmailCheckbox.checked = true;
+        cuentaAviso.classList.add('hidden');
+        pacienteCodigoInput.value = 'GENERAR';
+        patientCodeDisplay.textContent = '';
+        patientSection.classList.add('hidden');
+        implantContainer.innerHTML = '';
+        addImplantSection();
     }
 
     function handleError(err) {
         searchBtn.disabled = false;
         saveBtn.disabled = false;
-        searchBtn.innerHTML = '🔍 Buscar Paciente';
-        saveBtn.innerHTML = '💾 Guardar Todo';
+        searchBtn.innerHTML = TXT_BUSCAR;
+        saveBtn.innerHTML = TXT_GUARDAR;
 
         console.error("Error del servidor:", err);
 
@@ -809,7 +1009,7 @@
         if(!file) return;
 
         const statusDiv = document.getElementById('masterScanStatus');
-        statusDiv.innerHTML = '⏳ Analizando con IA... (No tarda más de 30 s!)';
+        statusDiv.innerHTML = '⏳ Analitzant amb IA... (no triga més de 30 s)';
         statusDiv.style.color = '#0284c7';
 
         const reader = new FileReader();
@@ -824,7 +1024,7 @@
                     } else {
                         statusDiv.innerHTML = `❌ ${response.message}`;
                         statusDiv.style.color = '#dc2626';
-                        Swal.fire({ icon: 'error', title: 'Error de Lectura', text: response.message });
+                        Swal.fire({ icon: 'error', title: 'Error de lectura', text: response.message });
                     }
                     input.value = ''; // Reset input
                 },
@@ -835,7 +1035,7 @@
                         avisarSesionRota(false);
                         return;
                     }
-                    statusDiv.innerHTML = `❌ Error técnico: ${err.message}`;
+                    statusDiv.innerHTML = `❌ Error tècnic: ${escapeHtml(err.message)}`;
                     statusDiv.style.color = '#dc2626';
                 });
         };
@@ -860,21 +1060,21 @@
             google.script.run.registrarDuda(doubts);
         }
 
-        // Alerta Profesional Sustituyendo a la antigua de Windows
+        // Aviso de revisión tras el escaneo
         Swal.fire({
-            title: '✨ ¡Análisis Completado!',
+            title: '✨ Anàlisi completada',
             icon: 'success',
             html: `
                 <div style="text-align: left; font-size: 14px; color: #334155;">
-                    <p>✅ Se han generado <b>${implantesArray.length}</b> implantes.</p>
+                    <p>✅ S'han generat <b>${implantesArray.length}</b> implants.</p>
                     <hr style="margin: 15px 0;">
-                    <p style="color: #b91c1c; font-weight: 600;">⚠️ IMPORTANTE - REVISAR AHORA:</p>
+                    <p style="color: #b91c1c; font-weight: 600;">⚠️ IMPORTANT - REVISA-HO ARA:</p>
                     <ul style="margin-top: 8px;">
-                        <li>Confirma que la <b>POSICIÓN (Diente)</b> sea correcta y, si existe pilar MULTI-UNIT, que sus <b>mm<\b> sean correctos (escritos a manos puede tener errores).</li>
+                        <li>Comprova que la <b>POSICIÓ (dent)</b> sigui correcta i, si hi ha pilar MULTI-UNIT, que els seus <b>mm</b> siguin correctes (escrits a mà poden tenir errors).</li>
                     </ul>
                 </div>
             `,
-            confirmButtonText: 'Entendido, voy a revisar',
+            confirmButtonText: 'Entesos, ho reviso',
             confirmButtonColor: '#0ea5e9',
             allowOutsideClick: false
         });

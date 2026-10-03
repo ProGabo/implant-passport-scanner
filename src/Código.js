@@ -18,8 +18,10 @@ function doGet() {
 }
 
 // ==========================================
-//  MENÚ Y SIDEBAR (Interfaz para la Secretaria)
+//  MENÚ Y SIDEBAR (interfaz interna: en catalán)
 // ==========================================
+
+const NOM_MENU = 'Pasaport Implantològic 🦷';
 
 /**
  * Crea un menú personalizado en la interfaz de Google Sheets al abrir la hoja.
@@ -31,66 +33,104 @@ function onOpen() {
   // AuthMode.LIMITED y da "pendiente" a cuentas que sí están autorizadas): avisaba en falso
   // y desplazaba hacia abajo el botón que se usa cada día. El aviso fiable lo da el panel
   // lateral, que detecta el fallo de verdad justo cuando se va a trabajar.
-  SpreadsheetApp.getUi()
-      .createMenu('Pasaporte Implantológico 🦷')
-      .addItem('➕ Añadir Implante / Paciente', 'showSidebar')
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu(NOM_MENU)
+      .addItem('➕ Afegir implant / pacient', 'showSidebar')
       .addSeparator()
-      .addItem('🧹 Limpiar Pacientes Duplicados', 'eliminarDuplicados')
-      .addItem('🩺 Comprobar todo', 'comprobarTodo')
-      .addItem('🔑 Autorizar mi cuenta', 'autorizarCuenta')
+      .addItem('🧹 Eliminar files duplicades', 'eliminarDuplicados')
+      .addItem('🩺 Comprovar-ho tot', 'comprobarTodo')
+      .addSubMenu(ui.createMenu('🗂️ Migració de dades')
+          .addItem('1. Migrar la fulla (una sola vegada)', 'migrarDadesS2')
+          .addItem('2. Aplicar les Cuentes de la revisió', 'aplicarCuentesRevisio'))
+      .addItem('🔑 Autoritzar el meu compte', 'autorizarCuenta')
       .addToUi();
 }
 
 /**
- * Función que abre una barra lateral (Sidebar) con el formulario.
- * Necesita el archivo HTML: SidebarForm.html
+ * Abre el sidebar. Le inyecta el código de PacientModel para que el formulario valide
+ * con las mismas reglas que el servidor, sin duplicarlas.
  */
 function showSidebar() {
   const html = HtmlService.createTemplateFromFile('SidebarForm');
+  html.pacientModelJs = crearPacientModel.toString();
   SpreadsheetApp.getUi()
       .showSidebar(html.evaluate()
-      .setTitle('Escáner de Implantes'));
+      .setTitle("Escàner d'implants"));
 }
 
 
 // ==========================================
-//  UTILIDADES
+//  ACCESO A LA HOJA (siempre por cabecera, vía PacientModel)
 // ==========================================
 
-/**
- * Normaliza strings para comparaciones (quita espacios, acentos, mayúsculas)
- */
-function _normalize(s) {
-  if (s === null || s === undefined) return '';
-  return String(s).trim().toLowerCase().replace(/[^a-z0-9]/gi, '');
+function hojaPacientes() {
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SHEET_NAME);
+  if (!sheet) throw new Error("No existeix la pestanya '" + SHEET_NAME + "'.");
+  return sheet;
+}
+
+/** Lee la hoja entera: cabeceras, índice clave -> columna, filas crudas y como objetos. */
+function leerPacientes(sheet) {
+  const data = sheet.getDataRange().getValues();
+  const headers = data.length ? data[0] : [];
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  const files = data.slice(1);
+  return { headers, idx, files, objetos: files.map(f => PacientModel.filaAObjecte(f, idx)) };
+}
+
+function mismoCodigo(a, b) {
+  return String(a || '').trim().toUpperCase() === String(b || '').trim().toUpperCase();
 }
 
 /**
- * Limpia las cabeceras de Excel para usarlas como claves de código (ej: "Cod. Implante" -> "cod_implante")
+ * Crea las cabeceras del registro que falten (al final) y pone casillas en las columnas
+ * de casilla. Idempotente: S3 y S4 añadirán así sus columnas, sin migraciones.
  */
-function _cleanKey(str) {
-  return str.toString().toLowerCase()
-    .replace(/\s+/g, '_')
-    .replace(/[á]/g, 'a').replace(/[é]/g, 'e').replace(/[í]/g, 'i').replace(/[ó]/g, 'o').replace(/[ú]/g, 'u')
-    .replace(/\./g, '') 
-    .replace(/[^a-z0-9_]/g, ''); 
+function asegurarColumnas(sheet) {
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  const faltan = PacientModel.COLUMNES.filter(c => idx[c.clau] === undefined);
+  if (faltan.length) {
+    const primeraLibre = headers.filter(h => String(h).trim() !== '').length === 0 ? 1 : lastCol + 1;
+    sheet.getRange(1, primeraLibre, 1, faltan.length).setValues([faltan.map(c => c.capcalera)]);
+  }
+  return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+}
+
+/** Casillas nativas en las columnas de casilla para las filas indicadas (no cambia valores). */
+function ponerCasillas(sheet, headers, filaInicio, numFilas) {
+  if (numFilas <= 0) return;
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  const regla = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+  PacientModel.COLUMNES.filter(c => c.casella && idx[c.clau] !== undefined).forEach(c => {
+    sheet.getRange(filaInicio, idx[c.clau] + 1, numFilas, 1).setDataValidation(regla);
+  });
+}
+
+/** Columnas que se guardan como texto, para que Sheets no convierta 012345 o 4300... en número. */
+function ponerFormatoTexto(sheet, headers, filaInicio, numFilas) {
+  if (numFilas <= 0) return;
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  ['codi_acces', 'cuenta_quartup', 'dni'].forEach(k => {
+    if (idx[k] !== undefined) sheet.getRange(filaInicio, idx[k] + 1, numFilas, 1).setNumberFormat('@');
+  });
 }
 
 /**
- * Función que genera código único de paciente (usa la hoja para comprobar duplicados)
+ * Genera un Codi d'accés de 6 caracteres que no exista ya.
+ * @param {string[]} existentes códigos ya usados
  */
-function generarCodigoUnico(hoja) {
+function generarCodigoUnico(existentes) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const usados = existentes.map(c => String(c).trim().toUpperCase());
   let code;
-  const last = Math.max(hoja.getLastRow() - 1, 0);
-  const existing = last > 0 ? hoja.getRange(2, 1, last, 1).getValues().flat().map(String) : [];
-
   do {
     code = '';
     for (let i = 0; i < 6; i++) {
       code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-  } while (existing.includes(code));
+  } while (usados.includes(code));
   return code;
 }
 
@@ -100,109 +140,77 @@ function generarCodigoUnico(hoja) {
 // ==========================================
 
 /**
- * Busca paciente por id_quartup y devuelve datos comunes para autocompletado (Usado por el Sidebar).
- * @param {string} id_quartup El id_quartup a buscar.
+ * Busca un paciente para el sidebar por Cuenta Quartup, DNI o Codi d'accés. Coincidencia
+ * exacta y solo en esas tres columnas.
+ * @returns {{ok, found, data?, encontradoPor?, message?}}
  */
-function getPatientByid_quartup(id_quartup) {
+function buscarPacient(termino) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(SHEET_NAME);
-    if (!sheet) return { ok: false, message: 'Hoja no encontrada.' };
+    const busca = String(termino || '').trim();
+    if (!busca) return { ok: true, found: false };
 
-    const searchNorm = String(id_quartup).trim().toLowerCase();
-    if (!searchNorm) return { ok: true, found: false, message: 'ID vacío.' };
+    const { objetos } = leerPacientes(hojaPacientes());
+    const buscaDoc = PacientModel.netejarDocument(busca);
 
-    // 1. Usamos TextFinder: El buscador nativo ultra rápido de Google
-    // Busca en toda la hoja esa coincidencia exacta
-    const finder = sheet.createTextFinder(searchNorm).matchEntireCell(true).matchCase(false);
-    const coincidencias = finder.findAll();
+    let encontradoPor = null;
+    const fila = objetos.find(o => {
+      if (String(o.cuenta_quartup).trim() === busca) { encontradoPor = 'cuenta'; return true; }
+      if (o.dni && PacientModel.netejarDocument(o.dni) === buscaDoc) { encontradoPor = 'dni'; return true; }
+      if (mismoCodigo(o.codi_acces, busca)) { encontradoPor = 'codi'; return true; }
+      return false;
+    });
+    if (!fila) return { ok: true, found: false };
 
-    if (coincidencias.length === 0) {
-      return { ok: true, found: false, message: 'ID_Quartup no encontrado.' };
-    }
-
-    // 2. Si lo encuentra, sacamos solo los encabezados (Fila 1) 
-    // y solo la fila donde se encontró el paciente (Fila X)
-    const ultimaColumna = sheet.getLastColumn();
-    const headersRaw = sheet.getRange(1, 1, 1, ultimaColumna).getValues()[0];
-    
-    // Obtenemos el número de fila del primer resultado encontrado
-    const filaPaciente = coincidencias[0].getRow(); 
-    const rowRaw = sheet.getRange(filaPaciente, 1, 1, ultimaColumna).getValues()[0];
-
-    // 3. Emparejamos los datos igual que antes, pero a la velocidad de la luz
-    let patientData = {};
-    for (let c = 0; c < headersRaw.length; c++) {
-      const headerOriginal = String(headersRaw[c]).trim();
-      
-      // Asumo que tienes una función _cleanKey en tu código para limpiar las cabeceras.
-      // Si no, esto emula el comportamiento de tu versión anterior:
-      let key = headerOriginal.toLowerCase().replace(/[^a-z0-9]/g, ''); 
-      
-      if (key === 'codigo' || key === 'id_quartup' || key === 'nombre' || key === 'email') {
-        patientData[key] = String(rowRaw[c]);
+    // Los datos de paciente se repiten en cada fila-implante: se toma lo más completo.
+    const codi = String(fila.codi_acces).trim().toUpperCase();
+    const filasPaciente = objetos.filter(o => mismoCodigo(o.codi_acces, codi));
+    const p = PacientModel.pacientsUnics(filasPaciente)[0];
+    return {
+      ok: true,
+      found: true,
+      encontradoPor: encontradoPor,
+      data: {
+        codi_acces: codi,
+        cuenta_quartup: p.cuenta_quartup,
+        nombre: p.nombre,
+        email: p.email,
+        sense_email: filasPaciente.some(o => o.sense_email),
+        dni: p.dni,
+        sense_dni: filasPaciente.some(o => o.sense_dni),
+        n_implants: p.n_implants
       }
-    }
-    
-    return { ok: true, found: true, data: patientData };
-
+    };
   } catch (e) {
-    Logger.log('Error en getPatientByid_quartup OPTIMIZADO: ' + e);
-    return { ok: false, message: 'Error interno: ' + e.message };
+    Logger.log('Error en buscarPacient: ' + e);
+    return { ok: false, message: 'Error intern: ' + e.message };
   }
 }
 
 /**
- * Busca TODAS las filas que coincidan con el código (usado por el Pasaporte Web para el paciente)
+ * Busca TODAS las filas-implante de un Codi d'accés (portal del paciente). Devuelve las
+ * claves estables del registro, independientes del texto de las cabeceras.
  */
 function getPatientDataVerbose(code) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(SHEET_NAME);
-    if (!sheet) return { ok: false, message: 'No se encontró la hoja: ' + SHEET_NAME };
+    const { objetos } = leerPacientes(hojaPacientes());
+    const busca = String(code === undefined || code === null ? '' : code).trim();
+    if (!busca) return { ok: true, found: false, message: 'No se encontraron implantes para este código.' };
 
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) return { ok: false, message: 'La base de datos está vacía' };
+    const implantes = objetos
+      .filter(o => mismoCodigo(o.codi_acces, busca))
+      .map(o => {
+        const out = {};
+        PacientModel.COLUMNES.forEach(c => {
+          const v = o[c.clau];
+          out[c.clau] = v instanceof Date ? v.toLocaleDateString('es-ES') : String(v);
+        });
+        return out;
+      });
 
-    const headersRaw = data[0];
-    const headersTrim = headersRaw.map(h => String(h).trim());
-    const headersLower = headersTrim.map(h => h.toLowerCase());
-
-    let idxCodigo = headersLower.indexOf('código');
-    if (idxCodigo === -1) idxCodigo = headersLower.indexOf('codigo');
-    
-    const rawSearch = (code === undefined || code === null) ? '' : String(code);
-    const searchNorm = _normalize(rawSearch);
-    const implantesEncontrados = [];
-
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      const rawVal = (idxCodigo >= 0 && row[idxCodigo]) ? String(row[idxCodigo]) : '';
-      const n = _normalize(rawVal);
-
-      if (searchNorm && n === searchNorm) {
-        const implantData = {};
-        
-        for (let c = 0; c < headersTrim.length; c++) {
-          const hdr = headersTrim[c] || ('col_' + c);
-          const key = _cleanKey(hdr); 
-          const val = (row[c] !== undefined && row[c] !== null) ? row[c] : '';
-          
-          if (val instanceof Date) {
-            implantData[key] = val.toLocaleDateString('es-ES');
-          } else {
-            implantData[key] = String(val);
-          }
-        }
-        implantesEncontrados.push(implantData);
-      }
+    if (implantes.length > 0) {
+      return { ok: true, found: true, implantes: implantes };
     }
-
-    if (implantesEncontrados.length > 0) {
-      return { ok: true, found: true, implantes: implantesEncontrados };
-    } else {
-      return { ok: true, found: false, message: 'No se encontraron implantes para este código.' };
-    }
+    return { ok: true, found: false, message: 'No se encontraron implantes para este código.' };
 
   } catch (err) {
     Logger.log('ERROR: ' + err);
@@ -217,100 +225,123 @@ function getPatientDataVerbose(code) {
 
 
 /**
- * Guarda MÚLTIPLES implantes de una vez, crea código de paciente si no es necesario.
- * @param {object} formData - Objeto que contiene datos del paciente y el array de implantes.
- */
-/**
- * Guarda MÚLTIPLES implantes de una vez, crea código de paciente si no es necesario,
- * envía el email de pasaporte y actualiza el catálogo.
- * * @param {object} formData - Objeto que contiene datos del paciente (id_quartup, nombre, email, etc.) 
- * y el array de implantes (implantes: []).
+ * Guarda los implantes de un paciente (nuevo o existente), envía el email del pasaporte
+ * si se pide y actualiza el catálogo.
+ * @param {object} formData { codi_acces ('GENERAR' si es nuevo), cuenta_quartup, nombre,
+ *   email, sense_email, dni, sense_dni, sendEmail ('true'|'false'), implantes: [] }
  */
 function saveNewImplant(formData) {
+  // Dos guardados a la vez podrían generar el mismo código o pisarse la última fila.
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(SHEET_NAME);
-    if (!sheet) throw new Error('Hoja de Pacientes no encontrada: ' + SHEET_NAME);
-    
-    // 1. Asignar/Generar Código de Paciente
-    let patientCode = formData.codigo_paciente;
-    if (!patientCode || patientCode === 'GENERAR') {
-      patientCode = generarCodigoUnico(sheet); 
+    const sheet = hojaPacientes();
+    const headers = asegurarColumnas(sheet);
+    const { objetos } = leerPacientes(sheet);
+
+    const senseEmail = PacientModel.esCert(formData.sense_email);
+    const senseDni = PacientModel.esCert(formData.sense_dni);
+    const esNuevo = !formData.codi_acces || formData.codi_acces === 'GENERAR';
+    const paciente = {
+      codi_acces: esNuevo ? '' : String(formData.codi_acces).trim().toUpperCase(),
+      cuenta_quartup: String(formData.cuenta_quartup || '').trim(),
+      nombre: String(formData.nombre || '').trim(),
+      email: senseEmail ? '' : String(formData.email || '').trim(),
+      sense_email: senseEmail,
+      dni: senseDni ? '' : PacientModel.netejarDocument(formData.dni),
+      sense_dni: senseDni
+    };
+
+    if (!esNuevo && !objetos.some(o => mismoCodigo(o.codi_acces, paciente.codi_acces))) {
+      return { ok: false, message: "El codi d'accés " + paciente.codi_acces + " no existeix. Torna a cercar el pacient." };
     }
 
-    const implantsArray = formData.implantes;
-    const rowsToAppend = [];
-    
-    // 2. Iterar sobre la lista de implantes recibida
-    implantsArray.forEach(imp => {
-      // Prepara la fila para la hoja de Pacientes (A-N)
-      const newRow = [
-        patientCode,            // Columna A: Código
-        formData.id_quartup,           // Columna B: id_quartup
-        formData.nombre,        // Columna C: Nombre
-        formData.email,         // Columna D: Email
-        imp.posicion,           // Columna E: Posición
-        imp.fecha_colocacion,   // Columna F: Fecha
-        imp.marca,              // Columna G: Marca
-        imp.modelo,             // Columna H: Modelo
-        imp.dimensiones,        // Columna I: Dimensiones
-        imp.plataforma,         // Columna J: Plataforma
-        imp.conexion,           // Columna K: Conexión
-        imp.pilar,              // Columna L: Pilar
-        imp.cod_implante,       // Columna M: Código de implante
-        imp.lote                // Columna N: Lote
-      ];
-      rowsToAppend.push(newRow);
-      
-      // *** Llama a la función de actualización del catálogo (NUEVO) ***
-      updateCatalog({
-        marca: imp.marca, 
-        modelo: imp.modelo, 
-        conexion: imp.conexion
-      });
-      // ***************************************************************
+    const { errors, avisos } = PacientModel.validarPacient(paciente, PacientModel.pacientsUnics(objetos));
+    if (errors.length) {
+      return { ok: false, message: errors.join('\n'), errors: errors };
+    }
+
+    if (esNuevo) {
+      paciente.codi_acces = generarCodigoUnico(objetos.map(o => o.codi_acces));
+    } else {
+      completarDatosPaciente(sheet, headers, paciente);
+    }
+
+    const filas = (formData.implantes || []).map(imp =>
+      PacientModel.objecteAFila(Object.assign({}, imp, paciente), headers));
+    if (filas.length === 0) {
+      return { ok: false, message: 'No hi ha cap implant per desar.' };
+    }
+
+    const primera = sheet.getLastRow() + 1;
+    ponerFormatoTexto(sheet, headers, primera, filas.length);
+    sheet.getRange(primera, 1, filas.length, headers.length).setValues(filas);
+    ponerCasillas(sheet, headers, primera, filas.length);
+
+    (formData.implantes || []).forEach(imp => {
+      updateCatalog({ marca: imp.marca, modelo: imp.modelo, conexion: imp.conexion });
     });
 
-    // 3. Escribir TODAS las filas en la hoja de Pacientes (más eficiente)
-    const ultimaFila = sheet.getLastRow() + 1;
-    sheet.getRange(ultimaFila, 1, rowsToAppend.length, rowsToAppend[0].length).setValues(rowsToAppend);
-    
-    // 4. Envío Opcional del Correo
     let emailStatus = { ok: true };
-    if (formData.sendEmail === 'true') { 
-      emailStatus = sendPassportEmail(
-        formData.email, 
-        formData.nombre, 
-        patientCode
-      );
+    const enviar = formData.sendEmail === 'true' && !senseEmail;
+    if (enviar) {
+      emailStatus = sendPassportEmail(paciente.email, paciente.nombre, paciente.codi_acces);
     }
-    
-    return { 
-      ok: true, 
-      message: `${rowsToAppend.length} implante(s) añadido(s) al Código: ${patientCode}.`,
-      newCode: patientCode,
-      implantsCount: rowsToAppend.length,
-      emailSent: (formData.sendEmail === 'true'),
-      emailError: emailStatus.ok ? null : emailStatus.message
+
+    return {
+      ok: true,
+      newCode: paciente.codi_acces,
+      implantsCount: filas.length,
+      emailSent: enviar && emailStatus.ok,
+      emailError: emailStatus.ok ? null : emailStatus.message,
+      avisos: avisos
     };
 
   } catch (e) {
     Logger.log('Error en saveNewImplant: ' + e.message);
-    return { ok: false, message: 'Error al guardar: ' + e.message };
+    return { ok: false, message: 'Error en desar: ' + e.message };
+  } finally {
+    lock.releaseLock();
   }
 }
 
-// === FUNCIONES DE ADMINISTRACIÓN ANTERIORES (Mantenidas) ===
+/**
+ * Paciente existente: rellena en TODAS sus filas los datos de identidad que estaban
+ * vacíos (p. ej. la Cuenta Quartup de un paciente antiguo dado de alta con el DNI).
+ * Nunca sobrescribe un dato ya guardado; editar datos existentes es cosa de S3.
+ */
+function completarDatosPaciente(sheet, headers, paciente) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  const rango = sheet.getRange(2, 1, lastRow - 1, headers.length);
+  const filas = rango.getValues();
+  const campos = ['cuenta_quartup', 'email', 'sense_email', 'dni', 'sense_dni'];
+  let cambios = false;
 
-function generarPasaportePDF() { 
-  // Implementación original o placeholder
-  const ui = SpreadsheetApp.getUi();
-  ui.alert("Función PDF mantenida (versión anterior).");
-}
-function añadirPaciente() { 
-  // Implementación original o placeholder
-  const ui = SpreadsheetApp.getUi();
-  ui.alert("Función 'añadirPaciente' manual anterior, ahora usa el menú 'Pasaporte Implantológico'.");
+  filas.forEach(f => {
+    if (!mismoCodigo(f[idx.codi_acces], paciente.codi_acces)) return;
+    campos.forEach(k => {
+      const i = idx[k];
+      if (i === undefined) return;
+      const actual = f[i];
+      const vacio = actual === '' || actual === null || actual === false;
+      if (vacio && paciente[k] !== '' && paciente[k] !== false) {
+        f[i] = paciente[k];
+        cambios = true;
+      }
+    });
+  });
+
+  if (cambios) {
+    ponerFormatoTexto(sheet, headers, 2, filas.length);
+    // Solo se reescriben las columnas tocadas, para no pisar fórmulas ni formatos ajenos.
+    campos.forEach(k => {
+      const i = idx[k];
+      if (i === undefined) return;
+      sheet.getRange(2, i + 1, filas.length, 1).setValues(filas.map(f => [f[i]]));
+    });
+  }
 }
 
 /**
@@ -323,7 +354,7 @@ function sendPassportEmail(recipientEmail, patientName, patientCode) {
   if (!recipientEmail || recipientEmail.indexOf('@') === -1) {
     Logger.log("Error: No se puede enviar el correo. Email no válido: " + recipientEmail);
     // Puedes devolver un error, pero lo manejamos de forma silenciosa si es un error de formato.
-    return { ok: false, message: 'Email no válido.' };
+    return { ok: false, message: 'Email no vàlid.' };
   }
 
   // --- CONFIGURACIÓN DEL MENSAJE ---
@@ -375,7 +406,7 @@ function sendPassportEmail(recipientEmail, patientName, patientCode) {
 
   } catch (e) {
     Logger.log('ERROR al enviar correo a %s: %s', recipientEmail, e);
-    return { ok: false, message: 'Error al enviar el correo.' };
+    return { ok: false, message: "No s'ha pogut enviar el correu." };
   }
 }
 
@@ -392,7 +423,7 @@ function getImplantOptions() {
     const sheet = ss.getSheetByName(CATALOG_SHEET_NAME);
     if (!sheet) {
       // Si la hoja no existe, devuelve un error específico
-      return { ok: false, message: 'La hoja de Catálogo de Implantes no existe.' };
+      return { ok: false, message: "No existeix la pestanya del catàleg d'implants." };
     }
 
     const data = sheet.getDataRange().getValues();
@@ -453,7 +484,7 @@ function getImplantOptions() {
 
   } catch (e) {
     Logger.log('Error en getImplantOptions: ' + e);
-    return { ok: false, message: 'Error al obtener opciones: ' + e.message };
+    return { ok: false, message: 'Error en carregar les opcions: ' + e.message };
   }
 }
 
@@ -474,8 +505,7 @@ function updateCatalog(newItem) {
   }
 
   // Función auxiliar para procesar una columna individualmente
-  // colIndex: 1=Marca, 2=Modelo, 3=Conexión
-  // value: El valor que queremos guardar
+  // colIndex: número de columna (1-based); value: el valor que queremos guardar
   function processColumn(colIndex, value) {
     if (!value || String(value).trim() === "") return; // No guardar vacíos
 
@@ -513,260 +543,62 @@ function updateCatalog(newItem) {
     }
   }
 
-  // Procesamos las 3 columnas por separado
-  processColumn(1, newItem.marca);    // Columna A
-  processColumn(2, newItem.modelo);   // Columna B
-  processColumn(3, newItem.conexion); // Columna C
+  // Procesamos las 3 columnas por separado, localizadas por su cabecera.
+  const headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0]
+    .map(h => PacientModel.normalitzar(h));
+  [['marca', newItem.marca], ['modelo', newItem.modelo], ['conexion', newItem.conexion]].forEach(([cab, valor]) => {
+    const i = headers.indexOf(cab);
+    if (i !== -1) processColumn(i + 1, valor);
+  });
 }
 
 /**
- * Busca un paciente por id_quartup o Email y le envía su Código de Paciente por correo.
- * @param {string} id_quartupOrEmail - El id_quartup o Email proporcionado por la secretaria.
- */
-function sendCodeRecoveryEmail(id_quartupOrEmail) {
-  try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(SHEET_NAME);
-    if (!sheet) throw new Error('Hoja de Pacientes no encontrada: ' + SHEET_NAME);
-
-    const data = sheet.getDataRange().getValues();
-    if (data.length <= 1) {
-      return { ok: false, message: 'Catálogo de pacientes vacío.' };
-    }
-
-    const id_quartupIndex = 1;  // Columna B: id_quartup
-    const emailIndex = 3; // Columna D: Email
-    const codeIndex = 0; // Columna A: Código Paciente
-
-    const searchTerm = id_quartupOrEmail.trim().toUpperCase();
-    let patientFound = null;
-
-    // Buscar en todas las filas (desde la fila 2)
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      const rowid_quartup = row[id_quartupIndex] ? String(row[id_quartupIndex]).trim().toUpperCase() : null;
-      const rowEmail = row[emailIndex] ? String(row[emailIndex]).trim().toUpperCase() : null;
-
-      if (rowid_quartup === searchTerm || rowEmail === searchTerm) {
-        patientFound = {
-          code: row[codeIndex],
-          name: row[2], // Columna C: Nombre
-          email: row[emailIndex]
-        };
-        // Un paciente puede tener múltiples filas de implantes, pero el código/email será el mismo
-        break; 
-      }
-    }
-
-    if (!patientFound) {
-      return { ok: false, message: 'Paciente no encontrado o datos incorrectos.' };
-    }
-    
-    // 3. Verificar si el paciente tiene un email válido registrado
-    if (!patientFound.email || patientFound.email.indexOf('@') === -1) {
-      return { ok: false, message: `Paciente encontrado, pero no tiene un email válido registrado (${patientFound.name}).` };
-    }
-    
-    // 4. Enviar el correo con el código (usando la función de Apps Script)
-    GmailApp.sendEmail(patientFound.email, `Recuperación de Código - Pasaporte Implantológico: ${patientFound.code}`, "", {
-      from: "clinicapiesteller@gmail.com",
-      name: "Drs. Pi y Esteller",
-      body: `Estimado(a) ${patientFound.name},\n\n` +
-            `Su código de paciente para el Pasaporte Implantológico es: ${patientFound.code}\n\n` +
-            `Utilice este código para acceder a sus registros.\n\n` +
-            `Atentamente,\n[Nombre de la Clínica]`
-    });
-
-    return { 
-      ok: true, 
-      message: `Código de paciente (${patientFound.code}) enviado a ${patientFound.email}.`
-    };
-
-  } catch (e) {
-    Logger.log('Error en sendCodeRecoveryEmail: ' + e.message);
-    return { ok: false, message: 'Error del servidor al enviar el correo: ' + e.message };
-  }
-}
-
-/**
- * Busca el código de paciente asociado a un email y lo envía por correo.
- * @param {string} patientEmail - El email introducido por el paciente.
- * @returns {object} Resultado de la operación (ok: boolean, message: string).
- */
-/**
- * Busca el código de paciente asociado a un email y lo envía por correo.
+ * Portal: busca el Codi d'accés asociado a un email y lo envía por correo al paciente.
  * @param {string} patientEmail - El email introducido por el paciente.
  * @returns {object} Resultado de la operación (ok: boolean, message: string).
  */
 function retrieveCodeByEmail(patientEmail) {
-  const SHEET_NAME = 'Pacientes'; // <--- ¡Ajusta este nombre a tu hoja de datos real!
-  
   if (!patientEmail || patientEmail.trim() === "") {
     return { ok: false, message: "Por favor, introduce tu dirección de correo." };
   }
 
   const EMAIL_ADDRESS = patientEmail.trim().toLowerCase();
-  
+
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(SHEET_NAME);
-    
-    if (!sheet) {
-      return { ok: false, message: "Error interno: Hoja de datos no encontrada." }; 
+    const { objetos } = leerPacientes(hojaPacientes());
+    const paciente = objetos.find(o => String(o.email).trim().toLowerCase() === EMAIL_ADDRESS);
+
+    if (!paciente) {
+      return { ok: false, message: "El email introducido no se encuentra registrado en nuestra base de datos." };
     }
 
-    const data = sheet.getDataRange().getValues();
-    if (data.length <= 1) {
-      return { ok: false, message: "Error interno: La hoja de datos está vacía." };
-    }
-    
-    const headers = data[0].map(h => String(h).trim()); // Mantiene mayúsculas para la búsqueda
+    const code = paciente.codi_acces;
+    const name = paciente.nombre || 'Paciente';
 
-    // Buscamos los índices exactos de las cabeceras (case-sensitive, por eso usamos String(h).trim())
-    const EMAIL_COL = headers.findIndex(h => h === 'Email');
-    const CODIGO_COL = headers.findIndex(h => h === 'Código');
-    const NAME_COL = headers.findIndex(h => h === 'Nombre');
+    GmailApp.sendEmail(EMAIL_ADDRESS, "Recuperación de Código de Pasaporte de Implantes", "", {
+      from: "clinicapiesteller@gmail.com",
+      name: "Drs. Pi i Esteller",
+      htmlBody: `
+        <p>Estimado/a ${name},</p>
+        <p>Hemos recibido una solicitud para recuperar tu código de paciente para el Pasaporte de Implantes de la <strong>Clínica Dental Dr. Pi Esteller</strong>.</p>
 
-    if (EMAIL_COL === -1 || CODIGO_COL === -1 || NAME_COL === -1) {
-       // Si esto falla, revisa si hay acentos o espacios extras en tus cabeceras
-       return { ok: false, message: "Error interno: Columnas 'Email', 'Código' o 'Nombre' no encontradas." }; 
-    }
+        <div style="background-color: #eef4fb; padding: 15px; border-radius: 8px; text-align: center; margin: 20px 0;">
+          <p style="font-size: 18px; font-weight: bold; color: #02234f; margin: 0;">Tu Código de Paciente es:</p>
+          <h2 style="font-size: 28px; color: #02234f; margin: 5px 0;">${code}</h2>
+        </div>
 
-    // --- Búsqueda y Envío ---
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      const emailEnHoja = row[EMAIL_COL] ? String(row[EMAIL_COL]).trim().toLowerCase() : '';
-      
-      if (emailEnHoja === EMAIL_ADDRESS) {
-        const code = row[CODIGO_COL];
-        const name = row[NAME_COL] || 'Paciente';
-        
-      GmailApp.sendEmail(EMAIL_ADDRESS, "Recuperación de Código de Pasaporte de Implantes", "", {
-        from: "clinicapiesteller@gmail.com",
-        name: "Drs. Pi i Esteller",
-          htmlBody: `
-            <p>Estimado/a ${name},</p>
-            <p>Hemos recibido una solicitud para recuperar tu código de paciente para el Pasaporte de Implantes de la <strong>Clínica Dental Dr. Pi Esteller</strong>.</p>
-            
-            <div style="background-color: #eef4fb; padding: 15px; border-radius: 8px; text-align: center; margin: 20px 0;">
-              <p style="font-size: 18px; font-weight: bold; color: #02234f; margin: 0;">Tu Código de Paciente es:</p>
-              <h2 style="font-size: 28px; color: #02234f; margin: 5px 0;">${code}</h2>
-            </div>
-            
-            <p>Puedes usar este código para acceder a todos los detalles técnicos de tus implantes en nuestra web.</p>
-            <p>Atentamente,<br>Equipo de la Clínica Dental Dr. Pi Esteller</p>
-          `
-        });
+        <p>Puedes usar este código para acceder a todos los detalles técnicos de tus implantes en nuestra web.</p>
+        <p>Atentamente,<br>Equipo de la Clínica Dental Dr. Pi Esteller</p>
+      `
+    });
 
-        // Este mensaje se envía si el script tuvo éxito en su ejecución
-        return { ok: true, message: "El código ha sido enviado con éxito a tu correo electrónico." };
-      }
-    }
-
-    // Si el bucle termina sin encontrar el email
-    return { ok: false, message: "El email introducido no se encuentra registrado en nuestra base de datos." };
+    return { ok: true, message: "El código ha sido enviado con éxito a tu correo electrónico." };
 
   } catch (e) {
-    // Si ocurre cualquier error no previsto, lo reportamos al cliente (o al log)
     Logger.log("Error en retrieveCodeByEmail: " + e.toString());
-    // Devolvemos un error genérico por seguridad
+    // Mensaje genérico hacia el paciente; el detalle queda en el log.
     return { ok: false, message: "Error en la ejecución del script. Contacte con la clínica." };
   }
-}
-
-/**
- * Procesa la hoja "CargaMasiva" e importa los pacientes al sistema.
- * Agrupa implantes por id_quartup para hacer una sola carga por paciente.
- */
-function procesarCargaMasiva() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("CargaMasiva");
-  if (!sheet) {
-    SpreadsheetApp.getUi().alert("No se encontró la hoja 'CargaMasiva'. Créala primero.");
-    return;
-  }
-
-  const data = sheet.getDataRange().getValues();
-  if (data.length < 2) return; // Solo cabeceras
-
-  // Asumimos orden de columnas en CargaMasiva:
-  // 0:id_quartup, 1:Nombre, 2:Email, 3:Posicion, 4:Fecha, 5:Marca, 6:Modelo, 
-  // 7:Dimensiones, 8:Plataforma, 9:Conexion, 10:Pilar, 11:Cod_Implante, 12:Lote, 13:ESTADO
-  
-  const headers = data[0];
-  const rows = data.slice(1);
-  const patientsMap = {};
-
-  // 1. Agrupar filas por id_quartup
-  rows.forEach((row, index) => {
-    const status = row[13]; // Columna de Estado
-    if (status === "OK") return; // Saltar ya procesados
-
-    const id_quartup = String(row[0]).trim();
-    if (!id_quartup) return;
-
-    if (!patientsMap[id_quartup]) {
-      patientsMap[id_quartup] = {
-        id_quartup: id_quartup,
-        nombre: row[1],
-        email: row[2],
-        codigo_paciente: "GENERAR", // Dejar que el sistema lo genere o busque
-        sendEmail: "false", // No enviar emails masivos históricos para no hacer spam
-        implantes: [],
-        rowIndexes: [] // Guardamos qué filas de Excel son para marcar OK luego
-      };
-    }
-
-    // Añadir el implante al paciente
-    patientsMap[id_quartup].implantes.push({
-      posicion: row[3],
-      fecha_colocacion: row[4],
-      marca: row[5],
-      modelo: row[6],
-      dimensiones: row[7],
-      plataforma: row[8],
-      conexion: row[9],
-      pilar: row[10],
-      cod_implante: row[11],
-      lote: row[12]
-    });
-    
-    patientsMap[id_quartup].rowIndexes.push(index + 2); // +2 porque data empieza en fila 1 y slice quita cabecera
-  });
-
-  // 2. Procesar cada paciente agrupado
-  let successCount = 0;
-  const entryList = Object.values(patientsMap);
-
-  entryList.forEach(patientData => {
-    try {
-      // Usamos tu función existente saveNewImplant para mantener la lógica de negocio
-      // PERO primero verificamos si el paciente ya existe para no duplicar códigos
-      const existing = getPatientByid_quartup(patientData.id_quartup);
-      if (existing.ok && existing.found) {
-        patientData.codigo_paciente = existing.data.codigo; // Usar código existente
-      }
-
-      const result = saveNewImplant(patientData);
-      
-      if (result.ok) {
-        // Marcar filas como OK en el Excel
-        patientData.rowIndexes.forEach(rowIndex => {
-          sheet.getRange(rowIndex, 14).setValue("OK"); // Columna 14 es Estado
-        });
-        successCount++;
-      } else {
-         patientData.rowIndexes.forEach(rowIndex => {
-          sheet.getRange(rowIndex, 14).setValue("ERROR: " + result.message);
-        });
-      }
-
-    } catch (e) {
-      Logger.log("Error importando " + patientData.id_quartup + ": " + e.message);
-    }
-  });
-
-  SpreadsheetApp.getUi().alert(`Proceso finalizado. ${successCount} pacientes importados/actualizados.`);
 }
 
 // ==========================================
@@ -779,31 +611,20 @@ function procesarCargaMasiva() {
  */
 function initiateLogin(patientCode) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(SHEET_NAME);
-    const data = sheet.getDataRange().getValues();
-    
-    let targetEmail = null;
-    let targetName = "";
-    let patientFound = false; // NUEVO: variable para saber si el paciente existe
-    
-    for (let i = 1; i < data.length; i++) {
-      if (String(data[i][0]).trim().toUpperCase() === String(patientCode).trim().toUpperCase()) {
-        // Guardamos los datos y marcamos que lo hemos encontrado
-        targetEmail = data[i][3] ? String(data[i][3]).trim() : ""; // Columna D
-        targetName = data[i][2];  // Columna C
-        patientFound = true;
-        break;
-      }
-    }
-    
+    const { objetos } = leerPacientes(hojaPacientes());
+    const paciente = objetos.find(o => mismoCodigo(o.codi_acces, patientCode));
+
     // 1. Si no existe en la base de datos:
-    if (!patientFound) {
+    if (!paciente) {
       return { ok: false, message: 'Código de paciente no encontrado.' };
     }
 
-    // 2. Si existe, pero NO tiene email válido:
-    if (!targetEmail || targetEmail.indexOf('@') === -1) {
+    const targetEmail = String(paciente.email || '').trim();
+    const targetName = paciente.nombre;
+
+    // 2. "Sense email" o sin email válido: acceso directo, sin PIN (comportamiento
+    //    previo a S2; quitar o no el 2FA se decide en S1).
+    if (paciente.sense_email || !targetEmail || targetEmail.indexOf('@') === -1) {
       // Obtenemos los datos del paciente directamente
       const dataResponse = getPatientDataVerbose(patientCode); 
       return { 
@@ -924,11 +745,11 @@ function processImplantFile(data, filename) {
     if (ScanEngine.isAuthError(e)) {
       return { ok: false, message: MENSAJE_REAUTORIZAR };
     }
-    return { ok: false, message: "Error al interpretar: " + e.message };
+    return { ok: false, message: "Error en interpretar el document: " + e.message };
   }
 }
 
-const MENSAJE_REAUTORIZAR = "Esta cuenta de Google todavía no tiene autorizados los permisos necesarios. Abre el menú 'Pasaporte Implantológico 🦷' y pulsa '🔑 Autorizar mi cuenta', y acepta los permisos que te pida Google. Después vuelve aquí y prueba de nuevo.";
+const MENSAJE_REAUTORIZAR = "Aquest compte de Google encara no té autoritzats els permisos necessaris. Obre el menú 'Pasaport Implantològic 🦷', prem '🔑 Autoritzar el meu compte' i accepta els permisos que et demani Google. Després torna aquí i prova-ho de nou.";
 
 /**
  * Autodiagnóstico del escáner, ejecutable desde el menú por cualquier usuario de la
@@ -947,37 +768,37 @@ function comprobarTodo() {
   try {
     const hoja = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SHEET_NAME);
     lineas.push(hoja
-      ? "✅ Base de datos: OK (" + Math.max(hoja.getLastRow() - 1, 0) + " filas)"
-      : "❌ Base de datos: no existe la pestaña '" + SHEET_NAME + "'. Avisa a Gabriel.");
+      ? "✅ Base de dades: OK (" + Math.max(hoja.getLastRow() - 1, 0) + " files)"
+      : "❌ Base de dades: no existeix la pestanya '" + SHEET_NAME + "'. Avisa en Gabriel.");
   } catch (e) {
-    lineas.push("❌ Base de datos: no se puede leer (" + e.message + ")");
+    lineas.push("❌ Base de dades: no es pot llegir (" + e.message + ")");
   }
 
   let permisosOk = true;
   try {
     gasHttpFetch('https://www.google.com', { method: 'get' });
-    lineas.push("✅ Permisos de esta cuenta: OK");
+    lineas.push("✅ Permisos d'aquest compte: OK");
   } catch (e) {
     permisosOk = false;
-    lineas.push("❌ Permisos de esta cuenta: FALLO. " + MENSAJE_REAUTORIZAR);
+    lineas.push("❌ Permisos d'aquest compte: ERROR. " + MENSAJE_REAUTORIZAR);
   }
 
   lineas.push(GEMINI_API_KEY
-    ? "✅ Clave Gemini: configurada"
-    : "❌ Clave Gemini: FALTA en Propiedades del script. Avisa a Gabriel.");
+    ? "✅ Clau Gemini: configurada"
+    : "❌ Clau Gemini: FALTA a les Propietats de l'script. Avisa en Gabriel.");
   lineas.push(OPENROUTER_API_KEY
-    ? "✅ Clave OpenRouter: configurada"
-    : "❌ Clave OpenRouter: FALTA en Propiedades del script. Avisa a Gabriel.");
+    ? "✅ Clau OpenRouter: configurada"
+    : "❌ Clau OpenRouter: FALTA a les Propietats de l'script. Avisa en Gabriel.");
 
   if (permisosOk) {
     if (GEMINI_API_KEY) {
       try {
         const res = gasHttpFetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + GEMINI_API_KEY.trim(), { method: 'get' });
-        if (res.status === 200) lineas.push("✅ Gemini: responde correctamente");
-        else if (res.status === 429) lineas.push("⚠️ Gemini: límite diario alcanzado (HTTP 429). El escáner usará OpenRouter hasta mañana.");
-        else lineas.push("❌ Gemini: error HTTP " + res.status + ". Avisa a Gabriel.");
+        if (res.status === 200) lineas.push("✅ Gemini: respon correctament");
+        else if (res.status === 429) lineas.push("⚠️ Gemini: límit diari assolit (HTTP 429). L'escàner farà servir OpenRouter fins demà.");
+        else lineas.push("❌ Gemini: error HTTP " + res.status + ". Avisa en Gabriel.");
       } catch (e) {
-        lineas.push("❌ Gemini: sin conexión (" + e.message + ")");
+        lineas.push("❌ Gemini: sense connexió (" + e.message + ")");
       }
     }
     if (OPENROUTER_API_KEY) {
@@ -986,18 +807,18 @@ function comprobarTodo() {
           method: 'get',
           headers: { 'Authorization': 'Bearer ' + OPENROUTER_API_KEY.trim() }
         });
-        if (res.status === 200) lineas.push("✅ OpenRouter (respaldo): responde correctamente");
-        else if (res.status === 429) lineas.push("⚠️ OpenRouter: límite diario alcanzado (HTTP 429).");
-        else lineas.push("❌ OpenRouter: error HTTP " + res.status + ". Avisa a Gabriel.");
+        if (res.status === 200) lineas.push("✅ OpenRouter (reserva): respon correctament");
+        else if (res.status === 429) lineas.push("⚠️ OpenRouter: límit diari assolit (HTTP 429).");
+        else lineas.push("❌ OpenRouter: error HTTP " + res.status + ". Avisa en Gabriel.");
       } catch (e) {
-        lineas.push("❌ OpenRouter: sin conexión (" + e.message + ")");
+        lineas.push("❌ OpenRouter: sense connexió (" + e.message + ")");
       }
     }
   } else {
-    lineas.push("⏭️ Gemini y OpenRouter: no comprobados (primero arregla los permisos de arriba).");
+    lineas.push("⏭️ Gemini i OpenRouter: no comprovats (primer arregla els permisos de dalt).");
   }
 
-  SpreadsheetApp.getUi().alert("Diagnóstico", lineas.join("\n\n"), SpreadsheetApp.getUi().ButtonSet.OK);
+  SpreadsheetApp.getUi().alert("Diagnòstic", lineas.join("\n\n"), SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 // Alias de compatibilidad con el nombre anterior del diagnóstico.
@@ -1028,8 +849,8 @@ function autorizarCuenta() {
   SpreadsheetApp.openById(SPREADSHEET_ID).getName();        // spreadsheets
 
   SpreadsheetApp.getUi().alert(
-    'Cuenta autorizada ✅',
-    'Esta cuenta de Google ya tiene todos los permisos necesarios.\n\nSi el panel lateral estaba abierto, ciérralo y vuelve a abrirlo desde el menú.',
+    'Compte autoritzat ✅',
+    'Aquest compte de Google ja té tots els permisos necessaris.\n\nSi el panell lateral estava obert, tanca\'l i torna\'l a obrir des del menú.',
     SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
@@ -1042,292 +863,247 @@ function forzarPermisosPDF() {
   autorizarCuenta();
 }
 
-// Añade esta nueva función al final de tu Código.js
+// ==========================================
+//  ADMINISTRACIÓN DE LA HOJA (menú)
+// ==========================================
+
+/**
+ * Elimina las filas 100% idénticas (mismo paciente, mismo implante, todo igual). No
+ * depende de la posición de ninguna columna.
+ */
 function eliminarDuplicados() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME); // Usa tu constante
+  const sheet = hojaPacientes();
   const range = sheet.getDataRange();
-  
-  // Guardamos cuántas filas había antes
   const filasAntes = range.getNumRows();
-  
-  // IMPORTANTE: Esto elimina las filas donde TODOS los campos coinciden exactamente.
-  // Si quieres que elimine basándose SOLO en el id_quartup (ej: columna B, que es la 2), 
-  // cambiarías el código a: range.removeDuplicates([2]);
-  range.removeDuplicates(); 
-  
-  // Comprobamos cuántas quedaron
-  const filasDespues = sheet.getDataRange().getNumRows();
-  const eliminadas = filasAntes - filasDespues;
-  
-  // Mostramos un mensaje a la secretaria
-  SpreadsheetApp.getUi().alert('Limpieza Completada', `Se han eliminado ${eliminadas} registros duplicados.`, SpreadsheetApp.getUi().ButtonSet.OK);
+
+  range.removeDuplicates();
+
+  const eliminadas = filasAntes - sheet.getDataRange().getNumRows();
+  SpreadsheetApp.getUi().alert('Neteja feta', `S'han eliminat ${eliminadas} files duplicades.`, SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
-function normalizarPosicionesDientes() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+const HOJA_REVISION = 'Revisió migració';
+const CAB_REVISION = ["Codi d'accés", 'Nom', 'DNI', 'Nº implants', 'Valor antic', 'Motiu', 'Cuenta Quartup (a omplir)', 'Resultat'];
+
+/**
+ * Migración S2 (una sola vez, idempotente): reordena la hoja al formato nuevo con
+ * cabeceras en catalán, separa los DNIs que estaban en la columna del identificador,
+ * marca "Sense email" a quien no tiene email y crea la pestaña "Revisió migració" con
+ * los pacientes que necesitan su Cuenta Quartup. Antes hace una copia de la pestaña.
+ */
+function migrarDadesS2() {
+  const ui = SpreadsheetApp.getUi();
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = hojaPacientes();
   const data = sheet.getDataRange().getValues();
-  const newData = [];
-  
-  // ¡OJO AQUÍ! Recuerda cambiar el 5 por tu columna real (A=0, B=1, C=2...)
-  const COL_POSICION = 5; 
 
-  // Guardamos los encabezados intactos
-  newData.push(data[0]);
-
-  for (let i = 1; i < data.length; i++) {
-    let row = data[i];
-    let posicion = String(row[COL_POSICION]).trim();
-    
-    // Pasamos el texto a minúsculas para atrapar "Posible", "posible" o "POSIBLE"
-    let posicionMinusculas = posicion.toLowerCase();
-
-    // La magia está aquí: Si tiene coma Y además NO incluye la palabra "posible"
-    if (posicion.includes(',') && !posicionMinusculas.includes('posible')) {
-      let multiplesDientes = posicion.split(',');
-      
-      // Desdoblamos la fila
-      multiplesDientes.forEach(diente => {
-        let filaClonada = [...row]; 
-        filaClonada[COL_POSICION] = diente.trim(); 
-        newData.push(filaClonada);
-      });
-    } else {
-      // Si no tiene coma, o si dice "posible", la dejamos exactamente como estaba
-      newData.push(row);
-    }
-  }
-
-  // Borramos los datos viejos y pegamos los nuevos
-  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearContent();
-  sheet.getRange(1, 1, newData.length, newData[0].length).setValues(newData);
-  
-  SpreadsheetApp.getUi().alert('Éxito', 'Filas desdobladas correctamente (se ignoraron los casos "posibles").', SpreadsheetApp.getUi().ButtonSet.OK);
-}
-
-function corregirDientesAntiguos() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-  const data = sheet.getDataRange().getValues();
-  
-  // ¡AJUSTA ESTOS NÚMEROS A TUS COLUMNAS REALES! (A=0, B=1, C=2...)
-  const COL_FECHA = 5; // <-- Cambia esto por la columna donde está la Fecha de Colocación
-  const COL_POSICION = 4; // <-- Cambia esto por la columna donde está el Diente/Posición
-
-  // En JavaScript, los meses empiezan en 0 (Enero = 0, Febrero = 1... Mayo = 4)
-  // Por lo tanto, 17/05/2007 se escribe: new Date(2007, 4, 17)
-  const fechaLimite = new Date(2007, 4, 17);
-  
-  let cambiosRealizados = 0;
-
-  // Empezamos en i = 1 para no tocar la fila de los títulos
-  for (let i = 1; i < data.length; i++) {
-    let fechaCelda = data[i][COL_FECHA];
-    
-    // Verificamos que la celda contenga una fecha válida
-    if (fechaCelda instanceof Date) {
-      // Si la fecha es ESTRICTAMENTE anterior al 17 de mayo de 2007
-      if (fechaCelda < fechaLimite) {
-        data[i][COL_POSICION] = "No especificado";
-        cambiosRealizados++;
-      }
-    }
-  }
-
-  // Si hicimos cambios, sobrescribimos la hoja con los datos corregidos
-  if (cambiosRealizados > 0) {
-    // Pegamos toda la matriz de datos de vuelta a la hoja
-    sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
-    SpreadsheetApp.getUi().alert(
-      'Limpieza Exitosa ✨', 
-      `Se han corregido ${cambiosRealizados} implantes anteriores al 17/05/2007 dejándolos como "No especificado".`, 
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  } else {
-    SpreadsheetApp.getUi().alert('Aviso', 'No se encontraron implantes anteriores a esa fecha o ya están corregidos.', SpreadsheetApp.getUi().ButtonSet.OK);
-  }
-}
-
-function limpiarFilasConComasResiduales() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-  const data = sheet.getDataRange().getValues();
-  const newData = [];
-  
-  // ⚠️ CAMBIA EL 5 POR TU COLUMNA REAL DE LOS DIENTES:
-  // A=0 | B=1 | C=2 | D=3 | E=4 | F=5 | G=6 | H=7
-  const COL_POSICION = 4; 
-  
-  let eliminadas = 0;
-
-  // 1. Guardamos la fila de los títulos (encabezados) intacta
-  newData.push(data[0]);
-
-  // 2. Revisamos el resto de filas una por una
-  for (let i = 1; i < data.length; i++) {
-    let fila = data[i];
-    let posicion = String(fila[COL_POSICION]).trim();
-    let posicionMinusculas = posicion.toLowerCase();
-    
-    // Si la celda TIENE una coma Y NO tiene la palabra "posible"
-    if (posicion.includes(',') && !posicionMinusculas.includes('posible')) {
-      // NO la guardamos en newData (es decir, la eliminamos virtualmente)
-      eliminadas++;
-    } else {
-      // Si está todo bien, la guardamos en nuestra nueva lista
-      newData.push(fila);
-    }
-  }
-
-  // 3. Si hemos detectado filas para eliminar, actualizamos la hoja
-  if (eliminadas > 0) {
-    // Borramos todo el contenido de la hoja de golpe
-    sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearContent();
-    
-    // Pegamos nuestra nueva lista limpia
-    sheet.getRange(1, 1, newData.length, newData[0].length).setValues(newData);
-    
-    SpreadsheetApp.getUi().alert(
-      'Limpieza Exitosa 🧹', 
-      `Se han eliminado ${eliminadas} filas originales con comas que ya no servían.`, 
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  } else {
-    // Si sale este mensaje, significa que el código no está encontrando las comas,
-    // ¡probablemente porque el número COL_POSICION no apunta a la columna correcta!
-    SpreadsheetApp.getUi().alert(
-      'Aviso', 
-      'No se encontró ninguna fila que borrar. Revisa que COL_POSICION sea el número de columna correcto.', 
-      SpreadsheetApp.getUi().ButtonSet.WARNING
-    );
-  }
-}
-function actualizarEmailsDesdeQuartup() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetPacientes = ss.getSheetByName(SHEET_NAME); // Tu hoja "Pacientes"
-  const sheetQuartup = ss.getSheetByName("EmailsQuartup"); 
-  
-  if (!sheetQuartup) {
-    SpreadsheetApp.getUi().alert('Error ❌', 'Por favor, crea una pestaña llamada "EmailsQuartup" y pega ahí los datos.', SpreadsheetApp.getUi().ButtonSet.OK);
+  let plan;
+  try {
+    plan = PacientModel.planificarMigracio(data[0] || [], data.slice(1));
+  } catch (e) {
+    ui.alert('No es pot migrar', e.message, ui.ButtonSet.OK);
     return;
   }
-  
-  // 1. Leer datos de Quartup y crear un "Diccionario en memoria"
-  const dataQuartup = sheetQuartup.getDataRange().getValues();
-  const diccionarioEmails = {};
-  
-  // Buscar en qué columnas están "Cuenta contable" y "Email" (por si cambian de orden)
-  let colCuenta = 0; 
-  let colEmail = 3;  
-  
-  const headersQuartup = dataQuartup[0].map(h => String(h).trim().toLowerCase());
-  const idxCuenta = headersQuartup.indexOf('cuenta contable');
-  const idxEmail = headersQuartup.indexOf('email');
-  
-  if (idxCuenta !== -1) colCuenta = idxCuenta;
-  if (idxEmail !== -1) colEmail = idxEmail;
-  
-  // Llenar el diccionario
-  for (let i = 1; i < dataQuartup.length; i++) {
-    let cuenta = String(dataQuartup[i][colCuenta]).trim().toUpperCase();
-    let email = String(dataQuartup[i][colEmail]).trim();
-    
-    // Solo guardamos si hay una cuenta y el email tiene formato válido (contiene @)
-    if (cuenta && email.includes('@')) {
-      diccionarioEmails[cuenta] = email;
-    }
+
+  const r = plan.recompte;
+  const lineas = [
+    `Files d'implants: ${r.files} (${r.pacients} pacients)`,
+    `DNIs que passen de la columna de l'identificador a la columna DNI: ${r.mogutsADni} files`,
+    `Files sense email (es marcaran "Sense email"): ${r.senseEmail}`,
+    `Pacients sense Cuenta Quartup (aniran a la pestanya "${HOJA_REVISION}"): ${r.senseCuenta}`,
+    `Pacients amb dades a revisar: ${r.revisar}`
+  ];
+  if (r.columnesDesconegudes.length) {
+    lineas.push(`Columnes no reconegudes (es conserven al final): ${r.columnesDesconegudes.join(', ')}`);
   }
-  
-  // 2. Leer la hoja principal de Pacientes
-  const dataPacientes = sheetPacientes.getDataRange().getValues();
-  
-  // Índices en tu hoja de Pacientes: B=1 (ID_Quartup), D=3 (Email)
-  const COL_ID = 1; 
-  const COL_EMAIL = 3; 
-  
+  lineas.push('', "Abans de canviar res es farà una còpia de la pestanya. Vols continuar?");
+  const resumen = lineas.join('\n');
+
+  if (ui.alert('Migració de dades', resumen, ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH.mm');
+    sheet.copyTo(ss).setName('Còpia abans S2 ' + stamp);
+
+    const numFilas = plan.files.length;
+    const numCols = plan.capcaleres.length;
+
+    // Se vacía todo (valores, formatos y validaciones de la disposición antigua: las
+    // columnas cambian de sitio y un formato viejo caería sobre otro dato) y se reescribe.
+    const todo = sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns());
+    todo.clearContent();
+    todo.clearFormat();
+    todo.clearDataValidations();
+
+    if (sheet.getMaxColumns() < numCols) {
+      sheet.insertColumnsAfter(sheet.getMaxColumns(), numCols - sheet.getMaxColumns());
+    }
+    sheet.getRange(1, 1, 1, numCols).setValues([plan.capcaleres]).setFontWeight('bold');
+    if (numFilas > 0) {
+      ponerFormatoTexto(sheet, plan.capcaleres, 2, numFilas);
+      const { idx } = PacientModel.indexarCapcaleres(plan.capcaleres);
+      sheet.getRange(2, idx.fecha_colocacion + 1, numFilas, 1).setNumberFormat('dd/mm/yyyy');
+      sheet.getRange(2, 1, numFilas, numCols).setValues(plan.files.map(f => f.map(textoSiId(plan.capcaleres))));
+      ponerCasillas(sheet, plan.capcaleres, 2, numFilas);
+    }
+    sheet.setFrozenRows(1);
+
+    crearHojaRevision(ss, plan.revisio);
+  } finally {
+    lock.releaseLock();
+  }
+
+  ui.alert('Migració feta ✅',
+    plan.revisio.length
+      ? `Ara omple la columna "Cuenta Quartup (a omplir)" de la pestanya "${HOJA_REVISION}" (${plan.revisio.length} pacients) i després prem:\n${NOM_MENU} → 🗂️ Migració de dades → 2. Aplicar les Cuentes de la revisió.`
+      : 'Tots els pacients tenen la seva Cuenta Quartup. No cal revisar res.',
+    ui.ButtonSet.OK);
+}
+
+/** Codi d'accés, Cuenta y DNI se escriben como texto (sin conversión a número). */
+function textoSiId(headers) {
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  const ids = [idx.codi_acces, idx.cuenta_quartup, idx.dni];
+  return (v, i) => (ids.indexOf(i) !== -1 && v !== '' && v !== null && v !== undefined) ? String(v) : v;
+}
+
+function crearHojaRevision(ss, revisio) {
+  let hoja = ss.getSheetByName(HOJA_REVISION);
+  if (hoja) ss.deleteSheet(hoja);
+  if (!revisio.length) return;
+
+  hoja = ss.insertSheet(HOJA_REVISION);
+  const filas = revisio.map(r => [r.codi_acces, r.nombre, r.dni, r.n_implants, r.valor_antic, r.motiu, '', '']);
+  hoja.getRange(1, 1, 1, CAB_REVISION.length).setValues([CAB_REVISION]).setFontWeight('bold');
+  hoja.getRange(2, 7, filas.length, 1).setNumberFormat('@');
+  hoja.getRange(2, 1, filas.length, CAB_REVISION.length).setValues(filas);
+  hoja.getRange(2, 7, filas.length, 1).setBackground('#fef9c3');
+  hoja.getRange(1, 7).setNote("Busca el pacient a Quartup (pel DNI o pel nom) i copia aquí el número de 'Cuenta'. Només xifres.");
+  hoja.setFrozenRows(1);
+  hoja.autoResizeColumns(1, CAB_REVISION.length);
+}
+
+/**
+ * Escribe las Cuentes rellenadas en "Revisió migració" en todas las filas de cada
+ * paciente. Valida formato y unicidad, y deja el resultado en la columna "Resultat".
+ */
+function aplicarCuentesRevisio() {
+  const ui = SpreadsheetApp.getUi();
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const hojaRev = ss.getSheetByName(HOJA_REVISION);
+  if (!hojaRev) {
+    ui.alert('Res a aplicar', `No existeix la pestanya "${HOJA_REVISION}".`, ui.ButtonSet.OK);
+    return;
+  }
+
+  const rev = hojaRev.getDataRange().getValues();
+  const cab = rev[0].map(h => String(h).trim());
+  const iCodi = cab.indexOf(CAB_REVISION[0]);
+  const iCuenta = cab.indexOf(CAB_REVISION[6]);
+  const iRes = cab.indexOf(CAB_REVISION[7]);
+  if (iCodi === -1 || iCuenta === -1 || iRes === -1) {
+    ui.alert('Error', `La pestanya "${HOJA_REVISION}" no té les columnes esperades. Torna a executar la migració.`, ui.ButtonSet.OK);
+    return;
+  }
+  const revisions = rev.slice(1).map(f => ({ codi_acces: f[iCodi], cuenta_quartup: f[iCuenta] }));
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  let resultado;
+  try {
+    const sheet = hojaPacientes();
+    const { headers, idx, files } = leerPacientes(sheet);
+    resultado = PacientModel.aplicarRevisio(headers, files, revisions);
+
+    if (resultado.aplicats.length && files.length) {
+      const col = idx.cuenta_quartup + 1;
+      sheet.getRange(2, col, files.length, 1).setNumberFormat('@');
+      sheet.getRange(2, col, files.length, 1).setValues(resultado.files.map(f => [String(f[idx.cuenta_quartup])]));
+    }
+  } catch (e) {
+    ui.alert('Error', e.message, ui.ButtonSet.OK);
+    return;
+  } finally {
+    lock.releaseLock();
+  }
+
+  const porCodigo = {};
+  resultado.aplicats.forEach(a => { porCodigo[a.codi_acces] = '✅ Aplicada'; });
+  resultado.errors.forEach(e => { porCodigo[e.codi_acces] = '❌ ' + e.motiu; });
+  const columnaRes = rev.slice(1).map((f, i) => {
+    const codi = String(f[iCodi] || '').trim().toUpperCase();
+    return [porCodigo[codi] !== undefined ? porCodigo[codi] : rev[i + 1][iRes]];
+  });
+  if (columnaRes.length) hojaRev.getRange(2, iRes + 1, columnaRes.length, 1).setValues(columnaRes);
+
+  const pendientes = revisions.filter(r => String(r.cuenta_quartup || '').trim() === '').length;
+  ui.alert('Cuentes aplicades',
+    `Pacients actualitzats: ${resultado.aplicats.length} (${resultado.filesTocades} files d'implants)\n` +
+    `Amb error (mira la columna "Resultat"): ${resultado.errors.length}\n` +
+    `Encara per omplir: ${pendientes}`,
+    ui.ButtonSet.OK);
+}
+
+/**
+ * Cruce de emails desde un export de Quartup pegado en la pestaña "EmailsQuartup"
+ * (columnas "Cuenta contable" y "Email"). Rellena el email por Cuenta Quartup y desmarca
+ * "Sense email" de quien lo recibe. Base del futuro cruce automático de Cuentes.
+ */
+function actualizarEmailsDesdeQuartup() {
+  const ui = SpreadsheetApp.getUi();
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheetQuartup = ss.getSheetByName("EmailsQuartup");
+  if (!sheetQuartup) {
+    ui.alert('Error ❌', 'Crea una pestanya anomenada "EmailsQuartup" i enganxa-hi les dades de Quartup.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const dataQuartup = sheetQuartup.getDataRange().getValues();
+  const cabQ = dataQuartup[0].map(h => PacientModel.normalitzar(h));
+  const colCuenta = cabQ.indexOf('cuentacontable') !== -1 ? cabQ.indexOf('cuentacontable') : cabQ.indexOf('cuenta');
+  const colEmail = cabQ.indexOf('email');
+  if (colCuenta === -1 || colEmail === -1) {
+    ui.alert('Error ❌', 'La pestanya "EmailsQuartup" ha de tenir les columnes "Cuenta contable" (o "Cuenta") i "Email".', ui.ButtonSet.OK);
+    return;
+  }
+
+  const emailsPorCuenta = {};
+  dataQuartup.slice(1).forEach(f => {
+    const cuenta = String(f[colCuenta]).trim();
+    const email = String(f[colEmail]).trim();
+    if (cuenta && PacientModel.esEmail(email)) emailsPorCuenta[cuenta] = email;
+  });
+
+  const sheet = hojaPacientes();
+  const { idx, files } = leerPacientes(sheet);
+  if (idx.cuenta_quartup === undefined || idx.email === undefined) {
+    ui.alert('Error ❌', 'No trobo les columnes "Cuenta Quartup" i "Email" a la fulla de pacients.', ui.ButtonSet.OK);
+    return;
+  }
+
   let actualizados = 0;
-  
-  // 3. Cruzar los datos
-  for (let i = 1; i < dataPacientes.length; i++) {
-    let idPaciente = String(dataPacientes[i][COL_ID]).trim().toUpperCase();
-    
-    // Si el paciente existe en nuestro diccionario de Quartup, le actualizamos el email
-    if (idPaciente && diccionarioEmails[idPaciente]) {
-      // Opcional: Si quieres que no sobreescriba emails que TÚ ya tenías, descomenta la siguiente línea:
-      // if (String(dataPacientes[i][COL_EMAIL]).trim() !== '') continue;
-      
-      dataPacientes[i][COL_EMAIL] = diccionarioEmails[idPaciente];
+  files.forEach(f => {
+    const email = emailsPorCuenta[String(f[idx.cuenta_quartup]).trim()];
+    if (email && String(f[idx.email]).trim() !== email) {
+      f[idx.email] = email;
+      if (idx.sense_email !== undefined) f[idx.sense_email] = false;
       actualizados++;
     }
-  }
-  
-  // 4. Guardar los datos actualizados de golpe
+  });
+
   if (actualizados > 0) {
-    sheetPacientes.getRange(1, 1, dataPacientes.length, dataPacientes[0].length).setValues(dataPacientes);
-    SpreadsheetApp.getUi().alert('Cruce Exitoso ✨', `Se han actualizado ${actualizados} emails correctamente en la base de datos.`, SpreadsheetApp.getUi().ButtonSet.OK);
+    sheet.getRange(2, idx.email + 1, files.length, 1).setValues(files.map(f => [f[idx.email]]));
+    if (idx.sense_email !== undefined) {
+      sheet.getRange(2, idx.sense_email + 1, files.length, 1).setValues(files.map(f => [PacientModel.esCert(f[idx.sense_email])]));
+    }
+    ui.alert('Creuament fet ✨', `S'han actualitzat ${actualizados} emails.`, ui.ButtonSet.OK);
   } else {
-    SpreadsheetApp.getUi().alert('Aviso', 'El script se ejecutó, pero no se encontró ninguna cuenta contable nueva con email para actualizar.', SpreadsheetApp.getUi().ButtonSet.OK);
+    ui.alert('Avís', "No s'ha trobat cap email nou per actualitzar.", ui.ButtonSet.OK);
   }
 }
 
-function eliminarImplantesDuplicadosPorPosicion() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-  const data = sheet.getDataRange().getValues();
-  const newData = [];
-  
-  // ⚠️ VERIFICA QUE LAS COLUMNAS SEAN CORRECTAS (A=0, B=1, C=2... F=5)
-  const COL_ID_QUARTUP = 1; // Columna B
-  const COL_POSICION = 5;   // Columna F
-
-  // Set es una colección ultrarrápida que nos permite saber si ya hemos visto algo antes
-  const combinacionesVistas = new Set();
-  let eliminadas = 0;
-
-  // 1. Guardamos la fila de los encabezados intacta
-  newData.push(data[0]);
-
-  // 2. Revisamos cada fila
-  for (let i = 1; i < data.length; i++) {
-    let fila = data[i];
-    let idQuartup = String(fila[COL_ID_QUARTUP]).trim().toLowerCase();
-    let posicion = String(fila[COL_POSICION]).trim().toLowerCase();
-
-    // EXCEPCIÓN MÉDICA: Si la posición es dudosa o no especificada, 
-    // SIEMPRE la guardamos (no queremos borrar datos dudosos que requieren revisión manual)
-    if (posicion === 'no especificado' || posicion.includes('posible') || !posicion) {
-      newData.push(fila);
-      continue;
-    }
-
-    // Creamos nuestra "Clave Compuesta" (Ejemplo: "q-12345_14")
-    let claveCompuesta = idQuartup + "_" + posicion;
-
-    // Si YA hemos visto a este paciente con este mismo diente...
-    if (combinacionesVistas.has(claveCompuesta)) {
-      // Es un duplicado: NO lo guardamos en newData, lo ignoramos.
-      eliminadas++;
-    } else {
-      // Es la primera vez que vemos este implante en este paciente: Lo guardamos
-      combinacionesVistas.add(claveCompuesta);
-      newData.push(fila);
-    }
-  }
-
-  // 3. Escribir los datos limpios en la hoja
-  if (eliminadas > 0) {
-    sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearContent();
-    sheet.getRange(1, 1, newData.length, newData[0].length).setValues(newData);
-    
-    SpreadsheetApp.getUi().alert(
-      'Limpieza Avanzada Exitosa ✨', 
-      `Se han eliminado ${eliminadas} filas duplicadas (Mismo paciente, mismo diente).`, 
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  } else {
-    SpreadsheetApp.getUi().alert(
-      'Todo Perfecto', 
-      'No se encontraron implantes repetidos en la misma posición para ningún paciente.', 
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  }
-}
 // =================================================================
 // NUEVA API PARA CONECTAR EL PASAPORTE CON NETLIFY
 // =================================================================

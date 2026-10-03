@@ -430,7 +430,7 @@
           <div style="background:#eef4fb; padding:15px; border-radius:8px; margin-top:20px; text-align:left;" class="fade-in">
             <h3 style="margin:0; color:#02234f;">👤 ${escapeHtml(p.nombre)}</h3>
             <p style="margin:5px 0; font-size:14px;">
-                <strong>id_quartup:</strong> ${escapeHtml(p.id_quartup)} <br> 
+                <strong>id_quartup:</strong> ${escapeHtml(p.cuenta_quartup)} <br> 
                 <strong>Email:</strong> ${escapeHtml(p.email)}
             </p>
           </div>
@@ -479,7 +479,7 @@
             { label: 'Plataforma', key: 'plataforma' },
             { label: 'Conexión', key: 'conexion' },
             { label: 'Pilar', key: 'pilar' },
-            { label: 'Fecha Colocación', key: 'fecha_de_colocacion' }, 
+            { label: 'Fecha Colocación', key: 'fecha_colocacion' }, 
             { label: 'Cód. Implante', key: 'cod_implante' },
             { label: 'Lote', key: 'lote' }
         ];
@@ -501,7 +501,7 @@
             let val = imp[f.key] || imp[f.key.replace(/_/g,'')] || '';
             
             // Si es fecha, formatear bonito en la vista web también
-            if (f.key === 'fecha_de_colocacion' && val) {
+            if (f.key === 'fecha_colocacion' && val) {
                  let d = new Date(val);
                  if(!isNaN(d.getTime())) val = d.toLocaleDateString('es-ES');
             }
@@ -525,7 +525,7 @@
 
         // 1. Rellenar datos Cabecera
         document.getElementById('pdf-nombre').textContent = p.nombre || '';
-        document.getElementById('pdf-id_quartup').textContent = p.id_quartup || '';
+        document.getElementById('pdf-id_quartup').textContent = p.cuenta_quartup || '';
         document.getElementById('pdf-codigo').textContent = currentPatientCode;
         document.getElementById('pdf-fecha').textContent = new Date().toLocaleDateString('es-ES');
 
