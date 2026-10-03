@@ -82,11 +82,11 @@ test('vista previa de un paciente existente: sus filas + las nuevas, ordenadas, 
   // Orden por posición: 14, 24, 26. Sin email, Cuenta ni DNI completo.
   const html = t.pasaport;
   assert.ok(html.indexOf('>14<') < html.indexOf('>24<') && html.indexOf('>24<') < html.indexOf('>26<'), 'ordenado');
-  assert.match(html, /Código de acceso:<\/b> ABC234/);
+  assert.match(html, /Código de acceso<\/div>\s*<div[^>]*>ABC234/);
   assert.match(html, /\*\*\*4567\*\*/);
   assert.doesNotMatch(html, /angels@x\.cat|43000200|12345678Z/);
   assert.match(html, /Multi-unit · 30º · 5 mm · ref\. pilar HE48865/);
-  assert.match(html, /Interna · plataforma 4,1/);
+  assert.match(html, /Interna<br>plataforma&nbsp;4,1/);
   assert.doesNotMatch(html, /<html>/, 'dentro de la ventana va solo el cuerpo');
 });
 
@@ -95,7 +95,7 @@ test('vista previa de un paciente nuevo: el codi "es generarà en desar" y lo de
   const r = ctx.vistaPreviaPasaport(fd(NOVA, [Object.assign({}, NOU, { conexion: 'Interna' })]));
   assert.equal(r.ok, true, r.message);
   assert.deepEqual([...r.avisos], []);
-  assert.match(dialegs[0].out.t.pasaport, /Código de acceso:<\/b> es generarà en desar/);
+  assert.match(dialegs[0].out.t.pasaport, /Código de acceso<\/div>\s*<div[^>]*>es generarà en desar/);
 });
 
 test('el formData no puede cerrar el <script> de la ventana', () => {

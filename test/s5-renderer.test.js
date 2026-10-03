@@ -37,27 +37,32 @@ const IMPS = [
     lote: 'L1', fecha_colocacion: '3/10/2026', pilar: '' }
 ];
 
-['A', 'B', 'C'].forEach(v => {
-  test('variante ' + v + ': datos, escapado y sin nada interno', () => {
-    const h = P.htmlPasaporte(PAC, IMPS, 'ABC234', '03/10/2026', { variant: v });
-    assert.match(h, /^<html>/);
-    assert.match(h, /Fisura pterigoidea \(cuadrante 1\)/);
-    assert.match(h, /Interna · plataforma 4,1/);
-    assert.match(h, /HE41418/);
-    assert.match(h, /2299C/);
-    assert.match(h, /A cabeza de implante/);
-    assert.match(h, /Código de acceso:<\/b> ABC234/);
-    assert.match(h, /\*\*\*4567\*\*/);
-    assert.doesNotMatch(h, /<b>Núñez<\/b>|<script>x/, 'todo escapado');
-    assert.doesNotMatch(h, /id_quartup|Cuenta|Nº Historial/i);
-  });
+test('pasaporte: datos, escapado y sin nada interno', () => {
+  const h = P.htmlPasaporte(PAC, IMPS, 'ABC234', '03/10/2026');
+  assert.match(h, /^<html>/);
+  assert.match(h, /Fisura pterigoidea \(cuadrante 1\)/);
+  assert.match(h, /Interna<br>plataforma&nbsp;4,1/);
+  assert.match(h, /HE41418/);
+  assert.match(h, /2299C/);
+  assert.match(h, /A cabeza de implante/);
+  assert.match(h, /Código de acceso<\/div>\s*<div[^>]*>ABC234/);
+  assert.match(h, /\*\*\*4567\*\*/);
+  assert.doesNotMatch(h, /<b>Núñez<\/b>|<script>x/, 'todo escapado');
+  assert.doesNotMatch(h, /id_quartup|Cuenta|Nº Historial/i);
 });
 
-test('variante A: Ref/Lote antes que el pilar, que va debajo del implante', () => {
-  const h = P.htmlPasaporte(PAC, IMPS, 'ABC234', '03/10/2026', { variant: 'A' });
-  assert.ok(h.indexOf('HE41418') < h.indexOf('Pilar:</b> A cabeza de implante'));
+test('pasaporte: Ref/Lote antes que el pilar, que va en su banda debajo del implante', () => {
+  const h = P.htmlPasaporte(PAC, IMPS, 'ABC234', '03/10/2026');
+  assert.ok(h.indexOf('HE41418') < h.indexOf('A cabeza de implante'));
   // Pilar vacío y sin pendiente: no hay banda de pilar para el 26.
-  assert.equal((h.match(/<b>Pilar:<\/b>/g) || []).length, 1);
+  assert.equal((h.match(/>Pilar<\/span>/g) || []).length, 1);
+});
+
+test('pasaporte: nada que el conversor de PDF no pinte (fondos o texto claro)', () => {
+  const h = P.htmlPasaporte(PAC, IMPS, 'ABC234', '03/10/2026');
+  assert.doesNotMatch(h, /background|bgcolor/i, 'los rellenos van con box-shadow inset');
+  assert.doesNotMatch(h, /color:\s*(#fff|#ffffff|white)/i, 'el conversor oscurece el texto claro');
+  assert.match(h, /print-color-adjust:exact/, 'al imprimir se conservan los rellenos');
 });
 
 test('nomesCos: solo el contenido, para meterlo en la ventana de la vista previa', () => {

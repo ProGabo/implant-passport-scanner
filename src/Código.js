@@ -1988,8 +1988,6 @@ function actualizarEmailsDesdeQuartup() {
 // Un solo renderer (PortalModel.htmlPasaporte) para el portal, la vista previa y el PDF,
 // que siempre convierte el servidor: así los tres son iguales por construcción (ADR 0004).
 
-// Disposición elegida por el usuario viendo PDFs reales (S5, paso 1).
-const VARIANT_PASAPORT = 'C';
 const LOGO_PASAPORT_URL = 'https://i.postimg.cc/tTX6JQ42/DR-PI-ESTELLER.png';
 
 /** Incluye un archivo HTML (sin scriptlets) en una plantilla: <?!= include_('VistaPrevia') ?>. */
@@ -2029,7 +2027,7 @@ function logoPasaport_() {
 function htmlPasaport_(implants, codi, opcions) {
   const avui = Utilities.formatDate(new Date(ahoraMs()), Session.getScriptTimeZone(), 'dd/MM/yyyy');
   return PortalModel.htmlPasaporte(implants[0] || {}, implants, codi, avui,
-    Object.assign({ variant: VARIANT_PASAPORT, logo: logoPasaport_() }, opcions));
+    Object.assign({ logo: logoPasaport_() }, opcions));
 }
 
 function pdfPasaport_(implants, codi) {

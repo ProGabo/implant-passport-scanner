@@ -272,129 +272,99 @@ function crearPortalModel() {
 
   const LOGO_URL = 'https://i.postimg.cc/tTX6JQ42/DR-PI-ESTELLER.png';
   const BLAU = '#02234f';
+  const SERIF = "Georgia,'Times New Roman',serif";
+
+  // El conversor de PDF de Apps Script (medido, S5): NO pinta ningún `background` y
+  // oscurece a #ababab todo texto claro. Los rellenos van con box-shadow inset (el
+  // navegador y el conversor los pintan igual) y el texto siempre oscuro sobre fondo
+  // suave. Así la vista previa, la impresión y el PDF son el mismo diseño.
+  const relleno = c => `box-shadow:inset 0 0 0 2000px ${c};`;
+  const ETIQUETA = 'font-size:7.5px;letter-spacing:1.4px;text-transform:uppercase;color:#5f6f86;font-weight:bold;';
+  const e = v => escapar(net(v) || '-');
 
   function capcalera(pacient, codi, dataEmissio, logo) {
+    const dada = (etiqueta, valor, estil) => `
+          <td style="padding:9px 14px;vertical-align:top;${estil || ''}">
+            <div style="${ETIQUETA}padding-bottom:3px;">${etiqueta}</div>
+            <div style="font-size:11.5px;color:${BLAU};">${valor}</div></td>`;
+    const sep = 'border-left:1px solid #d5dce7;';
     return `
-        <table style="width:100%;border-bottom:2px solid ${BLAU};margin-bottom:16px;"><tr>
-          <td style="vertical-align:middle;"><img src="${escapar(logo || LOGO_URL)}" style="height:55px;"></td>
-          <td style="text-align:right;vertical-align:middle;">
-            <div style="font-size:20px;color:${BLAU};font-weight:bold;">Pasaporte Implantológico</div>
-            <div style="color:#666;">Certificado de Autenticidad y Garantía</div>
-          </td>
+        <table style="width:100%;border-collapse:collapse;"><tr>
+          <td style="vertical-align:bottom;padding-bottom:12px;"><img src="${escapar(logo || LOGO_URL)}" style="height:52px;"></td>
+          <td style="text-align:right;vertical-align:bottom;padding-bottom:12px;">
+            <div style="${ETIQUETA}letter-spacing:2.4px;padding-bottom:5px;">Certificado de autenticidad y garantía</div>
+            <div style="font-family:${SERIF};font-size:25px;color:${BLAU};">Pasaporte Implantológico</div>
+          </td></tr></table>
+        <div style="border-top:1px solid ${BLAU};border-bottom:1px solid ${BLAU};height:2px;margin-bottom:20px;"></div>
+        <table style="width:100%;border-collapse:collapse;${relleno('#f3f6fa')}"><tr>
+          ${dada('Paciente', e(pacient.nombre), 'width:34%;')}
+          ${dada('DNI', e(pacient.dni_parcial), 'width:20%;' + sep)}
+          ${dada('Fecha de emisión', e(dataEmissio), 'width:22%;' + sep)}
+          ${dada('Código de acceso', e(codi), 'width:24%;' + sep)}
         </tr></table>
-        <table style="width:100%;background:#f4f6f9;margin-bottom:18px;" cellpadding="6"><tr>
-          <td><b>Paciente:</b> ${escapar(pacient.nombre)}</td>
-          <td>${pacient.dni_parcial ? '<b>DNI:</b> ' + escapar(pacient.dni_parcial) : ''}</td>
-        </tr><tr>
-          <td><b>Fecha de emisión:</b> ${escapar(dataEmissio)}</td>
-          <td><b>Código de acceso:</b> ${escapar(codi)}</td>
-        </tr></table>
-        <div style="font-size:14px;color:${BLAU};font-weight:bold;border-bottom:1px solid #ccc;padding-bottom:4px;">Registro de Implantes Colocados</div>`;
+        <div style="font-family:${SERIF};font-size:16px;color:${BLAU};margin-top:30px;">Registro de Implantes Colocados</div>
+        <div style="height:7px;"></div>`;
+  }
+
+  /**
+   * Una fila por implante y, debajo, el pilar en una banda de color suave unida a él
+   * (sin banda si textPilar está vacío). Cada implante es un <tbody> que no se parte
+   * entre páginas; el <thead> se repite.
+   */
+  function cosPasaporte(implants) {
+    const th = amplada => `width:${amplada};padding:7px 6px 7px 10px;text-align:left;${ETIQUETA}border-top:1px solid ${BLAU};border-bottom:1px solid ${BLAU};`;
+    const cella = 'vertical-align:top;font-size:10.5px;color:#26354a;line-height:1.5;';
+    const mini = t => `<span style="${ETIQUETA}font-size:7px;letter-spacing:1.2px;padding-right:5px;">${t}</span>`;
+    const files = implants.map(i => {
+      const pilar = textPilar(i);
+      const td = `padding:11px 6px ${pilar ? 6 : 11}px 10px;${cella}` + (pilar ? '' : 'border-bottom:1px solid #d5dce7;');
+      const conexion = textConexion(i);
+      return `
+          <tbody style="page-break-inside:avoid;">
+            <tr>
+              <td style="${td}font-weight:bold;font-size:11.5px;color:${BLAU};">${e(i.posicion)}</td>
+              <td style="${td}"><span style="font-weight:bold;color:${BLAU};">${e(i.marca)}</span>${net(i.modelo) ? '<br><span style="color:#5f6f86;">' + escapar(net(i.modelo)) + '</span>' : ''}</td>
+              <td style="${td}">${e(i.dimensiones)}</td>
+              <td style="${td}">${conexion ? conexion.split(' · ').map(t => escapar(t).replace(/ /g, '&nbsp;')).join('<br>') : '-'}</td>
+              <td style="${td}">${mini('Ref')}${e(i.cod_implante)}<br>${mini('Lote')}${e(i.lote)}</td>
+              <td style="${td}">${e(i.fecha_colocacion)}</td>
+            </tr>` + (pilar ? `
+            <tr><td colspan="6" style="padding:0;border-bottom:1px solid #d5dce7;">
+              <table style="width:100%;border-collapse:collapse;margin-bottom:10px;"><tr>
+                <td style="width:10px;"></td>
+                <td style="padding:8px 12px;border-left:4px solid #5b7fa8;${relleno('#e1eaf5')}font-size:10px;color:#1f3b5c;">
+                  <span style="${ETIQUETA}color:#3f5c82;padding-right:8px;">Pilar</span>${escapar(pilar)}</td>
+              </tr></table></td></tr>` : '') + `
+          </tbody>`;
+    }).join('');
+    return `
+        <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+          <thead><tr><th style="${th('18%')}">Posición</th><th style="${th('19%')}">Implante</th><th style="${th('11%')}">Medidas</th>
+            <th style="${th('20%')}">Conexión</th><th style="${th('16%')}">Ref / Lote</th><th style="${th('16%')}">Fecha</th></tr></thead>
+          ${files}
+        </table>`;
   }
 
   const PEU = `
-        <div style="margin-top:36px;font-size:9px;color:#999;text-align:center;border-top:1px solid #eee;padding-top:10px;">
-          Este documento certifica los componentes médicos implantados. Se recomienda conservarlo para futuras referencias clínicas.<br>
-          © Clínica Dental Drs. Pi y Esteller
+        <div style="margin-top:38px;text-align:center;">
+          <div style="border-top:1px solid ${BLAU};width:60px;margin:0 auto 12px auto;"></div>
+          <div style="font-family:${SERIF};font-size:9.5px;color:#4a5b73;line-height:1.5;">Este documento certifica los componentes médicos implantados.<br>Se recomienda conservarlo para futuras referencias clínicas.</div>
+          <div style="${ETIQUETA}padding-top:7px;">© Clínica Dental Drs. Pi y Esteller</div>
         </div>`;
 
-  const e = v => escapar(net(v) || '-');
-  const refLote = i => `Ref: ${e(i.cod_implante)}<br>Lote: ${e(i.lote)}`;
-
-  // A: una fila por implante y, debajo, el pilar en una banda de color unida a él.
-  function cosVariantA(implants) {
-    const th = `padding:6px;text-align:left;background:${BLAU};color:#fff;`;
-    const td = 'padding:7px 6px;vertical-align:top;border-top:1px solid #cfd6df;';
-    const files = implants.map(i => {
-      const pilar = textPilar(i);
-      return `
-          <tr>
-            <td style="${td}"><b>${e(i.posicion)}</b></td>
-            <td style="${td}">${e([net(i.marca), net(i.modelo)].filter(Boolean).join(' '))}</td>
-            <td style="${td}">${e(i.dimensiones)}</td>
-            <td style="${td}">${e(textConexion(i))}</td>
-            <td style="${td}">${refLote(i)}</td>
-            <td style="${td}">${e(i.fecha_colocacion)}</td>
-          </tr>` + (pilar ? `
-          <tr>
-            <td style="padding:0 6px 7px 6px;"></td>
-            <td colspan="5" style="padding:5px 8px;background:#e8eef6;border-left:3px solid #5b7fa8;color:#1f3b5c;">
-              <b>Pilar:</b> ${escapar(pilar)}
-            </td>
-          </tr>` : '');
-    }).join('');
-    return `
-        <table style="width:100%;border-collapse:collapse;margin-top:10px;">
-          <tr><th style="${th}">Posición</th><th style="${th}">Implante</th><th style="${th}">Medidas</th>
-              <th style="${th}">Conexión</th><th style="${th}">Ref / Lote</th><th style="${th}">Fecha</th></tr>
-          ${files}
-        </table>`;
-  }
-
-  // B: una tarjeta por implante, con el pilar en una sub-tarjeta.
-  function cosVariantB(implants) {
-    const k = 'padding:3px 8px 3px 0;color:#666;width:22%;vertical-align:top;';
-    const v = 'padding:3px 12px 3px 0;vertical-align:top;';
-    return implants.map(i => {
-      const pilar = textPilar(i);
-      return `
-        <table style="width:100%;border:1px solid #cfd6df;border-collapse:collapse;margin-top:12px;">
-          <tr><td style="background:${BLAU};color:#fff;padding:6px 10px;font-weight:bold;">${e(i.posicion)}</td>
-              <td style="background:${BLAU};color:#fff;padding:6px 10px;text-align:right;">Colocado: ${e(i.fecha_colocacion)}</td></tr>
-          <tr><td colspan="2" style="padding:8px 10px;">
-            <table style="width:100%;border-collapse:collapse;">
-              <tr><td style="${k}">Implante</td><td style="${v}"><b>${e([net(i.marca), net(i.modelo)].filter(Boolean).join(' '))}</b></td>
-                  <td style="${k}">Ref</td><td style="${v}">${e(i.cod_implante)}</td></tr>
-              <tr><td style="${k}">Medidas</td><td style="${v}">${e(i.dimensiones)}</td>
-                  <td style="${k}">Lote</td><td style="${v}">${e(i.lote)}</td></tr>
-              <tr><td style="${k}">Conexión</td><td style="${v}" colspan="3">${e(textConexion(i))}</td></tr>
-            </table>` + (pilar ? `
-            <table style="width:100%;border-collapse:collapse;margin-top:6px;"><tr>
-              <td style="padding:6px 10px;background:#e8eef6;border-left:3px solid #5b7fa8;color:#1f3b5c;"><b>Pilar:</b> ${escapar(pilar)}</td>
-            </tr></table>` : '') + `
-          </td></tr>
-        </table>`;
-    }).join('');
-  }
-
-  // C: tabla compacta, una fila por implante (referencia para comparar).
-  function cosVariantC(implants) {
-    const th = `padding:5px;text-align:left;background:${BLAU};color:#fff;`;
-    const td = 'padding:5px;border-bottom:1px solid #ddd;vertical-align:top;';
-    const files = implants.map(i => `
-          <tr>
-            <td style="${td}"><b>${e(i.posicion)}</b></td>
-            <td style="${td}">${e([net(i.marca), net(i.modelo)].filter(Boolean).join(' '))}</td>
-            <td style="${td}">${e(i.dimensiones)}</td>
-            <td style="${td}">${e(textConexion(i))}</td>
-            <td style="${td}">${refLote(i)}</td>
-            <td style="${td}">${escapar(textPilar(i))}</td>
-            <td style="${td}">${e(i.fecha_colocacion)}</td>
-          </tr>`).join('');
-    return `
-        <table style="width:100%;border-collapse:collapse;margin-top:10px;font-size:10px;">
-          <tr><th style="${th}">Posición</th><th style="${th}">Implante</th><th style="${th}">Medidas</th>
-              <th style="${th}">Conexión</th><th style="${th}">Ref / Lote</th><th style="${th}">Pilar</th><th style="${th}">Fecha</th></tr>
-          ${files}
-        </table>`;
-  }
-
-  const VARIANTS = { A: cosVariantA, B: cosVariantB, C: cosVariantC };
-
   /**
-   * HTML del pasaporte: el mismo para el portal, la vista previa y el PDF (que convierte
-   * el servidor). Solo tablas y estilos en línea: el conversor de Apps Script no entiende
-   * CSS moderno. Recibe datos ya filtrados por perAlPortal y ya ordenados.
-   * @param {{variant?: string, logo?: string, nomesCos?: boolean}} [opcions] logo: URL o
-   *   data URI; nomesCos: sin <html>/<body>, para meterlo dentro de otra página
+   * HTML del pasaporte: el mismo para el portal, la vista previa, la impresión y el PDF
+   * (que convierte el servidor). Solo tablas y estilos en línea (ver `relleno`). Recibe
+   * datos ya filtrados por perAlPortal y ya ordenados.
+   * @param {{logo?: string, nomesCos?: boolean}} [opcions] logo: URL o data URI;
+   *   nomesCos: sin <html>/<body>, para meterlo dentro de otra página
    */
   function htmlPasaporte(pacient, implants, codi, dataEmissio, opcions) {
     const o = opcions || {};
-    const cos = VARIANTS[o.variant] || cosVariantA;
     const contingut = `
-      <div style="font-family:Helvetica,Arial,sans-serif;color:#333;font-size:11px;">
+      <div style="font-family:Helvetica,Arial,sans-serif;color:#26354a;font-size:11px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
         ${capcalera(pacient || {}, codi, dataEmissio, o.logo)}
-        ${cos(implants || [])}
+        ${cosPasaporte(implants || [])}
         ${PEU}
       </div>`;
     if (o.nomesCos) return contingut;
