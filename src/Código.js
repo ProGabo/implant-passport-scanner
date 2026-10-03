@@ -1462,6 +1462,7 @@ function marcarSenseDniMenu() {
  * Idempotente: se puede volver a lanzar sin cambiar nada.
  */
 function migrarPilarsMenu() {
+  exigirUsuariIntern_();
   const ui = SpreadsheetApp.getUi();
   const sheet = hojaPacientes();
   let previa;

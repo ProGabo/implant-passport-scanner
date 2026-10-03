@@ -531,6 +531,7 @@ test('visitante anónimo del web app: el portal funciona, el panel y el menú no
     () => ctx.migrarDadesS2(),
     () => ctx.aplicarCuentesRevisio(),
     () => ctx.marcarSenseDniMenu(),
+    () => ctx.migrarPilarsMenu(),
     () => ctx.eliminarDuplicados(),
     () => ctx.comprobarTodo(),
     () => ctx.registrarDuda(1),
@@ -707,8 +708,9 @@ test('saveNewImplant guarda la pterigoidea y los detalles del pilar, y el portal
   const { idx } = ctx.PacientModel.indexarCapcaleres(sheet.rows()[0]);
   assert.equal(sheet.formats.get(sheet.getLastRow() + ',' + (idx.pilar_ref + 1)), '@'); // "0196" no pierde el 0
 
-  // El portal (S5 lo mostrará) recibe la pterigoidea y los detalles del pilar.
-  const portal = JSON.stringify(ctx.getPatientDataVerbose(res.newCode));
+  // El portal (S5 lo mostrará) recibe la pterigoidea y los detalles del pilar
+  // (están en la lista blanca CAMPS_PORTAL).
+  const portal = JSON.stringify(ctx.getPatientDataVerbose_(res.newCode));
   assert.ok(portal.indexOf('"pilar_ref":"0196"') !== -1, portal.slice(0, 400));
   assert.ok(portal.indexOf('"pilar_angulacion":"30"') !== -1);
   assert.ok(portal.indexOf('Fisura pterigoidea (cuadrante 2)') !== -1);

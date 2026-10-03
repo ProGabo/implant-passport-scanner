@@ -105,7 +105,9 @@ function crearPortalModel() {
   // (email, Cuenta Quartup, casillas internas, DNI completo) no sale nunca. Una columna
   // nueva que deba ver el paciente se añade aquí (p. ej. el pilar estructurado de S4).
   const CAMPS_PORTAL = ['posicion', 'fecha_colocacion', 'marca', 'modelo', 'dimensiones',
-    'plataforma', 'conexion', 'pilar', 'cod_implante', 'lote'];
+    'plataforma', 'conexion', 'pilar', 'cod_implante', 'lote',
+    // Detalles del pilar (S4); los muestra el pasaporte de S5.
+    'pilar_altura', 'pilar_angulacion', 'pilar_marca', 'pilar_conexion', 'pilar_ref'];
 
   /** `***4567**` (DNI) o `****4567*` (NIE); null si no hay DNI válido. */
   function emmascararDni(v) {

@@ -345,12 +345,17 @@
       }
 
       // --- ORDEN DE LOS IMPLANTES (por posición dental) ---
+      // Misma regla que PacientModel.ordrePosicio (el portal no carga el modelo): el
+      // diente FDI, y la fisura pterigoidea justo después del 18 / 28.
+      function ordrePosicio(v) {
+        const s = String(v === undefined || v === null ? '' : v).trim();
+        if (s === 'Fisura pterigoidea (cuadrante 1)') return 18.5;
+        if (s === 'Fisura pterigoidea (cuadrante 2)') return 28.5;
+        return parseInt(s.replace(/\D/g, ''), 10) || 0;
+      }
+
       function ordenarImplantes(implantes) {
-        implantes.sort((a, b) => {
-          let posA = parseInt(String(a.posicion || a.posiciondiente).replace(/\D/g, '')) || 0;
-          let posB = parseInt(String(b.posicion || b.posiciondiente).replace(/\D/g, '')) || 0;
-          return posA - posB;
-        });
+        implantes.sort((a, b) => ordrePosicio(a.posicion || a.posiciondiente) - ordrePosicio(b.posicion || b.posiciondiente));
         return implantes;
       }
 
