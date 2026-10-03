@@ -34,7 +34,14 @@ class FakeRange {
   clearFormat() { this.each((i, j) => this.sheet.formats.delete(i + ',' + j)); return this; }
   clearDataValidations() { this.each((i, j) => this.sheet.checkboxes.delete(i + ',' + j)); return this; }
   setNumberFormat(f) { this.each((i, j) => this.sheet.formats.set(i + ',' + j, f)); return this; }
-  setDataValidation() { this.each((i, j) => this.sheet.checkboxes.add(i + ',' + j)); return this; }
+  // Casilla -> sheet.checkboxes; cualquier otra regla (desplegable) -> sheet.validations.
+  setDataValidation(regla) {
+    this.each((i, j) => { if (regla === undefined || regla === 'checkbox') this.sheet.checkboxes.add(i + ',' + j); else this.sheet.validations.set(i + ',' + j, regla); });
+    return this;
+  }
+  setFormula(fm) { this.sheet.formulas.set(this.r + ',' + this.c, fm); return this; }
+  getFormula() { return this.sheet.formulas.get(this.r + ',' + this.c) || ''; }
+  getRow() { return this.r; }
   setFontWeight() { return this; }
   setBackground() { return this; }
   setNote() { return this; }
@@ -55,6 +62,10 @@ class FakeSheet {
     this.cells = new Map();
     this.formats = new Map();
     this.checkboxes = new Set();
+    this.validations = new Map();
+    this.formulas = new Map();
+    this.conditionalRules = [];
+    this.sheetId = ++FakeSheet.ids;
     this.maxCols = 26;
     (rows || []).forEach((row, i) => row.forEach((v, j) => this.set(i + 1, j + 1, v)));
   }
@@ -77,7 +88,13 @@ class FakeSheet {
   getName() { return this.name; }
   setName(n) { this.name = n; return this; }
   rows() { return this.getDataRange().getValues(); }
+  getSheetId() { return this.sheetId; }
+  getConditionalFormatRules() { return this.conditionalRules.slice(); }
+  setConditionalFormatRules(rs) { this.conditionalRules = rs.slice(); }
+  clear() { this.cells.clear(); this.formats.clear(); this.formulas.clear(); return this; }
 }
+
+FakeSheet.ids = 0;
 
 class FakeSpreadsheet {
   constructor(sheets) { this.sheets = sheets; }
@@ -87,18 +104,25 @@ class FakeSpreadsheet {
   getSheets() { return this.sheets.slice(); }
   insertSheet(n) { const s = new FakeSheet(n); this.sheets.push(s); return s; }
   deleteSheet(s) { this.sheets = this.sheets.filter(x => x !== s); }
+  // Selección de la Auxiliar (panel "Completar i enviar"): seleccionar(sheet, fila).
+  seleccionar(sheet, fila) { this.activa = { sheet, fila }; }
+  getActiveSheet() { return this.activa ? this.activa.sheet : this.sheets[0]; }
+  getActiveRange() { return this.activa ? this.activa.sheet.getRange(this.activa.fila, 1) : null; }
 }
 
 function cargarCodigo(ss, opts) {
   const o = opts || {};
   const sent = [];
   const alerts = [];
+  const sidebars = [];
   const cache = new Map();
   const props = Object.assign({ ALERT_EMAIL: 'responsable@example.com' }, o.props);
   const ctx = {
     console,
     SpreadsheetApp: {
       getActiveSpreadsheet: () => ss,
+      getActiveSheet: () => ss.getActiveSheet(),
+      getActiveRange: () => ss.getActiveRange(),
       openById: id => (o.libres && o.libres[id]) || ss,
       getUi: () => {
         // Como Apps Script: desde el web app (visitante anónimo) no hay interfaz de Sheets.
@@ -106,6 +130,7 @@ function cargarCodigo(ss, opts) {
         const prompts = o.prompts || [];
         return {
           alert: (...a) => { alerts.push(a); return 'YES'; },
+          showSidebar: h => { sidebars.push(h); },
           prompt: () => {
             const text = prompts.shift();
             return { getSelectedButton: () => (text === undefined ? 'CANCEL' : 'OK'), getResponseText: () => text || '' };
@@ -114,7 +139,25 @@ function cargarCodigo(ss, opts) {
           Button: { YES: 'YES', OK: 'OK' }
         };
       },
-      newDataValidation: () => ({ requireCheckbox() { return this; }, build() { return 'checkbox'; } })
+      newDataValidation: () => {
+        const r = { tipus: 'checkbox' };
+        return {
+          requireCheckbox() { return this; },
+          requireValueInList(llista, desplegable) { Object.assign(r, { tipus: 'llista', llista: llista.slice(), desplegable }); return this; },
+          setAllowInvalid(v) { r.allowInvalid = v; return this; },
+          setHelpText(t) { r.ajuda = t; return this; },
+          build() { return r.tipus === 'checkbox' ? 'checkbox' : r; }
+        };
+      },
+      newConditionalFormatRule: () => {
+        const r = {};
+        return {
+          whenFormulaSatisfied(fm) { r.formula = fm; return this; },
+          setBackground(c) { r.background = c; return this; },
+          setRanges(rs) { r.ranges = rs; return this; },
+          build() { return Object.assign({ getBooleanCondition: () => ({ getCriteriaValues: () => [r.formula] }) }, r); }
+        };
+      }
     },
     PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), setProperty() {} }) },
     LockService: { getScriptLock: () => ({ waitLock() {}, tryLock() { return true; }, releaseLock() {} }) },
@@ -139,6 +182,10 @@ function cargarCodigo(ss, opts) {
       search: () => o.rebots || []
     },
     Logger: { log() {} },
+    HtmlService: {
+      createTemplateFromFile: nom => ({ evaluate() { return { nom, setTitle(t) { this.titol = t; return this; } }; } }),
+      createHtmlOutputFromFile: nom => ({ getContent: () => '<!-- ' + nom + ' -->' })
+    },
     CacheService: { getScriptCache: () => ({
       put: (k, v) => { cache.set(k, String(v)); },
       get: k => (cache.has(k) ? cache.get(k) : null),
@@ -160,7 +207,7 @@ function cargarCodigo(ss, opts) {
     book.sheets.push(c);
     return c;
   };
-  return { ctx, sent, alerts, cache };
+  return { ctx, sent, alerts, cache, sidebars };
 }
 
 module.exports = { FakeRange, FakeSheet, FakeSpreadsheet, cargarCodigo };

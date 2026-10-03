@@ -36,6 +36,7 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu(NOM_MENU)
       .addItem('➕ Afegir implant / pacient', 'showSidebar')
+      .addItem('✏️ Completar i enviar (fila seleccionada)', 'obrirPanellPendents')
       .addSeparator()
       .addItem('✨ Arreglar codis undefined o en blanc', 'arreglarCodigosUndefined')
       .addItem('🧹 Eliminar files duplicades', 'eliminarDuplicados')
@@ -46,7 +47,9 @@ function onOpen() {
           .addItem('2. Aplicar les Cuentes de la revisió', 'aplicarCuentesRevisio')
           .addItem('3. Marcar "Sense DNI" als pacients sense DNI', 'marcarSenseDniMenu')
           .addItem('4. Posar al dia els pilars ("NO" -> "Sin pilar")', 'migrarPilarsMenu')
-          .addItem("5. Recuperar el text original dels pilars d'una còpia", 'recuperarPilarsMenu'))
+          .addItem("5. Recuperar el text original dels pilars d'una còpia", 'recuperarPilarsMenu')
+          .addItem('6. Proposar pendents (últims 6 mesos)', 'proposarPendentsMenu')
+          .addItem('7. Aplicar pendents', 'aplicarPendentsMenu'))
       .addItem('🔑 Autoritzar el meu compte', 'autorizarCuenta')
       .addToUi();
 }
@@ -206,7 +209,8 @@ function buscarPacient(termino) {
         sense_email: filasPaciente.some(o => o.sense_email),
         dni: p.dni,
         sense_dni: filasPaciente.some(o => o.sense_dni),
-        n_implants: p.n_implants
+        n_implants: p.n_implants,
+        ultimEnviament: ultimEnviamentDe_(codi)
       }
     };
   } catch (e) {
@@ -340,83 +344,57 @@ function saveNewImplant(formData) {
   // Dos guardados a la vez podrían generar el mismo código o pisarse la última fila.
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
+  let paciente, plan, filas;
   try {
     const sheet = hojaPacientes();
     const headers = asegurarColumnas(sheet);
-    const { objetos } = leerPacientes(sheet);
+    const { files, objetos } = leerPacientes(sheet);
 
-    const senseEmail = PacientModel.esCert(formData.sense_email);
-    const senseDni = PacientModel.esCert(formData.sense_dni);
-    const esNuevo = !formData.codi_acces || formData.codi_acces === 'GENERAR';
-    const paciente = {
-      codi_acces: esNuevo ? '' : String(formData.codi_acces).trim().toUpperCase(),
-      cuenta_quartup: String(formData.cuenta_quartup || '').trim(),
-      nombre: String(formData.nombre || '').trim(),
-      email: senseEmail ? '' : String(formData.email || '').trim(),
-      sense_email: senseEmail,
-      dni: senseDni ? '' : PacientModel.netejarDocument(formData.dni),
-      sense_dni: senseDni
-    };
-
-    if (!esNuevo && !objetos.some(o => mismoCodigo(o.codi_acces, paciente.codi_acces))) {
-      return { ok: false, message: "El codi d'accés " + paciente.codi_acces + " no existeix. Torna a cercar el pacient." };
+    plan = PacientModel.planificarDesat(headers, files, Object.assign({}, formData, { mode: 'afegir' }));
+    if (plan.errors.length) {
+      return { ok: false, message: plan.errors.join('\n'), errors: plan.errors };
     }
-
-    const { errors, avisos } = PacientModel.validarPacient(paciente, PacientModel.pacientsUnics(objetos));
-    if (errors.length) {
-      return { ok: false, message: errors.join('\n'), errors: errors };
-    }
-
-    if (esNuevo) {
+    paciente = plan.paciente;
+    if (!plan.codi) {
       paciente.codi_acces = generarCodigoUnico(objetos.map(o => o.codi_acces));
+      plan.filas.forEach(f => { f.codi_acces = paciente.codi_acces; });
     } else {
       completarDatosPaciente(sheet, headers, paciente);
     }
 
-    const filas = (formData.implantes || []).map(imp =>
-      PacientModel.objecteAFila(Object.assign({}, imp, paciente), headers));
-    if (filas.length === 0) {
-      return { ok: false, message: 'No hi ha cap implant per desar.' };
-    }
-
+    filas = plan.filas.map(o => PacientModel.objecteAFila(o, headers));
     const primera = sheet.getLastRow() + 1;
     ponerFormatoTexto(sheet, headers, primera, filas.length);
     sheet.getRange(primera, 1, filas.length, headers.length).setValues(filas);
     ponerCasillas(sheet, headers, primera, filas.length);
 
-    (formData.implantes || []).forEach(imp => {
+    plan.filas.forEach(imp => {
       updateCatalog_({ marca: imp.marca, modelo: imp.modelo, conexion: imp.conexion });
     });
-
-    let emailStatus = { ok: true };
-    const enviar = formData.sendEmail === 'true' && !senseEmail;
-    if (enviar) {
-      emailStatus = sendPassportEmail_(paciente.email, paciente.nombre, paciente.codi_acces);
-    }
-
-    // Sin email, la Secretària hace llegar el codi (casilla marcada por defecto en el panel).
-    let avisSecretaria = null;
-    if (senseEmail && formData.avisSecretaria === 'true') {
-      const r = enviarAvisSecretaria_(paciente);
-      avisSecretaria = { enviat: r.ok, error: r.ok ? null : r.message };
-    }
-
-    return {
-      ok: true,
-      newCode: paciente.codi_acces,
-      implantsCount: filas.length,
-      emailSent: enviar && emailStatus.ok,
-      emailError: emailStatus.ok ? null : emailStatus.message,
-      avisSecretaria: avisSecretaria,
-      avisos: avisos
-    };
-
+    // La primera vez que se guarda algo pendiente: color, desplegable y pestaña "Pendents".
+    if (plan.filas.some(f => f.pendent)) prepararHoja_(sheet, headers);
   } catch (e) {
     Logger.log('Error en saveNewImplant: ' + e.message);
     return { ok: false, message: 'Error en desar: ' + e.message };
   } finally {
     lock.releaseLock();
   }
+
+  // Los envíos van fuera del lock: un email lento no debe bloquear otros guardados.
+  // Sin email, la Secretària hace llegar el codi (casilla marcada por defecto en el panel).
+  const env = enviarPasaport_(paciente.codi_acces, {
+    email: formData.sendEmail === 'true',
+    avisSecretaria: paciente.sense_email && formData.avisSecretaria === 'true'
+  });
+  return {
+    ok: true,
+    newCode: paciente.codi_acces,
+    implantsCount: filas.length,
+    emailSent: env.emailSent,
+    emailError: env.emailError,
+    avisSecretaria: env.avisSecretaria,
+    avisos: plan.avisos
+  };
 }
 
 /**
@@ -462,6 +440,329 @@ function completarDatosPaciente(sheet, headers, paciente) {
       sheet.getRange(2, i + 1, filas.length, 1).setValues(filas.map(f => [f[i]]));
     });
   }
+}
+
+// ==========================================
+//  CICLO DE VIDA DE LA FICHA (S3): pendientes y panel "Completar i enviar"
+// ==========================================
+
+const HOJA_PENDENTS = 'Pendents';
+const COLOR_PENDENT = '#ffedd5';
+const HOJA_PROPOSTA = 'Proposta pendents';
+const CAB_PROPOSTA = ['Fila', "Codi d'accés", 'Nom', 'Posició', 'Data', 'Pilar', 'Motiu', 'Pendent?', 'Resultat'];
+const RE_REGLA_PENDENT = /^=\$[A-Z]+2=TRUE$/;
+
+function columnaLletra_(n) {
+  let s = '';
+  for (; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + (n - 1) % 26) + s;
+  return s;
+}
+
+/**
+ * Deja la hoja lista para los pendientes (idempotente; las columnas se buscan por cabecera,
+ * así que si se mueven basta con volver a llamarla): casillas en "Pendent", fila en naranja
+ * mientras está marcada (también si se edita a mano), desplegable de aviso en "Pilar" y la
+ * pestaña "Pendents".
+ */
+function prepararHoja_(sheet, headers) {
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  if (idx.pendent === undefined) return;
+  const nFiles = Math.max(sheet.getMaxRows(), 2) - 1;
+
+  sheet.getRange(2, idx.pendent + 1, nFiles, 1)
+      .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+
+  // Formato condicional: se reconoce el propio por su fórmula y se sustituye.
+  const formula = '=$' + columnaLletra_(idx.pendent + 1) + '2=TRUE';
+  const esPropia = r => {
+    const c = r.getBooleanCondition();
+    return !!c && RE_REGLA_PENDENT.test(String((c.getCriteriaValues() || [])[0]));
+  };
+  const regles = sheet.getConditionalFormatRules().filter(r => !esPropia(r));
+  regles.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(formula)
+      .setBackground(COLOR_PENDENT)
+      .setRanges([sheet.getRange(2, 1, nFiles, Math.max(sheet.getMaxColumns(), headers.length))])
+      .build());
+  sheet.setConditionalFormatRules(regles);
+
+  if (idx.pilar !== undefined) {
+    sheet.getRange(2, idx.pilar + 1, nFiles, 1).setDataValidation(SpreadsheetApp.newDataValidation()
+        .requireValueInList(PacientModel.TIPUS_PILAR, true)
+        .setAllowInvalid(true)
+        .setHelpText('Tria el tipus de pilar. Si és un altre, escriu-lo: només sortirà un avís.')
+        .build());
+  }
+  prepararPestanyaPendents_(sheet, idx);
+}
+
+/** Pestaña "Pendents": lista en vivo de los implantes pendientes, con enlace a su fila. */
+function prepararPestanyaPendents_(sheet, idx) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const hoja = ss.getSheetByName(HOJA_PENDENTS) || ss.insertSheet(HOJA_PENDENTS);
+  const pref = "'" + sheet.getName().replace(/'/g, "''") + "'!";
+  const files = pref + 'A2:A';
+  const col = k => {
+    const l = columnaLletra_(idx[k] + 1);
+    return idx[k] === undefined ? 'IF(ROW(' + files + '),"")' : pref + l + '2:' + l;
+  };
+  const columnes = ['HYPERLINK("#gid=' + sheet.getSheetId() + '&range=A"&ROW(' + files + '),"Anar-hi")']
+      .concat(['nombre', 'codi_acces', 'posicion', 'fecha_colocacion', 'pilar', 'que_falta'].map(col))
+      .concat(['ROW(' + files + ')']);
+  const formula = '=IFERROR(FILTER(ARRAYFORMULA({' + columnes.join(',') + '}),' + col('pendent') + '=TRUE),"Cap implant pendent")';
+  if (hoja.getRange(2, 1).getFormula() === formula) return;
+  hoja.clear();
+  hoja.getRange(1, 1, 1, 8).setValues([['Anar-hi', 'Nom', "Codi d'accés", 'Posició', 'Data', 'Pilar', 'Què falta', 'Fila']]).setFontWeight('bold');
+  hoja.getRange(2, 1).setFormula(formula);
+  hoja.getRange(2, 5, Math.max(hoja.getMaxRows() - 1, 1), 1).setNumberFormat('dd/mm/yyyy');
+  hoja.getRange(1, 1).setNote("Llista automàtica dels implants marcats com a «Pendent». Per completar-ne un: «Anar-hi», i després " + NOM_MENU + " → ✏️ Completar i enviar.");
+  hoja.setFrozenRows(1);
+}
+
+/** Menú y botón: abre el panel lateral "Completar i enviar" sobre la fila seleccionada. */
+function obrirPanellPendents() {
+  exigirUsuariIntern_();
+  const html = HtmlService.createTemplateFromFile('PanelPendents');
+  html.pacientModelJs = crearPacientModel.toString();
+  SpreadsheetApp.getUi().showSidebar(html.evaluate().setTitle('Completar i enviar'));
+}
+
+/**
+ * Fila de "Pacientes" que la Auxiliar tiene seleccionada (también desde la pestaña
+ * "Pendents", por su columna "Fila"). Se lee al llamar, no al abrir el panel.
+ * @returns {{fila: number}|{error: string}}
+ */
+function filaSeleccionada_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const hoja = ss.getActiveSheet();
+  const rang = ss.getActiveRange();
+  if (!hoja || !rang) return { error: "Selecciona una fila d'un implant a la pestanya " + SHEET_NAME + '.' };
+  if (hoja.getName() === SHEET_NAME) {
+    return rang.getRow() >= 2 ? { fila: rang.getRow() } : { error: "Selecciona una fila d'un implant (no la capçalera)." };
+  }
+  if (hoja.getName() === HOJA_PENDENTS && rang.getRow() >= 2) {
+    const fila = parseInt(hoja.getRange(rang.getRow(), 8).getValue(), 10);
+    if (fila >= 2) return { fila: fila };
+  }
+  return { error: "Selecciona una fila d'un implant a la pestanya " + SHEET_NAME + ' (o a ' + HOJA_PENDENTS + ').' };
+}
+
+/** Claves de implante de una fila para el panel (las fechas, como texto). */
+function perAlPanell_(o, fila) {
+  const out = { fila: fila };
+  PacientModel.CLAUS_IMPLANT.forEach(k => {
+    const v = o[k];
+    out[k] = v instanceof Date ? Utilities.formatDate(v, Session.getScriptTimeZone(), 'dd/MM/yyyy') : v;
+  });
+  return out;
+}
+
+/**
+ * Panel: el paciente de la fila seleccionada y sus implantes pendientes (más la fila
+ * seleccionada, aunque no lo esté).
+ */
+function carregarPanell() {
+  exigirUsuariIntern_();
+  try {
+    const sel = filaSeleccionada_();
+    if (sel.error) return { ok: false, message: sel.error };
+    const sheet = hojaPacientes();
+    asegurarColumnas(sheet);
+    const { objetos } = leerPacientes(sheet);
+    const o = objetos[sel.fila - 2];
+    if (!o || !String(o.codi_acces || '').trim()) {
+      return { ok: false, message: "La fila " + sel.fila + " no té cap pacient. Selecciona la fila d'un implant." };
+    }
+    const codi = String(o.codi_acces).trim().toUpperCase();
+    const delPacient = objetos.filter(x => mismoCodigo(x.codi_acces, codi));
+    const files = [];
+    objetos.forEach((x, i) => {
+      if (mismoCodigo(x.codi_acces, codi) && (x.pendent || i + 2 === sel.fila)) files.push(perAlPanell_(x, i + 2));
+    });
+    const p = PacientModel.pacientsUnics(delPacient)[0];
+    return {
+      ok: true,
+      filaSeleccionada: sel.fila,
+      pacient: {
+        codi_acces: codi,
+        nombre: p.nombre,
+        cuenta_quartup: p.cuenta_quartup,
+        email: p.email,
+        dni: p.dni,
+        sense_email: delPacient.some(x => x.sense_email),
+        sense_dni: delPacient.some(x => x.sense_dni),
+        n_implants: p.n_implants,
+        ultimEnviament: ultimEnviamentDe_(codi)
+      },
+      files: files,
+      marques: marquesCataleg_()
+    };
+  } catch (e) {
+    Logger.log('Error en carregarPanell: ' + e);
+    return { ok: false, message: 'Error intern: ' + e.message };
+  }
+}
+
+/**
+ * Guarda los cambios del panel en sus filas, columna a columna (no pisa columnas ajenas).
+ * `completar`: además desmarca "Pendent" de esas filas.
+ */
+function desarPanell_(formData, completar) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = hojaPacientes();
+    const headers = asegurarColumnas(sheet);
+    const { files } = leerPacientes(sheet);
+    const fd = Object.assign({}, formData, { mode: 'completar' });
+    if (completar) fd.implantes = (fd.implantes || []).map(i => Object.assign({}, i, { pendent: false }));
+    const plan = PacientModel.planificarDesat(headers, files, fd);
+    if (plan.errors.length) return { ok: false, message: plan.errors.join('\n'), errors: plan.errors };
+
+    const { idx } = PacientModel.indexarCapcaleres(headers);
+    const esText = {};
+    PacientModel.COLUMNES.forEach(c => { esText[c.clau] = !!c.text; });
+    plan.files_hoja.forEach((n, i) => {
+      plan.claus_tocades.forEach(k => {
+        if (idx[k] === undefined) return;
+        const cel = sheet.getRange(n, idx[k] + 1);
+        const v = plan.filas[i][k];
+        if (esText[k]) cel.setNumberFormat('@');
+        cel.setValue(esText[k] && v !== '' && v !== null ? String(v) : v);
+      });
+      ponerCasillas(sheet, headers, n, 1);
+    });
+    completarDatosPaciente(sheet, headers, plan.paciente);
+    if (['marca', 'modelo', 'conexion'].some(k => plan.claus_tocades.indexOf(k) !== -1)) {
+      plan.filas.forEach(imp => updateCatalog_({ marca: imp.marca, modelo: imp.modelo, conexion: imp.conexion }));
+    }
+    return { ok: true, codi: plan.codi, filesDesades: plan.files_hoja.length, avisos: plan.avisos };
+  } catch (e) {
+    Logger.log('Error en desarPanell_: ' + e);
+    return { ok: false, message: 'Error en desar: ' + e.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Panel: "Desar" (Pendent queda como lo haya dejado la Auxiliar). */
+function desarPanell(formData) {
+  exigirUsuariIntern_();
+  return desarPanell_(formData, false);
+}
+
+/**
+ * Panel: "Completar i enviar". Guarda, desmarca Pendent y envía: con email, el email del
+ * pasaporte (y el avís si se pide); sin email, el avís a la Secretària.
+ */
+function completarIEnviarPanell(formData, opcions) {
+  exigirUsuariIntern_();
+  const r = desarPanell_(formData, true);
+  if (!r.ok) return r;
+  return Object.assign(r, enviarPasaport_(r.codi, opcionsEnviament_(opcions)));
+}
+
+/** Panel: "Enviar el pasaport" sin cambiar nada (la fila ya se completó a mano). */
+function enviarPasaportPanell(codi, opcions) {
+  exigirUsuariIntern_();
+  try {
+    return Object.assign({ ok: true, codi: String(codi || '').trim().toUpperCase() },
+      enviarPasaport_(codi, opcionsEnviament_(opcions)));
+  } catch (e) {
+    Logger.log('Error en enviarPasaportPanell: ' + e);
+    return { ok: false, message: 'Error en enviar: ' + e.message };
+  }
+}
+
+function opcionsEnviament_(opcions) {
+  return { email: true, avisSecretaria: !!(opcions && opcions.avisSecretaria), avisSiSenseEmail: true };
+}
+
+/**
+ * Menú 🗂️ 6: propone como "Pendent" los implantes recientes que lo parecen (pilar vacío o
+ * +PC) en la pestaña "Proposta pendents". La Auxiliar revisa y aplica con el 7.
+ */
+function proposarPendentsMenu() {
+  exigirUsuariIntern_();
+  const ui = SpreadsheetApp.getUi();
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = hojaPacientes();
+  const headers = asegurarColumnas(sheet);
+  prepararHoja_(sheet, headers);
+  const { files } = leerPacientes(sheet);
+  const prop = PacientModel.proposarPendents(headers, files, ahoraMs());
+
+  const vella = ss.getSheetByName(HOJA_PROPOSTA);
+  if (vella) ss.deleteSheet(vella);
+  if (!prop.length) {
+    ui.alert('Proposar pendents', 'No hi ha cap implant dels últims 6 mesos amb el pilar buit o «A cabeza de implante» que no estigui ja marcat com a pendent.', ui.ButtonSet.OK);
+    return;
+  }
+  const hoja = ss.insertSheet(HOJA_PROPOSTA);
+  const tz = Session.getScriptTimeZone();
+  const filas = prop.map(p => [p.fila, p.codi_acces, p.nombre, p.posicion,
+    p.fecha instanceof Date ? Utilities.formatDate(p.fecha, tz, 'dd/MM/yyyy') : p.fecha, p.pilar, p.motiu, p.proposat, '']);
+  hoja.getRange(1, 1, 1, CAB_PROPOSTA.length).setValues([CAB_PROPOSTA]).setFontWeight('bold');
+  hoja.getRange(2, 2, filas.length, 4).setNumberFormat('@');
+  hoja.getRange(2, 1, filas.length, CAB_PROPOSTA.length).setValues(filas);
+  hoja.getRange(2, 8, filas.length, 1)
+      .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
+      .setBackground('#fef9c3');
+  hoja.getRange(1, 8).setNote('Deixa marcats els implants que encara esperen alguna cosa (normalment el pilar definitiu) i desmarca els que ja estan acabats.');
+  hoja.setFrozenRows(1);
+  hoja.autoResizeColumns(1, CAB_PROPOSTA.length);
+  ui.alert('Proposar pendents',
+    `He trobat ${prop.length} implants que podrien estar pendents (pestanya "${HOJA_PROPOSTA}").\n\n` +
+    'Revisa la columna «Pendent?»: deixa marcats els que encara esperen alguna cosa i desmarca els acabats. Després prem:\n' +
+    `${NOM_MENU} → 🗂️ Migració de dades → 7. Aplicar pendents.`,
+    ui.ButtonSet.OK);
+}
+
+/** Menú 🗂️ 7: marca "Pendent" en las filas confirmadas de "Proposta pendents". */
+function aplicarPendentsMenu() {
+  exigirUsuariIntern_();
+  const ui = SpreadsheetApp.getUi();
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const hojaProp = ss.getSheetByName(HOJA_PROPOSTA);
+  if (!hojaProp) {
+    ui.alert('Res a aplicar', `No existeix la pestanya "${HOJA_PROPOSTA}". Primer prem «6. Proposar pendents».`, ui.ButtonSet.OK);
+    return;
+  }
+  const rev = hojaProp.getDataRange().getValues();
+  const cab = rev[0].map(h => String(h).trim());
+  const i = k => cab.indexOf(k);
+  if ([CAB_PROPOSTA[0], CAB_PROPOSTA[1], CAB_PROPOSTA[3], CAB_PROPOSTA[7], CAB_PROPOSTA[8]].some(k => i(k) === -1)) {
+    ui.alert('Error', `La pestanya "${HOJA_PROPOSTA}" no té les columnes esperades. Torna a prémer «6. Proposar pendents».`, ui.ButtonSet.OK);
+    return;
+  }
+  const decisions = rev.slice(1).map(f => ({
+    fila: f[i('Fila')], codi_acces: f[i("Codi d'accés")], posicion: f[i('Posició')], pendent: f[i('Pendent?')]
+  }));
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  let r;
+  try {
+    const sheet = hojaPacientes();
+    const headers = asegurarColumnas(sheet);
+    const { idx, files } = leerPacientes(sheet);
+    r = PacientModel.aplicarPendents(headers, files, decisions);
+    decisions.forEach((d, n) => {
+      if (r.resultats[n] === 'Marcat pendent') sheet.getRange(parseInt(d.fila, 10), idx.pendent + 1).setValue(true);
+    });
+    prepararHoja_(sheet, headers);
+  } catch (e) {
+    ui.alert('Error', e.message, ui.ButtonSet.OK);
+    return;
+  } finally {
+    lock.releaseLock();
+  }
+  if (r.resultats.length) hojaProp.getRange(2, i('Resultat') + 1, r.resultats.length, 1).setValues(r.resultats.map(x => [x]));
+  const errors = r.resultats.filter(x => /^ERROR/.test(x)).length;
+  ui.alert('Pendents aplicats',
+    `Marcats com a pendents: ${r.marcades}` + (errors ? `\nAmb error (mira la columna «Resultat»): ${errors}` : '') +
+    `\n\nAra surten en taronja i a la pestanya "${HOJA_PENDENTS}".`,
+    ui.ButtonSet.OK);
 }
 
 // ==========================================
@@ -606,6 +907,55 @@ function enviarAvisSecretaria_(paciente, destiProva) {
   const assumpte = destiProva ? '[PROVA] ' + a.assumpte : a.assumpte;
   return enviarEmail_(destiProva ? 'avís de prova' : 'avís secretària', paciente.codi_acces, desti, assumpte, a.text, a.html,
     { attachments: adjunts, replyTo: EMAIL_REMITENT });
+}
+
+/**
+ * Envía el pasaporte de un paciente ya guardado (lo lee de la hoja). Con email: el email
+ * del pasaporte si `email`; el avís a la Secretària si `avisSecretaria` (con o sin email)
+ * o si `avisSiSenseEmail` y el paciente no tiene email.
+ * Lo usan el alta, el panel "Completar i enviar" y, más adelante, los recordatorios (S6).
+ * @param {{email?: boolean, avisSecretaria?: boolean, avisSiSenseEmail?: boolean}} opcions
+ * @returns {{emailSent: boolean, emailError: string|null, avisSecretaria: {enviat, error}|null}}
+ */
+function enviarPasaport_(codi, opcions) {
+  const o = opcions || {};
+  const res = { emailSent: false, emailError: null, avisSecretaria: null };
+  if (!o.email && !o.avisSecretaria) return res;
+  const { objetos } = leerPacientes(hojaPacientes());
+  const p = PacientModel.pacientsUnics(objetos.filter(x => mismoCodigo(x.codi_acces, codi)))[0];
+  if (!p) {
+    res.emailError = "No trobo el pacient " + codi + '.';
+    return res;
+  }
+  if (o.email && String(p.email).trim()) {
+    const r = sendPassportEmail_(p.email, p.nombre, p.codi_acces);
+    res.emailSent = r.ok;
+    res.emailError = r.ok ? null : r.message;
+  }
+  if (o.avisSecretaria || (o.avisSiSenseEmail && !String(p.email).trim())) {
+    const r = enviarAvisSecretaria_(p);
+    res.avisSecretaria = { enviat: r.ok, error: r.ok ? null : r.message };
+  }
+  return res;
+}
+
+/**
+ * Último pasaporte enviado a un paciente (email o avís a la Secretària), según el Registre
+ * d'enviaments. Para que la Auxiliar decida si reenviarlo ("Últim enviament: fa N dies").
+ * @returns {{ms: number, tipus: string}|null}
+ */
+function ultimEnviamentDe_(codi) {
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(FULL_REGISTRE);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  let ultim = null;
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, 5).getValues().forEach(f => {
+    const tipus = String(f[1]).trim();
+    if ((tipus !== 'pasaport' && tipus !== 'avís secretària') || String(f[4]).trim() !== 'OK') return;
+    if (!mismoCodigo(f[2], codi)) return;
+    const ms = f[0] instanceof Date ? f[0].getTime() : new Date(f[0]).getTime();
+    if (!isNaN(ms) && (!ultim || ms > ultim.ms)) ultim = { ms: ms, tipus: tipus };
+  });
+  return ultim;
 }
 
 /**
@@ -1310,6 +1660,8 @@ function migrarDadesS2() {
       ponerCasillas(sheet, plan.capcaleres, 2, numFilas);
     }
     sheet.setFrozenRows(1);
+    // El vaciado de arriba se ha llevado el naranja de los pendientes y el desplegable.
+    prepararHoja_(sheet, plan.capcaleres);
 
     crearHojaRevision(ss, plan.revisio);
   } finally {
