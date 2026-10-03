@@ -39,7 +39,11 @@ function crearPacientModel() {
     { clau: 'pilar_conexion', capcalera: 'Pilar connexió', grup: 'implant', alies: ['Pilar conexión', 'Conexión pilar'] },
     { clau: 'pilar_ref', capcalera: 'Pilar ref', grup: 'implant', text: true, alies: ['Pilar referència', 'Pilar referencia', 'Ref pilar'] },
     { clau: 'cod_implante', capcalera: 'Codi implant', grup: 'implant', alies: ['Código de implante', 'Cod. Implante', 'Código implante', 'Referencia'] },
-    { clau: 'lote', capcalera: 'Lot', grup: 'implant', alies: ['Lote'] }
+    { clau: 'lote', capcalera: 'Lot', grup: 'implant', alies: ['Lote'] },
+    // Ciclo de vida (S3): a este implante aún le falta algo. Lo marca la Auxiliar; es
+    // interno y nunca sale hacia el paciente.
+    { clau: 'pendent', capcalera: 'Pendent', grup: 'implant', casella: true, alies: ['Pendiente'] },
+    { clau: 'que_falta', capcalera: 'Què falta', grup: 'implant', alies: ['Que falta', 'Qué falta'] }
   ];
 
   const CAPCALERES = COLUMNES.map(c => c.capcalera);
@@ -802,6 +806,278 @@ function crearPacientModel() {
     return { files: novesFiles, restaurades, noTrobades, canviadesDespres };
   }
 
+  // --- Ciclo de vida de la ficha (S3) ---
+  //
+  // Un implante "Pendent" es uno al que aún le falta algo (típicamente el pilar definitivo de
+  // la 2ª visita). Lo decide la Auxiliar: las reglas de aquí solo proponen.
+
+  const CLAUS_IMPLANT = COLUMNES.filter(c => c.grup === 'implant').map(c => c.clau);
+
+  /** Objeto con todas las claves del registro vacías, como una fila en blanco. */
+  function objecteBuit() {
+    return filaAObjecte([], {});
+  }
+
+  /** Pendiente y todavía sin pilar: el pasaporte dice "Pilar: pendiente de colocar". */
+  function pilarPendent(fila) {
+    return !!fila && esCert(fila.pendent) && textCela(fila.pilar) === '';
+  }
+
+  /**
+   * ¿Proponer "Pendent" para este implante? Sin pilar todavía, o "A cabeza de implante",
+   * que es como se guarda el "+PC" (pilar de cicatrización, provisional) de la ficha.
+   */
+  function suggereixPendent(imp) {
+    const pilar = textCela(imp && imp.pilar);
+    return pilar === '' || normalitzarTipusPilar(pilar) === 'A cabeza de implante';
+  }
+
+  /**
+   * Fecha de la hoja: Date, "aaaa-mm-dd" (sidebar) o "d/m/aaaa" (día primero, como escribe
+   * la clínica). Lo que no se entiende -> null.
+   */
+  function parseData(v) {
+    if (v instanceof Date || Object.prototype.toString.call(v) === '[object Date]') {
+      return isNaN(v.getTime()) ? null : v;
+    }
+    const s = textCela(v);
+    let y, m, d;
+    let r = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:$|[T\s])/);
+    if (r) { y = +r[1]; m = +r[2]; d = +r[3]; }
+    else {
+      r = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2}|\d{4})$/);
+      if (!r) return null;
+      d = +r[1]; m = +r[2]; y = +r[3] < 100 ? 2000 + +r[3] : +r[3];
+    }
+    const data = new Date(y, m - 1, d);
+    return data.getFullYear() === y && data.getMonth() === m - 1 && data.getDate() === d ? data : null;
+  }
+
+  /** Datos de paciente del formulario, normalizados como se guardan. */
+  function pacientDelFormulari(fd) {
+    const senseEmail = esCert(fd.sense_email);
+    const senseDni = esCert(fd.sense_dni);
+    const codi = textCela(fd.codi_acces).toUpperCase();
+    return {
+      codi_acces: !codi || codi === 'GENERAR' ? '' : codi,
+      cuenta_quartup: textCela(fd.cuenta_quartup),
+      nombre: textCela(fd.nombre),
+      email: senseEmail ? '' : textCela(fd.email),
+      sense_email: senseEmail,
+      dni: senseDni ? '' : netejarDocument(fd.dni),
+      sense_dni: senseDni
+    };
+  }
+
+  /** Claves del implante del formulario, con las casillas como booleano. */
+  function campsImplant(imp) {
+    const out = {};
+    CLAUS_IMPLANT.forEach(k => {
+      if (!(k in imp)) return;
+      const col = COLUMNES.find(c => c.clau === k);
+      out[k] = col.casella ? esCert(imp[k]) : (imp[k] === undefined || imp[k] === null ? '' : imp[k]);
+    });
+    return out;
+  }
+
+  /**
+   * Lo que tenía vacío un paciente existente y ahora llega (como completarDatosPaciente en
+   * el servidor): nunca se sobrescribe un dato guardado.
+   */
+  function omplirBuits(fila, pacient) {
+    const o = Object.assign({}, fila);
+    ['cuenta_quartup', 'email', 'sense_email', 'dni', 'sense_dni'].forEach(k => {
+      const actual = o[k];
+      const buit = actual === '' || actual === null || actual === undefined || actual === false;
+      if (buit && pacient[k] !== '' && pacient[k] !== false && pacient[k] !== undefined) o[k] = pacient[k];
+    });
+    if (textCela(o.email)) o.sense_email = false;
+    if (textCela(o.dni)) o.sense_dni = false;
+    return o;
+  }
+
+  /**
+   * Plan puro de un guardado del panel lateral. No toca la hoja ni genera el Codi d'accés:
+   * lo usan el servidor para escribir y la vista previa (S5) para enseñar el pasaporte tal
+   * como quedará, así las dos cosas salen siempre de aquí.
+   *
+   * - mode 'afegir' (por defecto; sidebar de escanear): `formData.implantes` son filas nuevas.
+   * - mode 'completar' (panel "Completar i enviar"): cada implante lleva `fila` (nº de fila
+   *   de la hoja) y `posicion_esperada`; solo se cambian las claves de implante que traiga.
+   *   Los datos de paciente que traiga solo rellenan los que estaban vacíos.
+   *
+   * @param {any[]} headers  fila 1 de la hoja (leerPacientes().headers)
+   * @param {any[][]} files  el resto de filas, crudas (leerPacientes().files)
+   * @returns {{ errors: string[], avisos: string[], mode: string, codi: string, paciente: object,
+   *   filas: object[], totes: object[], files_hoja: number[], claus_tocades: string[] }}
+   *   `filas`: las nuevas (afegir) o las reescritas (completar). `totes`: todas las filas
+   *   del paciente tal como quedarán. `codi` vacío = paciente nuevo.
+   */
+  function planificarDesat(headers, files, formData) {
+    const fd = formData || {};
+    const mode = fd.mode === 'completar' ? 'completar' : 'afegir';
+    const { idx } = indexarCapcaleres(headers);
+    const objectes = files.map(f => filaAObjecte(f, idx));
+    const codiDe = o => textCela(o.codi_acces).toUpperCase();
+    const implants = fd.implantes || [];
+    const errors = [];
+    const avisos = [];
+    const resultat = extra => Object.assign({ errors, avisos, mode, codi: '', paciente: null,
+      filas: [], totes: [], files_hoja: [], claus_tocades: [] }, extra);
+
+    if (mode === 'afegir') {
+      const paciente = pacientDelFormulari(fd);
+      const codi = paciente.codi_acces;
+      if (codi && !objectes.some(o => codiDe(o) === codi)) {
+        errors.push("El codi d'accés " + codi + " no existeix. Torna a cercar el pacient.");
+        return resultat({ codi, paciente });
+      }
+      const v = validarPacient(paciente, pacientsUnics(objectes));
+      errors.push(...v.errors);
+      avisos.push(...v.avisos);
+      if (!errors.length && !implants.length) errors.push('No hi ha cap implant per desar.');
+      if (errors.length) return resultat({ codi, paciente });
+      const filas = implants.map(imp => Object.assign(objecteBuit(), campsImplant(imp), paciente));
+      const existents = codi ? objectes.filter(o => codiDe(o) === codi).map(o => omplirBuits(o, paciente)) : [];
+      return resultat({ codi, paciente, filas, totes: existents.concat(filas) });
+    }
+
+    // --- completar ---
+    const codi = textCela(fd.codi_acces).toUpperCase();
+    const delPacient = objectes.filter(o => codiDe(o) === codi);
+    if (!codi || !delPacient.length) {
+      errors.push("No trobo el pacient " + (codi || '(sense codi)') + '. Torna a obrir el panell.');
+      return resultat({ codi });
+    }
+    if (!implants.length) {
+      errors.push('No hi ha cap implant per desar.');
+      return resultat({ codi });
+    }
+
+    // Datos de paciente que llegan: solo los que faltaban, y validados uno a uno (una ficha
+    // antigua incompleta no debe impedir completar su pilar).
+    const actual = pacientsUnics(delPacient)[0];
+    const nou = {};
+    const dada = k => textCela(fd[k]);
+    if (dada('cuenta_quartup') && !textCela(actual.cuenta_quartup)) {
+      const c = dada('cuenta_quartup');
+      if (classificarIdentificador(c) !== 'cuenta') errors.push('La Cuenta Quartup només pot tenir xifres (ex: 43001234).');
+      else {
+        const altre = pacientsUnics(objectes).find(p => p.codi_acces !== codi && textCela(p.cuenta_quartup) === c);
+        if (altre) errors.push(`Aquesta Cuenta Quartup ja és de ${altre.nombre || 'un altre pacient'} (codi ${altre.codi_acces}).`);
+        else nou.cuenta_quartup = c;
+      }
+    }
+    if (dada('email') && !textCela(actual.email)) {
+      if (!esEmail(dada('email'))) errors.push("L'email no és vàlid.");
+      else nou.email = dada('email');
+    }
+    if (dada('dni') && !textCela(actual.dni)) {
+      if (!esDni(dada('dni'))) errors.push("El DNI no és vàlid (ha d'acabar en lletra, ex: 12345678A o X1234567L).");
+      else nou.dni = netejarDocument(dada('dni'));
+    }
+
+    const vistes = {};
+    const filesHoja = [];
+    const filas = [];
+    const tocades = {};
+    implants.forEach(imp => {
+      const n = parseInt(imp.fila, 10);
+      const o = n >= 2 ? objectes[n - 2] : undefined;
+      if (!o || filaBuida(files[n - 2])) { errors.push(`La fila ${imp.fila} ja no existeix. Torna a obrir el panell.`); return; }
+      if (vistes[n]) { errors.push(`La fila ${n} hi és dues vegades.`); return; }
+      vistes[n] = true;
+      if (codiDe(o) !== codi) { errors.push(`La fila ${n} ja no és d'aquest pacient. Torna a obrir el panell.`); return; }
+      if ('posicion_esperada' in imp && textCela(o.posicion) !== textCela(imp.posicion_esperada)) {
+        errors.push(`La fila ${n} ha canviat (posició ${textCela(o.posicion) || 'buida'}). Torna a obrir el panell.`);
+        return;
+      }
+      const canvis = campsImplant(imp);
+      Object.keys(canvis).forEach(k => { tocades[k] = true; });
+      filesHoja.push(n);
+      filas.push(Object.assign({}, o, canvis));
+    });
+    if (errors.length) return resultat({ codi });
+
+    const paciente = Object.assign({}, actual, nou, {
+      codi_acces: codi,
+      sense_email: delPacient.some(o => o.sense_email) && !textCela(nou.email || actual.email),
+      sense_dni: delPacient.some(o => o.sense_dni) && !textCela(nou.dni || actual.dni)
+    });
+    delete paciente.n_implants;
+    const perFila = {};
+    filesHoja.forEach((n, i) => { perFila[n] = filas[i]; });
+    const totes = [];
+    objectes.forEach((o, i) => {
+      if (codiDe(o) !== codi) return;
+      totes.push(omplirBuits(perFila[i + 2] || o, nou));
+    });
+    return resultat({ codi, paciente, filas: filas.map(f => omplirBuits(f, nou)), totes,
+      files_hoja: filesHoja, claus_tocades: CLAUS_IMPLANT.filter(k => tocades[k]) });
+  }
+
+  /**
+   * Propuesta de "Pendent" para la revisión que lanza la Auxiliar (menú 🗂️): implantes de
+   * los últimos 6 meses que aún no lo están y cuyo pilar está vacío o es "A cabeza de
+   * implante" (el +PC). Las fechas que no se entienden también salen, sin proponer.
+   * @param {number} araMs ahora (ms), para poder probarlo
+   * @returns {{fila, codi_acces, nombre, posicion, fecha, pilar, motiu, proposat}[]}
+   */
+  function proposarPendents(headers, files, araMs) {
+    const { idx } = indexarCapcaleres(headers);
+    const limit = new Date(araMs);
+    limit.setMonth(limit.getMonth() - 6);
+    const out = [];
+    files.forEach((f, i) => {
+      if (filaBuida(f)) return;
+      const o = filaAObjecte(f, idx);
+      if (!textCela(o.codi_acces) || o.pendent || !suggereixPendent(o)) return;
+      const data = parseData(o.fecha_colocacion);
+      if (data && data < limit) return;
+      const motiu = textCela(o.pilar) === '' ? 'Pilar buit' : 'A cabeza de implante (+PC?)';
+      out.push({
+        fila: i + 2,
+        codi_acces: textCela(o.codi_acces).toUpperCase(),
+        nombre: textCela(o.nombre),
+        posicion: textCela(o.posicion),
+        fecha: data || textCela(o.fecha_colocacion),
+        pilar: textCela(o.pilar),
+        motiu: data ? motiu : motiu + ' · data no entesa',
+        proposat: !!data
+      });
+    });
+    return out;
+  }
+
+  /**
+   * Aplica la revisión de pendientes: marca "Pendent" en las filas confirmadas. Cada
+   * decisión lleva su fila, codi y posición, y si la fila ha cambiado no se toca.
+   * @param {{fila, codi_acces, posicion, pendent}[]} decisions
+   * @returns {{ files: any[][], marcades: number, resultats: string[] }} un resultado por decisión
+   */
+  function aplicarPendents(headers, files, decisions) {
+    const { idx } = indexarCapcaleres(headers);
+    if (idx.pendent === undefined) throw new Error('No trobo la columna "Pendent".');
+    const novesFiles = files.slice();
+    let marcades = 0;
+    const resultats = decisions.map(d => {
+      if (!esCert(d.pendent)) return 'No marcat';
+      const n = parseInt(d.fila, 10);
+      const f = n >= 2 ? novesFiles[n - 2] : undefined;
+      if (!f) return 'ERROR: la fila ja no existeix';
+      const o = filaAObjecte(f, idx);
+      if (textCela(o.codi_acces).toUpperCase() !== textCela(d.codi_acces).toUpperCase() ||
+          textCela(o.posicion) !== textCela(d.posicion)) return 'ERROR: la fila ha canviat; torna a proposar';
+      if (o.pendent) return 'Ja era pendent';
+      const copia = f.slice();
+      copia[idx.pendent] = true;
+      novesFiles[n - 2] = copia;
+      marcades++;
+      return 'Marcat pendent';
+    });
+    return { files: novesFiles, marcades, resultats };
+  }
+
   function unics(llista) {
     return llista.filter((v, i) => llista.indexOf(v) === i);
   }
@@ -837,7 +1113,14 @@ function crearPacientModel() {
     analitzarTextPilar,
     descriurePilar,
     planificarMigracioPilars,
-    planificarRecuperacioPilars
+    planificarRecuperacioPilars,
+    CLAUS_IMPLANT,
+    pilarPendent,
+    suggereixPendent,
+    parseData,
+    planificarDesat,
+    proposarPendents,
+    aplicarPendents
   };
 }
 
