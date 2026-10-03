@@ -42,15 +42,15 @@ A partir de ahí:
 Cuando alguien usa la herramienta por primera vez con su cuenta, Google le pide permiso. Se
 hace sola en 20 segundos, sin llamar a nadie:
 
-1. Menú **Pasaporte Implantológico 🦷** (arriba, junto a Archivo, Editar, Ver...).
-2. Pulsa **🔑 Autorizar mi cuenta**.
+1. Menú **Pasaport Implantològic 🦷** (arriba, junto a Archivo, Editar, Ver...).
+2. Pulsa **🔑 Autoritzar el meu compte**.
 3. Google enseñará una pantalla de permisos. Acepta.
    - Si sale un aviso de "Google no ha verificado esta aplicación", pulsa **Configuración
      avanzada** → **Ir a Pasaporte Implantológico**. Es normal: es una herramienta interna de
      la clínica, no una app publicada en internet.
-4. Cuando salga **"Cuenta autorizada ✅"**, ya está.
+4. Cuando salga **"Compte autoritzat ✅"**, ya está.
 
-### Recuadro rojo en el panel lateral: "Este panel no puede conectar con la hoja"
+### Recuadro rojo en el panel lateral: "Aquest panell no pot connectar amb la fulla"
 
 Casi siempre es el problema de las dos cuentas.
 
@@ -58,17 +58,17 @@ Casi siempre es el problema de las dos cuentas.
    cuenta de Google, ciérralas todas menos la de la clínica.
    - Atajo si tienes prisa: abre la hoja en una **ventana de incógnito** (Ctrl+Mayús+N) y
      entra solo con la cuenta de la clínica.
-2. Por si acaso, en el menú **Pasaporte Implantológico 🦷** pulsa **🔑 Autorizar mi cuenta** y
+2. Por si acaso, en el menú **Pasaport Implantològic 🦷** pulsa **🔑 Autoritzar el meu compte** y
    acepta los permisos.
-3. Cierra el panel lateral y vuelve a abrirlo desde **Pasaporte Implantológico 🦷 → ➕ Añadir
-   Implante / Paciente**.
+3. Cierra el panel lateral y vuelve a abrirlo desde **Pasaport Implantològic 🦷 → ➕ Afegir
+   implant / pacient**.
 
 **Importante:** si estabas a media faena y ya habías escaneado una hoja de cirugía, **no
 cierres el panel**. Tus datos siguen en pantalla. Arregla la cuenta en otra pestaña y vuelve
-a pulsar **💾 Guardar Todo**.
+a pulsar **💾 Desar-ho tot**.
 
 ### Cualquier otro error
 
-Menú **Pasaporte Implantológico 🦷** → **🩺 Comprobar todo**. Sale una lista con un ✅ o un ❌
+Menú **Pasaport Implantològic 🦷** → **🩺 Comprovar-ho tot**. Sale una lista con un ✅ o un ❌
 por cada parte del sistema. Manda una captura de esa lista a Gabriel: con eso se sabe qué
 falla sin tener que adivinar.
