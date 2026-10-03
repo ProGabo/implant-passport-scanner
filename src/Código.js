@@ -37,8 +37,10 @@ function onOpen() {
   ui.createMenu(NOM_MENU)
       .addItem('➕ Afegir implant / pacient', 'showSidebar')
       .addSeparator()
+      .addItem('✨ Arreglar codis undefined o en blanc', 'arreglarCodigosUndefined')
       .addItem('🧹 Eliminar files duplicades', 'eliminarDuplicados')
       .addItem('🩺 Comprovar-ho tot', 'comprobarTodo')
+      .addItem('✉️ Enviar un avís de prova', 'provarAvisSecretaria')
       .addSubMenu(ui.createMenu('🗂️ Migració de dades')
           .addItem('1. Migrar la fulla (una sola vegada)', 'migrarDadesS2')
           .addItem('2. Aplicar les Cuentes de la revisió', 'aplicarCuentesRevisio')
@@ -67,17 +69,30 @@ function showSidebar() {
 /**
  * Las funciones del panel y del menú son solo para el personal. El web app del portal es
  * anónimo y se ejecuta como quien lo despliega, y desde su página cualquiera podría llamar
- * con google.script.run a cualquier función global sin "_" final: ahí no hay email de
- * usuario, y en el panel o el menú sí (los ejecuta la propia cuenta, autorizada).
+ * con google.script.run a cualquier función global sin "_" final.
+ * La prueba: desde la hoja (panel o menú) existe la interfaz de Sheets; desde el web app,
+ * SpreadsheetApp.getUi() lanza "Cannot call ... from this context". No se usa
+ * Session.getActiveUser() como prueba principal: exige el permiso userinfo.email, que el
+ * manifiesto no declara, y añadirlo obligaría a todas las cuentas a volver a autorizar.
  */
 function exigirUsuariIntern_() {
-  if (!Session.getActiveUser().getEmail()) {
-    throw new Error("No s'ha pogut identificar el teu compte de Google. Obre el menú 'Pasaport Implantològic 🦷', prem '🔑 Autoritzar el meu compte' i torna-ho a provar.");
+  try {
+    SpreadsheetApp.getUi();
+    return;
+  } catch (e) { /* no es la hoja: se prueba la identidad */ }
+  if (!emailUsuariActual_()) {
+    // Sin la palabra "autoritzar": el panel la confunde con un fallo de permisos.
+    throw new Error("Aquesta funció només es pot fer servir des del full de càlcul de la clínica.");
   }
 }
 
+/** Email de quien ejecuta, o '' si Google no lo da (sin el permiso userinfo.email, anónimo...). */
+function emailUsuariActual_() {
+  try { return Session.getActiveUser().getEmail() || ''; } catch (e) { return ''; }
+}
+
 function hojaPacientes() {
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SHEET_NAME);
+  const sheet =SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SHEET_NAME);
   if (!sheet) throw new Error("No existeix la pestanya '" + SHEET_NAME + "'.");
   return sheet;
 }
@@ -568,7 +583,7 @@ function sendPassportEmail_(recipientEmail, patientName, patientCode) {
  * reenviar (botón de WhatsApp) y el pasaporte en PDF para imprimir.
  * @param {{codi_acces, nombre, cuenta_quartup, dni}} paciente
  */
-function enviarAvisSecretaria_(paciente) {
+function enviarAvisSecretaria_(paciente, destiProva) {
   const a = PortalModel.avisSecretaria({
     nombre: paciente.nombre,
     cuenta_quartup: paciente.cuenta_quartup,
@@ -582,8 +597,39 @@ function enviarAvisSecretaria_(paciente) {
     // Sin PDF el aviso sigue siendo útil: el codi y el enlace bastan.
     Logger.log('No s\'ha pogut generar el PDF per a ' + paciente.codi_acces + ': ' + e);
   }
-  return enviarEmail_('avís secretària', paciente.codi_acces, EMAIL_SECRETARIA, a.assumpte, a.text, a.html,
+  const desti = destiProva || EMAIL_SECRETARIA;
+  const assumpte = destiProva ? '[PROVA] ' + a.assumpte : a.assumpte;
+  return enviarEmail_(destiProva ? 'avís de prova' : 'avís secretària', paciente.codi_acces, desti, assumpte, a.text, a.html,
     { attachments: adjunts, replyTo: EMAIL_REMITENT });
+}
+
+/**
+ * Menú: envía a la dirección que se indique el avís que recibiría la Secretària para un
+ * paciente, para ver cómo llega (y si va a spam) sin guardar nada ni molestar a la consulta.
+ */
+function provarAvisSecretaria() {
+  exigirUsuariIntern_();
+  const ui = SpreadsheetApp.getUi();
+  const rCodi = ui.prompt('Avís de prova', "Codi d'accés del pacient (per exemple DEMO2026):", ui.ButtonSet.OK_CANCEL);
+  if (rCodi.getSelectedButton() !== ui.Button.OK) return;
+  const { objetos } = leerPacientes(hojaPacientes());
+  const r = PortalModel.resoldreCodi(rCodi.getResponseText(), objetos.map(o => o.codi_acces));
+  if (!r.codi) {
+    ui.alert('Avís de prova', "No trobo cap pacient amb aquest codi d'accés.", ui.ButtonSet.OK);
+    return;
+  }
+  const p = PacientModel.pacientsUnics(objetos.filter(o => mismoCodigo(o.codi_acces, r.codi)))[0];
+  const rEmail = ui.prompt('Avís de prova', "Email on vols rebre la prova (s'enviarà el mateix que rebria la consulta):", ui.ButtonSet.OK_CANCEL);
+  if (rEmail.getSelectedButton() !== ui.Button.OK) return;
+  const desti = String(rEmail.getResponseText() || '').trim();
+  if (!PacientModel.esEmail(desti)) {
+    ui.alert('Avís de prova', "L'email no és vàlid.", ui.ButtonSet.OK);
+    return;
+  }
+  const res = enviarAvisSecretaria_(p, desti);
+  ui.alert('Avís de prova', res.ok
+    ? `Enviat a ${desti}. Si no el veus en uns minuts, mira la carpeta de correu brossa (spam).`
+    : `No s'ha pogut enviar: ${res.message}`, ui.ButtonSet.OK);
 }
 
 /**
@@ -1022,7 +1068,7 @@ function diagnosticRebots_() {
       if (!llista.length) {
         const cos = String(m.getPlainBody() || '');
         const trobat = cos.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [];
-        const propies = [EMAIL_REMITENT, EMAIL_SECRETARIA, Session.getActiveUser().getEmail()].map(a => String(a).toLowerCase());
+        const propies = [EMAIL_REMITENT, EMAIL_SECRETARIA, emailUsuariActual_()].map(a => String(a).toLowerCase());
         llista = trobat.filter(a => !/mailer-daemon|postmaster|googlemail\.com$|google\.com$/i.test(a) && propies.indexOf(a.toLowerCase()) === -1);
       }
       llista.filter(Boolean).forEach(a => { adreces[a.toLowerCase()] = true; });
@@ -1087,6 +1133,97 @@ function forzarPermisosPDF() {
  * Elimina las filas 100% idénticas (mismo paciente, mismo implante, todo igual). No
  * depende de la posición de ninguna columna.
  */
+/**
+ * Busca filas con Codi d'accés "undefined", "UNDEFINED" o vacío, y les asigna el código
+ * correcto del paciente (si ya tiene uno en otras filas) o les genera uno nuevo.
+ */
+function arreglarCodigosUndefined() {
+  exigirUsuariIntern_();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = hojaPacientes();
+    const { headers, idx, files, objetos } = leerPacientes(sheet);
+    
+    if (idx.codi_acces === undefined) return;
+    const colCodi = idx.codi_acces;
+    
+    let cambios = false;
+    let arregladosExistentes = 0;
+    let arregladosNuevos = 0;
+    
+    // Identificar códigos válidos por DNI o Cuenta
+    const codigosPorCuenta = {};
+    const codigosPorDNI = {};
+    const codigosUsados = new Set();
+    
+    objetos.forEach(o => {
+      const codi = String(o.codi_acces || '').trim().toUpperCase();
+      if (codi && codi !== 'UNDEFINED' && codi !== 'NULL' && codi !== 'NAN') {
+        codigosUsados.add(codi);
+        const cuenta = String(o.cuenta_quartup || '').trim();
+        if (cuenta) codigosPorCuenta[cuenta] = codi;
+        
+        const dni = o.dni ? PacientModel.netejarDocument(o.dni) : '';
+        if (dni) codigosPorDNI[dni] = codi;
+      }
+    });
+    
+    // Recorrer las filas y arreglar
+    files.forEach((f, indexFila) => {
+      const o = objetos[indexFila];
+      const codiActual = String(o.codi_acces || '').trim().toUpperCase();
+      
+      if (!codiActual || codiActual === 'UNDEFINED' || codiActual === 'NULL' || codiActual === 'NAN') {
+        const cuenta = String(o.cuenta_quartup || '').trim();
+        const dni = o.dni ? PacientModel.netejarDocument(o.dni) : '';
+        
+        let nuevoCodi = '';
+        if (cuenta && codigosPorCuenta[cuenta]) {
+          nuevoCodi = codigosPorCuenta[cuenta];
+        } else if (dni && codigosPorDNI[dni]) {
+          nuevoCodi = codigosPorDNI[dni];
+        }
+        
+        if (nuevoCodi) {
+          arregladosExistentes++;
+        } else {
+          // Generar uno nuevo si no hay ninguno
+          nuevoCodi = generarCodigoUnico(Array.from(codigosUsados));
+          codigosUsados.add(nuevoCodi);
+          if (cuenta) codigosPorCuenta[cuenta] = nuevoCodi;
+          if (dni) codigosPorDNI[dni] = nuevoCodi;
+          arregladosNuevos++;
+        }
+        
+        f[colCodi] = nuevoCodi;
+        cambios = true;
+      }
+    });
+    
+    if (cambios) {
+      // Escribir la columna entera de codi_acces
+      ponerFormatoTexto(sheet, headers, 2, files.length);
+      const aTexto = textoSiId(headers);
+      const columnaCodi = files.map(f => [aTexto(f[colCodi], colCodi)]);
+      sheet.getRange(2, colCodi + 1, files.length, 1).setValues(columnaCodi);
+      
+      SpreadsheetApp.getUi().alert('✨ Arreglo completado\n\n' +
+        'S\'han arreglat ' + (arregladosExistentes + arregladosNuevos) + ' codis:\n' +
+        '- ' + arregladosExistentes + ' files han recuperat el codi que ja tenia el pacient.\n' +
+        '- ' + arregladosNuevos + ' files de pacients sense cap codi n\'han rebut un de nou.');
+    } else {
+      SpreadsheetApp.getUi().alert('✅ Tot correcte. No s\'ha trobat cap codi "undefined" ni en blanc.');
+    }
+    
+  } catch (e) {
+    Logger.log('Error en arreglarCodigosUndefined: ' + e);
+    SpreadsheetApp.getUi().alert('❌ Error intern: ' + e.message);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function eliminarDuplicados() {
   exigirUsuariIntern_();
   const sheet = hojaPacientes();

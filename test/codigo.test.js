@@ -101,11 +101,20 @@ function cargarCodigo(ss, opts) {
     SpreadsheetApp: {
       getActiveSpreadsheet: () => ss,
       openById: () => ss,
-      getUi: () => ({
-        alert: (...a) => { alerts.push(a); return 'YES'; },
-        ButtonSet: { OK: 'OK', YES_NO: 'YES_NO' },
-        Button: { YES: 'YES' }
-      }),
+      getUi: () => {
+        // Como Apps Script: desde el web app (visitante anónimo) no hay interfaz de Sheets.
+        if (o.usuari === '') throw new Error('Cannot call SpreadsheetApp.getUi() from this context.');
+        const prompts = o.prompts || [];
+        return {
+          alert: (...a) => { alerts.push(a); return 'YES'; },
+          prompt: () => {
+            const text = prompts.shift();
+            return { getSelectedButton: () => (text === undefined ? 'CANCEL' : 'OK'), getResponseText: () => text || '' };
+          },
+          ButtonSet: { OK: 'OK', YES_NO: 'YES_NO', OK_CANCEL: 'OK_CANCEL' },
+          Button: { YES: 'YES', OK: 'OK' }
+        };
+      },
       newDataValidation: () => ({ requireCheckbox() { return this; }, build() { return 'checkbox'; } })
     },
     PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), setProperty() {} }) },
@@ -117,7 +126,11 @@ function cargarCodigo(ss, opts) {
     Session: {
       getScriptTimeZone: () => 'Europe/Madrid',
       // Panel y menú: la cuenta de la clínica. Visitante anónimo del web app: '' (opts.usuari).
-      getActiveUser: () => ({ getEmail: () => ('usuari' in o ? o.usuari : 'clinicapiesteller@gmail.com') })
+      getActiveUser: () => {
+        // Lo que pasó en vivo: sin el permiso userinfo.email, Google lanza en vez de dar el email.
+        if (o.senseUserinfo) throw new Error('Specified permissions are not sufficient to call Session.getActiveUser. Required permissions: https://www.googleapis.com/auth/userinfo.email');
+        return { getEmail: () => ('usuari' in o ? o.usuari : 'clinicapiesteller@gmail.com') };
+      }
     },
     GmailApp: {
       sendEmail: (to, subject, body, options) => {
@@ -520,9 +533,38 @@ test('visitante anónimo del web app: el portal funciona, el panel y el menú no
     () => ctx.marcarSenseDniMenu(),
     () => ctx.eliminarDuplicados(),
     () => ctx.comprobarTodo(),
-    () => ctx.registrarDuda(1)
-  ].forEach(f => assert.throws(f, /identificar el teu compte/));
+    () => ctx.registrarDuda(1),
+    () => ctx.provarAvisSecretaria()
+  ].forEach(f => assert.throws(f, /només es pot fer servir des del full/));
   assert.equal(sent.length, 1, 'solo la recuperación de código');
+});
+
+test('panel sin el permiso userinfo.email (como en vivo): funciona igual y no habla de autorizar', () => {
+  const ss = libroAntiguo();
+  const { ctx } = cargarCodigo(ss, { senseUserinfo: true });
+  ctx.migrarDadesS2();
+  assert.equal(ctx.buscarPacient('43000001').data.codi_acces, 'AAA111');
+  ctx.comprobarTodo();
+});
+
+test('anónimo y sin permiso userinfo.email: bloqueado, sin la palabra "autoritzar"', () => {
+  const { ctx } = cargarCodigo(libroAntiguo(), { usuari: '', senseUserinfo: true });
+  assert.throws(() => ctx.buscarPacient('43000001'), err => !/autoriz/i.test(err.message) && /des del full/.test(err.message));
+});
+
+test('avís de prova: envía a la dirección indicada lo mismo que a la consulta, con [PROVA]', () => {
+  const ss = libroAntiguo();
+  const { ctx: intern } = cargarCodigo(ss);
+  intern.migrarDadesS2();
+  const { ctx, sent, alerts } = cargarCodigo(ss, { prompts: ['bbb-222', 'prova@example.com'] });
+  ctx.provarAvisSecretaria();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, 'prova@example.com');
+  assert.match(sent[0].subject, /^\[PROVA\] .*Maria Roca/);
+  assert.match(sent[0].options.htmlBody, /BBB222/);
+  assert.equal(sent[0].options.attachments.length, 1);
+  assert.match(alerts[0][1], /Enviat a prova@example\.com/);
+  assert.equal(ss.getSheetByName('Pacientes').rows().length, 4, 'no toca la hoja');
 });
 
 test('las funciones internas no se pueden llamar desde el portal (terminan en "_")', () => {

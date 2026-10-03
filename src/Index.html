@@ -277,13 +277,15 @@
           </div>
         `;
 
-        fetch(API_URL, {
-            method: 'POST',
-            body: JSON.stringify({ action: 'initiateLogin', code: code }),
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' }
-        })
-        .then(res => res.json())
+        // Si tarda (el servidor a veces "despierta" lento), se avisa en vez de dejar la duda.
+        const avisoLento = setTimeout(() => {
+          status.insertAdjacentHTML('beforeend',
+            '<p style="font-size: 13px; color: #92400e; text-align: center;">Está tardando un poco más de lo normal. Seguimos buscando, no cierre la página.</p>');
+        }, 8000);
+
+        llamarApi({ action: 'initiateLogin', code: code }, 2)
         .then(res => {
+            clearTimeout(avisoLento);
             btnCode.disabled = false;
             btnCode.textContent = 'Siguiente';
 
@@ -310,11 +312,32 @@
             }
         })
         .catch(err => {
+            clearTimeout(avisoLento);
             btnCode.disabled = false;
             btnCode.textContent = 'Siguiente';
-            status.innerHTML = '<span class="error">Error de conexión. Inténtalo de nuevo.</span>';
+            status.innerHTML = '<span class="error">No hemos podido conectar con el servidor. Compruebe su conexión a internet e inténtelo de nuevo en un momento.</span>';
         });
       });
+
+      /**
+       * POST al servidor con reintentos: un fallo de red o una respuesta que no es JSON (el
+       * servidor de Google a veces responde con una página de error) se reintenta tras una
+       * pausa, en vez de enseñar "Error de conexión" a la primera.
+       */
+      function llamarApi(payload, reintentos) {
+        return fetch(API_URL, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+        })
+        .then(res => res.json())
+        .catch(err => {
+            if (reintentos > 0) {
+              return new Promise(r => setTimeout(r, 1500)).then(() => llamarApi(payload, reintentos - 1));
+            }
+            throw err;
+        });
+      }
 
       // --- ORDEN DE LOS IMPLANTES (por posición dental) ---
       function ordenarImplantes(implantes) {
