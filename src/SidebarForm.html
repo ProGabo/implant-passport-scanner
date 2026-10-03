@@ -766,6 +766,8 @@
         searchBtn.innerHTML = '🔍 Buscar Paciente';
         saveBtn.innerHTML = '💾 Guardar Todo';
 
+        console.error("Error del servidor:", err);
+
         // El formulario NO se vacía nunca aquí: si el fallo llega al guardar, lo ya
         // escaneado y revisado sigue en pantalla y se puede reintentar.
         if (esErrorDeAutorizacion(err)) {
@@ -773,7 +775,29 @@
             return;
         }
 
-        Swal.fire({ icon: 'error', title: 'Error del Servidor', text: err.message });
+        const textoError = (err && (err.message || String(err))) || "Error desconegut";
+
+        // Mensaje tranquilizador + el error crudo plegado: una foto de esa caja basta
+        // para diagnosticar a distancia sin adivinar.
+        const htmlMsg = `<p style="font-size:14px; text-align:left;">Alguna cosa ha fallat. <b>No t'amoïnis: les teves dades continuen aquí.</b> Espera uns segons i torna a prémer el botó.</p>
+            <details style="margin-top: 15px; text-align:left; font-size:12px; color:#64748b; background:#f1f5f9; padding:8px; border-radius:4px;">
+                <summary style="cursor:pointer; font-weight:600;">Veure detalls tècnics (fes-ne una foto per a l'informàtic)</summary>
+                <p style="margin-top:8px; word-break: break-all;">${escapeHtml(textoError)}</p>
+            </details>`;
+
+        Swal.fire({
+            icon: 'error',
+            title: 'Error del servidor',
+            html: htmlMsg,
+            confirmButtonText: 'D\'acord',
+            confirmButtonColor: '#0ea5e9'
+        });
+    }
+
+    function escapeHtml(s) {
+        return String(s === undefined || s === null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     // ==========================================
