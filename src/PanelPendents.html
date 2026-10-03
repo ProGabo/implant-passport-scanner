@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+    <base target="_top">
+    <title>Completar i enviar</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        body { font-family: 'Inter', Arial, sans-serif; padding: 12px; background: #f4f7f6; color: #2c3e50; margin: 0; font-size: 13px; }
+        h4 { margin: 0 0 8px 0; color: #0f172a; }
+        .hidden { display: none !important; }
+        .card { background: #fff; border-radius: 8px; padding: 14px; border: 1px solid #e2e8f0; box-shadow: 0 2px 8px rgba(0,0,0,0.04); margin-bottom: 14px; }
+        .fila { border-left: 4px solid #0ea5e9; }
+        .fila.es-pendent { border-left-color: #f97316; background: #fffaf5; }
+        .fila-cap { font-weight: 700; color: #0f172a; margin-bottom: 2px; }
+        .fila-sub { font-size: 12px; color: #64748b; margin-bottom: 10px; }
+        label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: #475569; }
+        input[type="text"], input[type="email"], select, textarea {
+            width: 100%; padding: 7px 9px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box;
+            font-size: 13px; font-family: 'Inter', sans-serif;
+        }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: #0ea5e9; box-shadow: 0 0 0 3px rgba(14,165,233,0.15); }
+        input.falta { border: 2px solid #f59e0b; background: #fffbeb; }
+        .form-group { margin-bottom: 10px; }
+        .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 8px; }
+        .card, details { min-width: 0; overflow-wrap: anywhere; }
+        details { margin-top: 8px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 10px; background: #f8fafc; }
+        summary { cursor: pointer; font-size: 12px; font-weight: 600; color: #0369a1; }
+        details[open] summary { margin-bottom: 8px; }
+        .inline-check { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #0f172a; cursor: pointer; margin: 0; }
+        .inline-check input { width: 16px; height: 16px; margin: 0; accent-color: #f97316; cursor: pointer; }
+        .pendent-block { margin-bottom: 10px; padding: 8px 10px; border-radius: 6px; border: 1px solid #e2e8f0; background: #f8fafc; }
+        .pendent-block.marcat { border-color: #fdba74; background: #fff7ed; }
+        .pendent-block input[type="text"] { margin-top: 6px; }
+        button { font-family: 'Inter', sans-serif; font-weight: 600; padding: 9px 12px; border: none; border-radius: 6px; cursor: pointer; width: 100%; font-size: 13px; }
+        button:disabled { opacity: .6; cursor: not-allowed; }
+        .btn-primary { background: #0f172a; color: #fff; }
+        .btn-ok { background: #16a34a; color: #fff; font-size: 14px; padding: 11px; }
+        .btn-sec { background: #f1f5f9; color: #0f172a; border: 1px solid #cbd5e1; }
+        .btn-petit { width: auto; padding: 5px 9px; font-size: 12px; }
+        .accions > * { margin-top: 8px; }
+        .ajuda { font-size: 11px; color: #64748b; margin-top: 3px; }
+        .avis { font-size: 12px; color: #b45309; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; padding: 8px; }
+        .estat { padding: 8px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; }
+        .estat-info { color: #0284c7; background: #e0f2fe; }
+        .estat-error { color: #991b1b; background: #fee2e2; }
+        .pacient-linia { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+        .pacient-linia span:first-child { color: #64748b; }
+    </style>
+</head>
+<body>
+    <div id="estat" class="estat estat-info">Carregant la fila seleccionada...</div>
+
+    <div id="contingut" class="hidden">
+        <div class="card">
+            <h4 id="pNom"></h4>
+            <div class="pacient-linia"><span>Codi d'accés</span><b id="pCodi"></b></div>
+            <div class="pacient-linia"><span>Email</span><span id="pEmail"></span></div>
+            <div class="ajuda" id="pUltim"></div>
+            <!-- Datos que faltan: se pueden completar aquí; los ya guardados no se tocan. -->
+            <div id="pFaltes" class="hidden" style="margin-top: 10px;"></div>
+        </div>
+
+        <div id="files"></div>
+
+        <div id="nomesEnviar" class="card hidden">
+            <div class="avis">Aquest pacient no té cap implant marcat com a <b>⏳ Pendent</b>. Si ja has completat la fila a mà, pots enviar-li el pasaport.</div>
+        </div>
+
+        <div class="card accions">
+            <label class="inline-check hidden" id="avisGrup">
+                <input type="checkbox" id="avisTambe">
+                Avisar també la secretària (li arriba el codi, el missatge per WhatsApp i el PDF)
+            </label>
+            <!-- S5: aquí va el botó "👁️ Vista prèvia" (VistaPrevia.html, include_). -->
+            <div id="vista-previa-slot"></div>
+            <button type="button" class="btn-sec" id="btnDesar">💾 Desar</button>
+            <button type="button" class="btn-ok" id="btnCompletar">✅ Completar i enviar</button>
+            <button type="button" class="btn-ok hidden" id="btnEnviar">📨 Enviar el pasaport</button>
+            <div class="ajuda" id="ajudaCompletar">Desa els canvis, treu la marca de pendent (i el taronja) i envia el pasaport.</div>
+            <button type="button" class="btn-sec btn-petit" id="btnRecarregar">↻ He canviat de fila: tornar a carregar</button>
+        </div>
+    </div>
+
+    <datalist id="marquesOptions"></datalist>
+    <datalist id="pilarConexionOptions"><option value="Externa"></option><option value="Interna"></option></datalist>
+
+    <template id="fila-template">
+        <div class="card fila">
+            <div class="fila-cap"></div>
+            <div class="fila-sub"></div>
+            <div class="pendent-block">
+                <label class="inline-check"><input type="checkbox" class="f-pendent"> ⏳ Pendent</label>
+                <input type="text" class="f-que-falta" placeholder="Què falta? (opcional)">
+            </div>
+            <div class="form-group">
+                <label>Pilar:</label>
+                <select class="f-pilar-tipus">
+                    <option value="">— Encara no se sap —</option>
+                    <option value="Multi-unit">Multi-unit</option>
+                    <option value="A cabeza de implante">A cabeza de implante (+PC)</option>
+                    <option value="Sin pilar">Sin pilar</option>
+                    <option value="__altre">Un altre...</option>
+                </select>
+                <input type="text" class="f-pilar-altre hidden" placeholder="Escriu el tipus de pilar" style="margin-top: 6px;">
+                <div style="margin-top: 8px;">
+                    <label>📋 Enganxa els detalls del pilar de Quartup:</label>
+                    <textarea class="f-pilar-text" rows="2" placeholder="Ex: 0196, mult-unit 3mm avinent hexagon externo : 2.00"></textarea>
+                    <button type="button" class="btn-sec btn-petit f-pilar-omplir" style="margin-top: 4px;">Omplir els camps</button>
+                </div>
+                <details class="f-pilar-detalls">
+                    <summary>Detalls del pilar (opcional)</summary>
+                    <div class="grid">
+                        <div><label>Alçada (mm):</label><input type="text" data-clau="pilar_altura" inputmode="decimal"></div>
+                        <div><label>Angulació (º):</label><input type="text" data-clau="pilar_angulacion" inputmode="numeric"></div>
+                        <div><label>Marca:</label><input type="text" data-clau="pilar_marca" list="marquesOptions"></div>
+                        <div><label>Connexió:</label><input type="text" data-clau="pilar_conexion" list="pilarConexionOptions"></div>
+                    </div>
+                    <div style="margin-top: 6px;"><label>Referència:</label><input type="text" data-clau="pilar_ref"></div>
+                </details>
+            </div>
+            <details class="f-altres">
+                <summary>Altres dades de l'implant</summary>
+                <div class="grid">
+                    <div><label>Data:</label><input type="text" data-clau="fecha_colocacion" placeholder="dd/mm/aaaa"></div>
+                    <div><label>Marca:</label><input type="text" data-clau="marca" list="marquesOptions"></div>
+                    <div><label>Model:</label><input type="text" data-clau="modelo"></div>
+                    <div><label>Dimensions:</label><input type="text" data-clau="dimensiones"></div>
+                    <div><label>Plataforma:</label><input type="text" data-clau="plataforma"></div>
+                    <div><label>Connexió:</label><input type="text" data-clau="conexion"></div>
+                    <div><label>Codi d'implant:</label><input type="text" data-clau="cod_implante"></div>
+                    <div><label>Lot:</label><input type="text" data-clau="lote"></div>
+                </div>
+            </details>
+        </div>
+    </template>
+
+<!-- Mismas reglas que el servidor: el código de PacientModel.js lo inyecta obrirPanellPendents(). -->
+<script>
+    <?!= pacientModelJs ?>
+    var PacientModel = crearPacientModel();
+</script>
+
+<script>
+    const estat = document.getElementById('estat');
+    const contingut = document.getElementById('contingut');
+    const filesDiv = document.getElementById('files');
+    const btnDesar = document.getElementById('btnDesar');
+    const btnCompletar = document.getElementById('btnCompletar');
+    const btnEnviar = document.getElementById('btnEnviar');
+    const avisGrup = document.getElementById('avisGrup');
+    const avisTambe = document.getElementById('avisTambe');
+    let dades = null;   // lo que devuelve carregarPanell
+    let marques = [];
+
+    function escapeHtml(s) {
+        return String(s === undefined || s === null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function mostrarEstat(text, tipus) {
+        estat.textContent = text || '';
+        estat.className = 'estat estat-' + (tipus || 'info');
+        estat.classList.toggle('hidden', !text);
+    }
+
+    /** google.script.run con un reintento ante el hipo de autorización (como el sidebar). */
+    function servidor(fn, args, ok) {
+        let reintentat = false;
+        const cridar = () => google.script.run
+            .withSuccessHandler(ok)
+            .withFailureHandler(err => {
+                const msg = (err && (err.message || String(err))) || '';
+                if (/autoriz|authoriz/i.test(msg) && !reintentat) { reintentat = true; cridar(); return; }
+                activarBotons(true);
+                Swal.fire({ icon: 'error', title: 'Error del servidor', html: `<p style="text-align:left;">Alguna cosa ha fallat. Les dades continuen aquí: torna-ho a provar.</p><p style="font-size:11px; color:#64748b; text-align:left;">${escapeHtml(msg)}</p>` });
+            })[fn].apply(null, args);
+        cridar();
+    }
+
+    function activarBotons(actius) {
+        [btnDesar, btnCompletar, btnEnviar].forEach(b => { b.disabled = !actius; });
+    }
+
+    // --- Carga ----------------------------------------------------------------------
+
+    function carregar() {
+        mostrarEstat('Carregant la fila seleccionada...');
+        contingut.classList.add('hidden');
+        servidor('carregarPanell', [], pintar);
+    }
+
+    function pintar(res) {
+        if (!res || !res.ok) {
+            mostrarEstat((res && res.message) || "No s'ha pogut carregar la fila.", 'error');
+            return;
+        }
+        dades = res;
+        marques = res.marques || [];
+        document.getElementById('marquesOptions').innerHTML = marques.map(m => `<option value="${escapeHtml(m)}"></option>`).join('');
+        const p = res.pacient;
+        const senseEmail = !String(p.email || '').trim();
+        document.getElementById('pNom').textContent = p.nombre || '(sense nom)';
+        document.getElementById('pCodi').textContent = p.codi_acces;
+        document.getElementById('pEmail').textContent = senseEmail ? 'Sense email' : p.email;
+        document.getElementById('pUltim').textContent = textUltimEnviament(p.ultimEnviament);
+        pintarFaltes(p);
+
+        const pendents = res.files.filter(f => PacientModel.esCert(f.pendent));
+        filesDiv.innerHTML = '';
+        pendents.forEach(f => filesDiv.appendChild(crearFila(f)));
+        const nomesEnviar = pendents.length === 0;
+        document.getElementById('nomesEnviar').classList.toggle('hidden', !nomesEnviar);
+        btnDesar.classList.toggle('hidden', nomesEnviar);
+        btnCompletar.classList.toggle('hidden', nomesEnviar);
+        document.getElementById('ajudaCompletar').classList.toggle('hidden', nomesEnviar);
+        btnEnviar.classList.toggle('hidden', !nomesEnviar);
+
+        // Con email: el email del pasaporte, y el avís si se quiere. Sin email: solo el avís.
+        avisGrup.classList.toggle('hidden', senseEmail);
+        avisTambe.checked = false;
+        btnCompletar.textContent = senseEmail ? '✅ Completar i avisar la secretària' : '✅ Completar i enviar';
+        btnEnviar.textContent = senseEmail ? '📨 Avisar la secretària' : '📨 Enviar el pasaport';
+
+        activarBotons(true);
+        mostrarEstat('');
+        contingut.classList.remove('hidden');
+    }
+
+    function textUltimEnviament(u) {
+        if (!u) return 'No consta cap enviament del pasaport.';
+        const dies = Math.floor((Date.now() - u.ms) / 86400000);
+        const quan = dies <= 0 ? 'avui' : dies === 1 ? 'ahir' : `fa ${dies} dies`;
+        return `Últim enviament: ${quan} (${u.tipus === 'pasaport' ? 'per email' : 'per la secretària'}).`;
+    }
+
+    function pintarFaltes(p) {
+        const faltes = [
+            ['email', 'Email', p.email],
+            ['dni', 'DNI / NIE', p.dni],
+            ['cuenta_quartup', 'Cuenta Quartup', p.cuenta_quartup]
+        ].filter(([, , v]) => !String(v || '').trim());
+        const div = document.getElementById('pFaltes');
+        div.innerHTML = faltes.map(([k, nom]) => `<div class="form-group"><label>${nom} (falta, opcional):</label><input type="text" class="falta" data-pacient="${k}"></div>`).join('');
+        div.classList.toggle('hidden', !faltes.length);
+    }
+
+    // --- Una tarjeta por implante pendiente --------------------------------------------
+
+    function crearFila(f) {
+        const node = document.getElementById('fila-template').content.cloneNode(true);
+        const card = node.querySelector('.fila');
+        card.dataset.fila = f.fila;
+        card.dataset.posicion = f.posicion;
+        card.dataset.original = JSON.stringify(f);
+        card.querySelector('.fila-cap').textContent = `${f.posicion || '(sense posició)'} · fila ${f.fila}`;
+        card.querySelector('.fila-sub').textContent = [f.fecha_colocacion, f.marca, f.modelo, f.dimensiones].filter(Boolean).join(' · ');
+
+        const pendent = card.querySelector('.f-pendent');
+        pendent.checked = PacientModel.esCert(f.pendent);
+        card.querySelector('.f-que-falta').value = f.que_falta || '';
+        pendent.addEventListener('change', () => pintarPendent(card));
+
+        card.querySelectorAll('[data-clau]').forEach(inp => {
+            inp.value = f[inp.dataset.clau] === undefined || f[inp.dataset.clau] === null ? '' : f[inp.dataset.clau];
+            if (!PacientModel.CAMPS_PILAR.includes(inp.dataset.clau) && !String(inp.value).trim()) inp.classList.add('falta');
+        });
+        if (card.querySelector('.f-altres .falta')) card.querySelector('.f-altres').open = true;
+        if (PacientModel.CAMPS_PILAR.some(k => k !== 'pilar' && String(f[k] || '').trim())) card.querySelector('.f-pilar-detalls').open = true;
+
+        const select = card.querySelector('.f-pilar-tipus');
+        const altre = card.querySelector('.f-pilar-altre');
+        fixarTipusPilar(card, f.pilar);
+        select.addEventListener('change', () => sincronitzarPilar(card));
+        card.querySelector('.f-pilar-omplir').addEventListener('click', () => enganxarPilar(card));
+        altre.addEventListener('input', () => sincronitzarPilar(card));
+        pintarPendent(card);
+        return node;
+    }
+
+    function pintarPendent(card) {
+        const marcat = card.querySelector('.f-pendent').checked;
+        card.classList.toggle('es-pendent', marcat);
+        card.querySelector('.pendent-block').classList.toggle('marcat', marcat);
+    }
+
+    function fixarTipusPilar(card, tipus) {
+        const select = card.querySelector('.f-pilar-tipus');
+        const altre = card.querySelector('.f-pilar-altre');
+        const t = PacientModel.normalitzarTipusPilar(tipus);
+        if (!t) select.value = '';
+        else if (PacientModel.TIPUS_PILAR.indexOf(t) !== -1) select.value = t;
+        else { select.value = '__altre'; altre.value = t; }
+        sincronitzarPilar(card);
+    }
+
+    function sincronitzarPilar(card) {
+        const select = card.querySelector('.f-pilar-tipus');
+        const esAltre = select.value === '__altre';
+        card.querySelector('.f-pilar-altre').classList.toggle('hidden', !esAltre);
+        const detalls = card.querySelector('.f-pilar-detalls');
+        detalls.classList.toggle('hidden', select.value === 'Sin pilar');
+    }
+
+    function tipusPilar(card) {
+        const select = card.querySelector('.f-pilar-tipus');
+        return select.value === '__altre' ? card.querySelector('.f-pilar-altre').value.trim() : select.value;
+    }
+
+    /** "📋 Enganxa de Quartup": el mismo analizador local que el sidebar (sin IA). */
+    function enganxarPilar(card) {
+        const textarea = card.querySelector('.f-pilar-text');
+        const r = PacientModel.analitzarTextPilar(textarea.value, marques);
+        if (!r.reconegut) {
+            Swal.fire({ icon: 'info', title: 'No ho he entès', text: 'No he reconegut cap dada del pilar en aquest text. Omple els camps a mà.', confirmButtonColor: '#0ea5e9' });
+            return;
+        }
+        if (!r.camps.pilar && (!tipusPilar(card) || tipusPilar(card) === 'Sin pilar')) {
+            Swal.fire({ icon: 'info', title: 'Tria el tipus de pilar', text: "El text no diu quin tipus de pilar és. Tria'l al desplegable i torna a prémer \"Omplir els camps\".", confirmButtonColor: '#0ea5e9' });
+            return;
+        }
+        if (r.camps.pilar) fixarTipusPilar(card, r.camps.pilar);
+        PacientModel.CAMPS_PILAR.filter(k => k !== 'pilar').forEach(k => {
+            const inp = card.querySelector(`[data-clau="${k}"]`);
+            if (inp) inp.value = r.camps[k] || '';
+        });
+        card.querySelector('.f-pilar-detalls').open = true;
+        textarea.value = '';
+    }
+
+    // --- Lectura y guardado ------------------------------------------------------------
+
+    /**
+     * formData de PacientModel.planificarDesat en modo 'completar': por cada fila, solo
+     * los campos que han cambiado (así una fecha de la hoja no se reescribe como texto).
+     * Lo usan los botones y la vista previa de S5 (`window.formDataVistaPrevia`).
+     * @returns {{formData: object} | {error: string}}
+     */
+    function llegirPanel() {
+        if (!dades) return { error: 'El panell encara no ha carregat cap fila.' };
+        const implantes = [];
+        for (const card of filesDiv.querySelectorAll('.fila')) {
+            const original = JSON.parse(card.dataset.original);
+            const actual = {
+                pilar: tipusPilar(card),
+                pendent: card.querySelector('.f-pendent').checked,
+                que_falta: card.querySelector('.f-que-falta').value.trim()
+            };
+            card.querySelectorAll('[data-clau]').forEach(inp => { actual[inp.dataset.clau] = inp.value.trim(); });
+            if (actual.pilar === '' && card.querySelector('.f-pilar-tipus').value === '__altre') {
+                return { error: `Escriu el tipus de pilar de l'implant ${original.posicion} (o tria'l al desplegable).` };
+            }
+            const imp = { fila: Number(card.dataset.fila), posicion_esperada: card.dataset.posicion };
+            Object.keys(actual).forEach(k => {
+                // El pilar se compara por su tipo: un texto antiguo ("Mt-U 3mm") que el
+                // desplegable enseña como "Multi-unit" no se reescribe si no se cambia.
+                const abans = k === 'pendent' ? PacientModel.esCert(original[k])
+                    : k === 'pilar' ? PacientModel.normalitzarTipusPilar(original.pilar)
+                    : String(original[k] === undefined || original[k] === null ? '' : original[k]).trim();
+                if (actual[k] !== abans) imp[k] = actual[k];
+            });
+            implantes.push(imp);
+        }
+        const formData = { mode: 'completar', codi_acces: dades.pacient.codi_acces, implantes: implantes };
+        document.querySelectorAll('[data-pacient]').forEach(inp => { if (inp.value.trim()) formData[inp.dataset.pacient] = inp.value.trim(); });
+        return { formData: formData };
+    }
+
+    /** Vista previa (S5): el pasaporte tal como quedará con lo que hay en el panel. */
+    window.formDataVistaPrevia = function() {
+        const r = llegirPanel();
+        if (r.error) { Swal.fire({ icon: 'warning', title: 'Revisa-ho', text: r.error }); return null; }
+        return r.formData;
+    };
+
+    function opcions() {
+        return { avisSecretaria: !avisGrup.classList.contains('hidden') && avisTambe.checked };
+    }
+
+    function errorsHtml(res) {
+        return (res.errors || [res.message]).map(e => `<li>${escapeHtml(e)}</li>`).join('');
+    }
+
+    function resultatEnviament(res) {
+        const linies = [];
+        if (res.emailSent) linies.push(`✅ Pasaport enviat per email a ${escapeHtml(dades.pacient.email)}.`);
+        else if (res.emailError) linies.push(`⚠️ No s'ha pogut enviar l'email: ${escapeHtml(res.emailError)}`);
+        if (res.avisSecretaria && res.avisSecretaria.enviat) linies.push('✅ Avís enviat a la secretària (codi, missatge per WhatsApp i PDF).');
+        else if (res.avisSecretaria) linies.push(`⚠️ No s'ha pogut avisar la secretària: ${escapeHtml(res.avisSecretaria.error)}`);
+        return linies.map(l => `<p style="text-align:left;">${l}</p>`).join('');
+    }
+
+    btnDesar.addEventListener('click', () => {
+        const r = llegirPanel();
+        if (r.error) { Swal.fire({ icon: 'warning', title: 'Revisa-ho', text: r.error }); return; }
+        activarBotons(false);
+        servidor('desarPanell', [r.formData], res => {
+            if (!res.ok) {
+                activarBotons(true);
+                Swal.fire({ icon: 'error', title: "No s'ha pogut desar", html: `<ul style="text-align:left;">${errorsHtml(res)}</ul>` });
+                return;
+            }
+            Swal.fire({ icon: 'success', title: 'Desat', text: 'Els canvis són a la fulla. El que segueixi marcat com a pendent continua en taronja.', confirmButtonColor: '#0ea5e9' })
+                .then(carregar);
+        });
+    });
+
+    btnCompletar.addEventListener('click', () => {
+        const r = llegirPanel();
+        if (r.error) { Swal.fire({ icon: 'warning', title: 'Revisa-ho', text: r.error }); return; }
+        activarBotons(false);
+        btnCompletar.textContent = '⏳ Desant i enviant...';
+        servidor('completarIEnviarPanell', [r.formData, opcions()], res => {
+            if (!res.ok) {
+                pintar(dades);
+                Swal.fire({ icon: 'error', title: "No s'ha pogut desar", html: `<ul style="text-align:left;">${errorsHtml(res)}</ul>` });
+                return;
+            }
+            Swal.fire({ icon: 'success', title: 'Fitxa completada', html: `<p style="text-align:left;">Desat i fora del taronja.</p>${resultatEnviament(res)}`, confirmButtonColor: '#0ea5e9' })
+                .then(carregar);
+        });
+    });
+
+    btnEnviar.addEventListener('click', () => {
+        if (!dades) return;
+        activarBotons(false);
+        servidor('enviarPasaportPanell', [dades.pacient.codi_acces, opcions()], res => {
+            activarBotons(true);
+            if (!res.ok) { Swal.fire({ icon: 'error', title: "No s'ha pogut enviar", text: res.message }); return; }
+            Swal.fire({ icon: res.emailError ? 'warning' : 'success', title: 'Enviament', html: resultatEnviament(res) || '<p>No hi havia res a enviar.</p>', confirmButtonColor: '#0ea5e9' })
+                .then(carregar);
+        });
+    });
+
+    document.getElementById('btnRecarregar').addEventListener('click', carregar);
+    document.addEventListener('DOMContentLoaded', carregar);
+</script>
+</body>
+</html>

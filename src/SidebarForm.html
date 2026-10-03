@@ -174,6 +174,12 @@
         .pilar-enganxa { margin-top: 8px; }
         .pilar-enganxa textarea { width: 100%; box-sizing: border-box; font-family: 'Inter', sans-serif; font-size: 12px; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; resize: vertical; }
         .pilar-enganxa button { margin-top: 4px; padding: 6px 8px; font-size: 12px; }
+        /* Pendent (S3): al implante aún le falta algo; la fila sale en naranja en la hoja */
+        .pendent-block { margin-bottom: 12px; padding: 8px 10px; border-radius: 6px; border: 1px solid #e2e8f0; background: #f8fafc; }
+        .pendent-block.marcat { border-color: #fdba74; background: #fff7ed; }
+        .pendent-block .inline-check { margin-top: 0; }
+        .pendent-block .implant-que-falta { margin-top: 6px; }
+        .implant-section.es-pendent { border-left-color: #f97316; }
     </style>
 </head>
 <body>
@@ -262,10 +268,11 @@
 
             <hr>
 
-            <div class="checkbox-group form-group" style="margin-top: 20px; margin-bottom: 15px;">
+            <div class="checkbox-group form-group" style="margin-top: 20px; margin-bottom: 4px;">
                 <input type="checkbox" id="sendEmail" value="true" checked>
                 <label for="sendEmail">Enviar el pasaport per email al pacient</label>
             </div>
+            <div id="enviarAjuda" class="field-help hidden" style="margin-bottom: 15px;"></div>
 
             <div class="checkbox-group form-group hidden" id="avisSecretariaGrup" style="margin-bottom: 15px;">
                 <input type="checkbox" id="avisSecretaria" value="true">
@@ -359,6 +366,14 @@
                 <div><label>Referència:</label><input type="text" class="implant-field" name="pilar_ref" placeholder="Ex: HE48865"></div>
             </details>
         </div>
+        <!-- Se propone sola con "A cabeza de implante" (+PC, provisional); decide la Auxiliar. -->
+        <div class="pendent-block">
+            <label class="inline-check">
+                <input type="checkbox" class="implant-pendent">
+                ⏳ Pendent: encara hi falta alguna cosa (pilar definitiu, una modificació...)
+            </label>
+            <input type="text" class="implant-que-falta hidden" placeholder="Què falta? (opcional, ex: canvi de pilars en 4 mesos)">
+        </div>
         <div class="form-group">
             <label>Codi d'implant (ref.):</label>
             <input type="text" class="implant-field" name="cod_implante" required>
@@ -398,7 +413,8 @@
     const sendEmailCheckbox = document.getElementById('sendEmail');
     const avisSecretariaCheckbox = document.getElementById('avisSecretaria');
     const avisSecretariaGrup = document.getElementById('avisSecretariaGrup');
-    const implantContainer = document.getElementById('implantContainer'); 
+    const enviarAjuda = document.getElementById('enviarAjuda');
+    const implantContainer = document.getElementById('implantContainer');
 
     // Variable global para almacenar las opciones del catálogo
     let catalogOptions = null;
@@ -516,8 +532,57 @@
         const section = clone.querySelector('.implant-section');
         implantContainer.appendChild(clone);
         prepararPilar(section);
+        prepararPendent(section);
         updateImplantNumbers();
     };
+
+    // ===============================================
+    //  Pendent (S3): la Auxiliar marca el implante al que aún le falta algo. Se propone
+    //  sola con "A cabeza de implante" (el +PC provisional), pero una vez la toca ella,
+    //  manda lo que haya decidido.
+    // ===============================================
+    function prepararPendent(section) {
+        const casilla = section.querySelector('.implant-pendent');
+        casilla.addEventListener('change', () => {
+            casilla.dataset.manual = '1';
+            pintarPendent(section);
+        });
+    }
+
+    function fixarPendent(section, marcat) {
+        section.querySelector('.implant-pendent').checked = !!marcat;
+        pintarPendent(section);
+    }
+
+    function pintarPendent(section) {
+        const marcat = section.querySelector('.implant-pendent').checked;
+        section.querySelector('.pendent-block').classList.toggle('marcat', marcat);
+        section.classList.toggle('es-pendent', marcat);
+        section.querySelector('.implant-que-falta').classList.toggle('hidden', !marcat);
+        actualizarEnviar();
+    }
+
+    /** Al cambiar el tipo de pilar: vuelve a proponer, si la Auxiliar no lo ha decidido ya. */
+    function proposarPendent(section) {
+        const casilla = section.querySelector('.implant-pendent');
+        const pilar = section.querySelector('input[name="pilar"]').value;
+        if (!casilla || casilla.dataset.manual === '1' || !pilar) return;
+        fixarPendent(section, PacientModel.suggereixPendent({ pilar: pilar }));
+    }
+
+    function algunPendent() {
+        return Array.from(implantContainer.querySelectorAll('.implant-pendent')).some(c => c.checked);
+    }
+
+    /**
+     * Casilla "Enviar": marcada para un paciente nuevo sin nada pendiente; desmarcada si
+     * ya existe (no reenviar sin querer) o si algo queda pendiente (se enviará al
+     * completarlo). Si la Auxiliar la ha tocado, se respeta.
+     */
+    function actualizarEnviar() {
+        if (senseEmailCheckbox.checked || sendEmailCheckbox.dataset.manual === '1') return;
+        sendEmailCheckbox.checked = !pacienteActual && !algunPendent();
+    }
 
     // ===============================================
     //  Pilar: tipo obligatorio (desplegable) + detalles opcionales. Los detalles se
@@ -560,6 +625,7 @@
                 if (inp) inp.value = '';
             });
         }
+        proposarPendent(section);
     }
 
     /** Pone un tipo de pilar en el desplegable (o en "Un altre..." si no es de la lista). */
@@ -645,6 +711,7 @@
         if (implantContainer.querySelectorAll('.implant-section').length > 1) {
             sectionElement.remove();
             updateImplantNumbers();
+            actualizarEnviar();
         } else {
             Toast.fire({ icon: 'warning', title: 'Hi ha d\'haver almenys un implant.' });
         }
@@ -884,8 +951,10 @@
 
         patientSection.classList.remove('hidden');
 
-        // Paciente nuevo en pantalla: "Avisar la secretària" vuelve a su valor por defecto.
+        // Paciente nuevo en pantalla: "Avisar la secretària" y "Enviar" vuelven a su valor por defecto.
         avisSecretariaGrup.classList.add('hidden');
+        delete sendEmailCheckbox.dataset.manual;
+        mostrarUltimEnviament(res.found ? res.data : null);
 
         if (res.found) {
             const d = res.data;
@@ -966,6 +1035,25 @@
         if (senseEmailCheckbox.checked && !eraVisible) avisSecretariaCheckbox.checked = true;
 
         marcarFaltas();
+        actualizarEnviar();
+    }
+
+    /** Paciente que ya existe: cuándo se le envió el pasaporte por última vez. */
+    function mostrarUltimEnviament(d) {
+        if (!d) {
+            enviarAjuda.classList.add('hidden');
+            return;
+        }
+        const u = d.ultimEnviament;
+        let text = 'Aquest pacient ja existeix: no consta cap enviament del pasaport.';
+        if (u) {
+            const dies = Math.floor((Date.now() - u.ms) / 86400000);
+            const quan = dies <= 0 ? 'avui' : dies === 1 ? 'ahir' : `fa ${dies} dies`;
+            const com = u.tipus === 'pasaport' ? 'per email' : 'per la secretària';
+            text = `Aquest pacient ja existeix. Últim enviament del pasaport: ${quan} (${com}). Marca la casella si el vols tornar a enviar.`;
+        }
+        enviarAjuda.textContent = text;
+        enviarAjuda.classList.remove('hidden');
     }
 
     function marcarFaltas() {
@@ -1143,6 +1231,7 @@
     [emailInput, dniInput].forEach(inp => inp.addEventListener('input', marcarFaltas));
     senseEmailCheckbox.addEventListener('change', actualizarCasillas);
     senseDniCheckbox.addEventListener('change', actualizarCasillas);
+    sendEmailCheckbox.addEventListener('change', () => { sendEmailCheckbox.dataset.manual = '1'; });
 
     function datosPaciente() {
         return {
@@ -1167,20 +1256,19 @@
 
     // --- Guardado -------------------------------------------------------------------
 
-    implantForm.addEventListener('submit', function(e) {
-        e.preventDefault();
-
-        saveBtn.disabled = true;
-        saveBtn.innerHTML = '⏳ Desant...';
-
+    /**
+     * Lee y valida el formulario sin enseñar nada: lo usan "Desar-ho tot" y la vista
+     * previa (S5, `window.formDataVistaPrevia`), así las dos parten de los mismos datos.
+     * No incluye sendEmail / avisSecretaria (los añade el guardado).
+     * @returns {{formData: object, avisos: string[]} | {error: {titol, html?, text?, focus?}}}
+     */
+    function llegirFormulari() {
         // Mismas reglas que el servidor (PacientModel). La unicidad de la Cuenta solo la
         // puede comprobar el servidor, que tiene la hoja.
         const paciente = datosPaciente();
         const { errors, avisos } = PacientModel.validarPacient(paciente);
         if (errors.length) {
-            reactivarGuardar();
-            Swal.fire({ icon: 'warning', title: 'Falten dades del pacient', html: listaHtml(errors), confirmButtonColor: '#0ea5e9' });
-            return;
+            return { error: { titol: 'Falten dades del pacient', html: listaHtml(errors) } };
         }
 
         // Bloqueo duro: ningún implante puede guardarse sin diente resuelto. Sin esto,
@@ -1193,17 +1281,12 @@
             }
         });
         if (pendingSections.length > 0) {
-            reactivarGuardar();
             const nums = pendingSections.map(p => p.num).join(', ');
-            Swal.fire({
-                icon: 'warning',
-                title: 'Falta la posició de la dent',
-                text: `Tria la dent al desplegable taronja de l'implant ${nums} abans de desar. La posició és al document en paper (anotació al costat de l'etiqueta).`
-            }).then(() => {
-                pendingSections[0].el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                pendingSections[0].el.focus();
-            });
-            return;
+            return { error: {
+                titol: 'Falta la posició de la dent',
+                text: `Tria la dent al desplegable taronja de l'implant ${nums} abans de desar. La posició és al document en paper (anotació al costat de l'etiqueta).`,
+                focus: pendingSections[0].el
+            } };
         }
 
         // Posición escrita a mano: se lleva a la forma canónica ("pterigo 2" -> "Fisura
@@ -1216,13 +1299,11 @@
             if (!PacientModel.esPosicioValida(posInput.value)) malPosades.push({ num: index + 1, el: posInput });
         });
         if (malPosades.length > 0) {
-            reactivarGuardar();
-            Swal.fire({
-                icon: 'warning',
-                title: 'Posició no vàlida',
-                text: `La posició de l'implant ${malPosades.map(p => p.num).join(', ')} ha de ser una dent (11-48) o "Fisura pterigoidea" amb el seu quadrant (1 o 2). Tria-la de la llista.`
-            }).then(() => { malPosades[0].el.focus(); });
-            return;
+            return { error: {
+                titol: 'Posició no vàlida',
+                text: `La posició de l'implant ${malPosades.map(p => p.num).join(', ')} ha de ser una dent (11-48) o "Fisura pterigoidea" amb el seu quadrant (1 o 2). Tria-la de la llista.`,
+                focus: malPosades[0].el
+            } };
         }
 
         const implantsArray = [];
@@ -1238,6 +1319,9 @@
                 }
                 impData[input.name] = input.value.trim();
             });
+            // Casilla: se lee .checked (su .value siempre es "on").
+            impData.pendent = section.querySelector('.implant-pendent').checked;
+            impData.que_falta = impData.pendent ? section.querySelector('.implant-que-falta').value.trim() : '';
 
             if (isValid) {
                 implantsArray.push(impData);
@@ -1245,16 +1329,41 @@
         });
 
         if (implantsArray.length === 0) {
-            reactivarGuardar();
-            Swal.fire({ icon: 'error', title: 'Falten dades', text: 'Omple almenys un implant complet.' });
-            return;
+            return { error: { titol: 'Falten dades', text: 'Omple almenys un implant complet.', icon: 'error' } };
         }
 
-        const formData = Object.assign({}, paciente, {
+        return { formData: Object.assign({}, paciente, { implantes: implantsArray }), avisos: avisos };
+    }
+
+    function mostrarErrorFormulari(err) {
+        Swal.fire({ icon: err.icon || 'warning', title: err.titol, html: err.html, text: err.text, confirmButtonColor: '#0ea5e9' })
+            .then(() => {
+                if (!err.focus) return;
+                err.focus.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                err.focus.focus();
+            });
+    }
+
+    let pendentsDesats = 0;
+
+    implantForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '⏳ Desant...';
+
+        const lectura = llegirFormulari();
+        if (lectura.error) {
+            reactivarGuardar();
+            mostrarErrorFormulari(lectura.error);
+            return;
+        }
+        const avisos = lectura.avisos;
+        const formData = Object.assign({}, lectura.formData, {
             sendEmail: sendEmailCheckbox.checked ? 'true' : 'false',
-            avisSecretaria: senseEmailCheckbox.checked && avisSecretariaCheckbox.checked ? 'true' : 'false',
-            implantes: implantsArray
+            avisSecretaria: senseEmailCheckbox.checked && avisSecretariaCheckbox.checked ? 'true' : 'false'
         });
+        pendentsDesats = formData.implantes.filter(i => i.pendent).length;
         const enviar = () => llamarServidor('saveNewImplant', [formData], handleSaveResponse, handleError);
 
         if (avisos.length) {
@@ -1301,6 +1410,9 @@
         } else if (senseEmailCheckbox.checked) {
             msg += `<p style="color: #b45309; margin-top: 10px;">ℹ️ El pacient no té email: fes-li arribar el codi d'accés d'una altra manera.</p>`;
         }
+        if (pendentsDesats) {
+            msg += `<p style="color: #c2410c; margin-top: 10px;">⏳ ${pendentsDesats} implant(s) queden pendents: surten en taronja a la fulla i a la pestanya «Pendents». Quan els completis, selecciona la fila i prem <b>✏️ Completar i enviar</b>.</p>`;
+        }
 
         Swal.fire({
             icon: 'success',
@@ -1316,6 +1428,8 @@
         fijarCasilla(senseDniCheckbox, false, false);
         sendEmailCheckbox.disabled = false;
         sendEmailCheckbox.checked = true;
+        delete sendEmailCheckbox.dataset.manual;
+        enviarAjuda.classList.add('hidden');
         avisSecretariaGrup.classList.add('hidden');
         avisSecretariaCheckbox.checked = false;
         cuentaAviso.classList.add('hidden');
@@ -1420,6 +1534,8 @@
             const currentSection = sections[sections.length - 1];
             populateThisSection(currentSection, data);
         });
+        actualizarEnviar();
+        const nPendents = container.querySelectorAll('.implant-pendent:checked').length;
 
         // Contador de dudas (fire-and-forget): datos reales para decidir si algún día
         // merece la pena que la IA proponga posiciones candidatas.
@@ -1440,6 +1556,7 @@
                     <ul style="margin-top: 8px;">
                         <li>Comprova que la <b>POSICIÓ (dent)</b> sigui correcta, també si és una <b>fisura pterigoidea</b> (quadrant 1 o 2).</li>
                         <li>Comprova el <b>PILAR</b>: "+PC" és <b>A cabeza de implante</b>, i als MULTI-UNIT revisa els <b>mm</b>, l'angulació i la referència (escrits a mà poden tenir errors).</li>
+                        ${nPendents ? `<li>${nPendents} implant(s) amb +PC surten marcats com a <b>⏳ Pendent</b>. Desmarca'ls si no esperen res més.</li>` : ''}
                     </ul>
                 </div>
             `,
