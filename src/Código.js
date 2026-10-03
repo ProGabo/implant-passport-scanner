@@ -471,6 +471,8 @@ function prepararHoja_(sheet, headers) {
 
   sheet.getRange(2, idx.pendent + 1, nFiles, 1)
       .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+  // "Què falta" como texto: "+PC, falta el pilar" no debe convertirse en fórmula.
+  if (idx.que_falta !== undefined) sheet.getRange(2, idx.que_falta + 1, nFiles, 1).setNumberFormat('@');
 
   // Formato condicional: se reconoce el propio por su fórmula y se sustituye.
   const formula = '=$' + columnaLletra_(idx.pendent + 1) + '2=TRUE';
@@ -622,12 +624,15 @@ function desarPanell_(formData, completar) {
     const { idx } = PacientModel.indexarCapcaleres(headers);
     const esText = {};
     PacientModel.COLUMNES.forEach(c => { esText[c.clau] = !!c.text; });
+    // Solo las celdas que cambia cada fila: las demás (una fecha, un número) se quedan
+    // exactamente como estaban.
     plan.files_hoja.forEach((n, i) => {
-      plan.claus_tocades.forEach(k => {
+      plan.claus_per_fila[i].forEach(k => {
         if (idx[k] === undefined) return;
         const cel = sheet.getRange(n, idx[k] + 1);
         const v = plan.filas[i][k];
-        if (esText[k]) cel.setNumberFormat('@');
+        // Un texto que empiece por = + - @ sería una fórmula: como texto literal.
+        if (esText[k] || (typeof v === 'string' && /^[=+\-@]/.test(v))) cel.setNumberFormat('@');
         cel.setValue(esText[k] && v !== '' && v !== null ? String(v) : v);
       });
       ponerCasillas(sheet, headers, n, 1);
@@ -919,7 +924,7 @@ function enviarAvisSecretaria_(paciente, destiProva) {
  */
 function enviarPasaport_(codi, opcions) {
   const o = opcions || {};
-  const res = { emailSent: false, emailError: null, avisSecretaria: null };
+  const res = { emailSent: false, emailError: null, emailDesti: '', avisSecretaria: null };
   if (!o.email && !o.avisSecretaria) return res;
   const { objetos } = leerPacientes(hojaPacientes());
   const p = PacientModel.pacientsUnics(objetos.filter(x => mismoCodigo(x.codi_acces, codi)))[0];
@@ -929,6 +934,7 @@ function enviarPasaport_(codi, opcions) {
   }
   if (o.email && String(p.email).trim()) {
     const r = sendPassportEmail_(p.email, p.nombre, p.codi_acces);
+    res.emailDesti = p.email;
     res.emailSent = r.ok;
     res.emailError = r.ok ? null : r.message;
   }

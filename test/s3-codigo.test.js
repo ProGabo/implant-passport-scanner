@@ -233,3 +233,40 @@ test('obrirPanellPendents abre el sidebar del panel', () => {
   assert.equal(sidebars[0].nom, 'PanelPendents');
   assert.equal(sidebars[0].titol, 'Completar i enviar');
 });
+
+test('revisión: "Què falta" se guarda como texto (un "+PC..." no es una fórmula) en el alta y en el panel', () => {
+  const ss = libro();
+  const { ctx } = cargarCodigo(ss);
+  const col = H.indexOf('Què falta') + 1;
+  const r = ctx.saveNewImplant(Object.assign({}, NOU, { sendEmail: 'false', implantes: [Object.assign({}, NOU.implantes[0], { que_falta: '+PC, falta el pilar' })] }));
+  assert.equal(r.ok, true, r.message);
+  assert.equal(pacientes(ss).formats.get('6,' + col), '@');
+  ctx.desarPanell({ codi_acces: 'K7XH3P', implantes: [{ fila: 3, posicion_esperada: '26', que_falta: '-canvi de pilars' }] });
+  assert.equal(pacientes(ss).formats.get('3,' + col), '@');
+  assert.equal(celda(ss, 3, 'que_falta'), '-canvi de pilars');
+});
+
+test('revisión: el panel solo escribe las celdas que cambia cada fila (una fecha de otra fila no se toca)', () => {
+  const ss = libro();
+  const { ctx } = cargarCodigo(ss);
+  const colData = H.indexOf('Data de col·locació') + 1;
+  const data = new Date(2026, 8, 12);
+  pacientes(ss).set(3, colData, data);
+  const r = ctx.desarPanell({ codi_acces: 'K7XH3P', implantes: [
+    { fila: 2, posicion_esperada: '25', fecha_colocacion: '13/09/2026' },
+    { fila: 3, posicion_esperada: '26', pilar: 'Multi-unit' }
+  ] });
+  assert.equal(r.ok, true, r.message);
+  assert.equal(pacientes(ss).get(3, colData), data); // el mismo objeto: no se ha reescrito
+  assert.equal(celda(ss, 2, 'fecha_colocacion'), '13/09/2026');
+  assert.equal(celda(ss, 2, 'pilar'), 'A cabeza de implante');
+});
+
+test('revisión: el resultado del envío dice a qué email se ha enviado', () => {
+  const ss = libro();
+  const { ctx } = cargarCodigo(ss);
+  const r = ctx.completarIEnviarPanell({ codi_acces: 'J0AN22', email: 'joan@x.cat', implantes: [{ fila: 5, posicion_esperada: '11' }] }, {});
+  assert.equal(r.ok, true, r.message);
+  assert.equal(r.emailSent, true);
+  assert.equal(r.emailDesti, 'joan@x.cat');
+});

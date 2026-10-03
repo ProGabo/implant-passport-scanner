@@ -43,7 +43,7 @@ function crearPacientModel() {
     // Ciclo de vida (S3): a este implante aún le falta algo. Lo marca la Auxiliar; es
     // interno y nunca sale hacia el paciente.
     { clau: 'pendent', capcalera: 'Pendent', grup: 'implant', casella: true, alies: ['Pendiente'] },
-    { clau: 'que_falta', capcalera: 'Què falta', grup: 'implant', alies: ['Que falta', 'Qué falta'] }
+    { clau: 'que_falta', capcalera: 'Què falta', grup: 'implant', text: true, alies: ['Que falta', 'Qué falta'] }
   ];
 
   const CAPCALERES = COLUMNES.map(c => c.capcalera);
@@ -909,9 +909,11 @@ function crearPacientModel() {
    * @param {any[]} headers  fila 1 de la hoja (leerPacientes().headers)
    * @param {any[][]} files  el resto de filas, crudas (leerPacientes().files)
    * @returns {{ errors: string[], avisos: string[], mode: string, codi: string, paciente: object,
-   *   filas: object[], totes: object[], files_hoja: number[], claus_tocades: string[] }}
+   *   filas: object[], totes: object[], files_hoja: number[], claus_tocades: string[],
+   *   claus_per_fila: string[][] }}
    *   `filas`: las nuevas (afegir) o las reescritas (completar). `totes`: todas las filas
-   *   del paciente tal como quedarán. `codi` vacío = paciente nuevo.
+   *   del paciente tal como quedarán. `codi` vacío = paciente nuevo. `claus_per_fila`
+   *   (completar): las claves que cambia cada fila, para escribir solo esas celdas.
    */
   function planificarDesat(headers, files, formData) {
     const fd = formData || {};
@@ -923,7 +925,7 @@ function crearPacientModel() {
     const errors = [];
     const avisos = [];
     const resultat = extra => Object.assign({ errors, avisos, mode, codi: '', paciente: null,
-      filas: [], totes: [], files_hoja: [], claus_tocades: [] }, extra);
+      filas: [], totes: [], files_hoja: [], claus_tocades: [], claus_per_fila: [] }, extra);
 
     if (mode === 'afegir') {
       const paciente = pacientDelFormulari(fd);
@@ -980,6 +982,7 @@ function crearPacientModel() {
     const vistes = {};
     const filesHoja = [];
     const filas = [];
+    const clausPerFila = [];
     const tocades = {};
     implants.forEach(imp => {
       const n = parseInt(imp.fila, 10);
@@ -994,6 +997,7 @@ function crearPacientModel() {
       }
       const canvis = campsImplant(imp);
       Object.keys(canvis).forEach(k => { tocades[k] = true; });
+      clausPerFila.push(CLAUS_IMPLANT.filter(k => k in canvis));
       filesHoja.push(n);
       filas.push(Object.assign({}, o, canvis));
     });
@@ -1013,7 +1017,7 @@ function crearPacientModel() {
       totes.push(omplirBuits(perFila[i + 2] || o, nou));
     });
     return resultat({ codi, paciente, filas: filas.map(f => omplirBuits(f, nou)), totes,
-      files_hoja: filesHoja, claus_tocades: CLAUS_IMPLANT.filter(k => tocades[k]) });
+      files_hoja: filesHoja, claus_tocades: CLAUS_IMPLANT.filter(k => tocades[k]), claus_per_fila: clausPerFila });
   }
 
   /**

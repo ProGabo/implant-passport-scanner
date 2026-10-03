@@ -181,3 +181,13 @@ test('portal: Pendent y Què falta nunca salen hacia el paciente', () => {
   assert.ok(!('que_falta' in p));
   assert.ok(!PO.CAMPS_PORTAL.includes('pendent') && !PO.CAMPS_PORTAL.includes('que_falta'));
 });
+
+test('planificarDesat completar: claus_per_fila dice qué cambia cada fila', () => {
+  const r = PM.planificarDesat(H, hoja(), { mode: 'completar', codi_acces: 'K7XH3P', implantes: [
+    { fila: 2, posicion_esperada: '25', que_falta: 'x' },
+    { fila: 3, posicion_esperada: '26', pilar: 'Multi-unit', pendent: false }
+  ] });
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.claus_per_fila, [['que_falta'], ['pilar', 'pendent']]);
+  assert.equal(PM.COLUMNES.find(c => c.clau === 'que_falta').text, true);
+});
