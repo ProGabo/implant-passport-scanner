@@ -316,9 +316,7 @@ function getPatientDataVerbose_(code) {
     }
     if (!r.codi) return { ok: true, found: false, message: 'No se encontraron implantes para este código.' };
 
-    const implantes = objetos
-      .filter(o => mismoCodigo(o.codi_acces, r.codi))
-      .map(o => PortalModel.perAlPortal(o));
+    const implantes = implantsPerAlPacient_(objetos.filter(o => mismoCodigo(o.codi_acces, r.codi)));
     return { ok: true, found: true, codi_acces: String(r.codi).trim().toUpperCase(), implantes: implantes };
 
   } catch (err) {
@@ -995,17 +993,13 @@ function provarAvisSecretaria() {
 
 /**
  * Pasaporte en PDF generado en el servidor, con los mismos datos que ve el paciente en
- * el portal (lista blanca, DNI enmascarado). S5 lo convertirá en el renderer único.
+ * el portal (lista blanca, DNI enmascarado). Mismo renderer que el portal y la vista previa.
  * @returns {Blob}
  */
 function generarPasaportePDF_(codi) {
   const dades = getPatientDataVerbose_(codi);
   if (!dades.ok || !dades.found) throw new Error('No hi ha implants per al codi ' + codi);
-  const pacient = dades.implantes[0];
-  const avui = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy');
-  const html = PortalModel.htmlPasaporte(pacient, dades.implantes, dades.codi_acces, avui);
-  const nom = 'Pasaporte_' + String(pacient.nombre || 'Paciente').trim().replace(/\s+/g, '_') + '.pdf';
-  return Utilities.newBlob(html, 'text/html', nom).getAs('application/pdf').setName(nom);
+  return pdfPasaport_(dades.implantes, dades.codi_acces);
 }
 
 /** Primera vez que salta el límite del portal: aviso al responsable (ALERT_EMAIL). */
@@ -1041,61 +1035,18 @@ function getImplantOptions() {
       return { ok: false, message: "No existeix la pestanya del catàleg d'implants." };
     }
 
+    // Cada columna del catálogo es una lista independiente (updateCatalog_ las ordena por
+    // separado): la fila NO empareja marca y modelo. Los pares salen de la hoja Pacientes.
     const data = sheet.getDataRange().getValues();
-    if (data.length < 2) {
-      // Si solo tiene cabeceras, devuelve listas vacías
-      return { ok: true, options: { brands: [], modelsByBrand: {}, allConnections: [] } };
-    }
-
-    const headers = data[0].map(h => String(h).trim());
-    const dataRows = data.slice(1);
-    
-    // Obtener los índices de las columnas importantes
-    const idxMarca = headers.indexOf('Marca');
-    const idxModelo = headers.indexOf('Modelo');
-    const idxConexion = headers.indexOf('Conexión');
-    
-    // Estructuras para almacenar las opciones
-    const options = {
-      brands: new Set(),
-      modelsByBrand: {}, // { 'MarcaA': [ModeloX, ModeloY], ... }
-      allConnections: new Set()
+    const headers = (data[0] || []).map(h => PacientModel.normalitzar(h));
+    const columna = nom => {
+      const i = headers.indexOf(nom);
+      return i === -1 ? [] : data.slice(1).map(r => r[i]);
     };
-    
-    // Recorrer los datos y construir las listas
-    dataRows.forEach(row => {
-      const marca = row[idxMarca] ? String(row[idxMarca]).trim() : null;
-      const modelo = row[idxModelo] ? String(row[idxModelo]).trim() : null;
-      const conexion = row[idxConexion] ? String(row[idxConexion]).trim() : null;
-
-      if (marca) {
-        options.brands.add(marca);
-        
-        if (!options.modelsByBrand[marca]) {
-          options.modelsByBrand[marca] = new Set();
-        }
-        if (modelo) {
-          options.modelsByBrand[marca].add(modelo);
-        }
-      }
-      
-      if (conexion) {
-        options.allConnections.add(conexion);
-      }
-    });
-
-    // Convertir Sets a Arrays ordenados
-    const result = {
-      brands: Array.from(options.brands).sort(),
-      allConnections: Array.from(options.allConnections).sort(),
-      modelsByBrand: {}
-    };
-    
-    for (const brand in options.modelsByBrand) {
-      result.modelsByBrand[brand] = Array.from(options.modelsByBrand[brand]).sort();
-    }
-
-    return { ok: true, options: result };
+    const { objetos } = leerPacientes(hojaPacientes());
+    const options = ComprovacioModel.opcionsImplant(
+      { marques: columna('marca'), models: columna('modelo'), connexions: columna('conexion') }, objetos);
+    return { ok: true, options: options };
 
   } catch (e) {
     Logger.log('Error en getImplantOptions: ' + e);
@@ -1107,6 +1058,8 @@ function getImplantOptions() {
  * Actualiza el catálogo manteniendo listas ÚNICAS e independientes por columna.
  * Si la Marca ya existe, no la añade, aunque el modelo sea nuevo.
  * Compacta las columnas para que no queden huecos vacíos.
+ * Ojo: como cada columna se ordena aparte, una fila del catálogo no es un par marca-modelo
+ * (getImplantOptions empareja desde la hoja Pacientes y descarta las erratas aprendidas).
  */
 function updateCatalog_(newItem) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -2029,6 +1982,143 @@ function actualizarEmailsDesdeQuartup() {
   }
 }
 
+// ==========================================
+//  PASAPORT: VISTA PRÈVIA I PDF (S5)
+// ==========================================
+// Un solo renderer (PortalModel.htmlPasaporte) para el portal, la vista previa y el PDF,
+// que siempre convierte el servidor: así los tres son iguales por construcción (ADR 0004).
+
+// Disposición elegida por el usuario viendo PDFs reales (S5, paso 1).
+const VARIANT_PASAPORT = 'A';
+const LOGO_PASAPORT_URL = 'https://i.postimg.cc/tTX6JQ42/DR-PI-ESTELLER.png';
+
+/** Incluye un archivo HTML (sin scriptlets) en una plantilla: <?!= include_('VistaPrevia') ?>. */
+function include_(nom) {
+  return HtmlService.createHtmlOutputFromFile(nom).getContent();
+}
+
+/** ¿Este implante espera todavía su pilar? Regla de S3 (casilla Pendent + pilar vacío). */
+function pilarPendent_(o) {
+  if (typeof PacientModel.pilarPendent === 'function') return PacientModel.pilarPendent(o);
+  // Mientras S3 no esté integrado: la misma regla acordada.
+  return PacientModel.esCert(o.pendent) && !String(o.pilar === undefined || o.pilar === null ? '' : o.pilar).trim();
+}
+
+/** Filas de un paciente -> lo que puede ver el paciente, ordenado por posición. */
+function implantsPerAlPacient_(objetos) {
+  return objetos
+    .map(o => PortalModel.perAlPortal(o, { pilarPendiente: pilarPendent_(o) }))
+    .sort((a, b) => PacientModel.ordrePosicio(a.posicion) - PacientModel.ordrePosicio(b.posicion));
+}
+
+/**
+ * El logo incrustado (data URI): el PDF no depende de que la URL externa responda en el
+ * momento de convertir. En caché 6 h; si algo falla, la URL.
+ */
+function logoPasaport_() {
+  const cache = CacheService.getScriptCache();
+  try {
+    const desat = cache.get('LOGO_PASAPORT');
+    if (desat) return desat;
+    const r = UrlFetchApp.fetch(LOGO_PASAPORT_URL, { muteHttpExceptions: true });
+    if (r.getResponseCode() !== 200) return LOGO_PASAPORT_URL;
+    const uri = 'data:image/png;base64,' + Utilities.base64Encode(r.getContent());
+    try { cache.put('LOGO_PASAPORT', uri, 21600); } catch (e) { /* más de 100 KB: sin caché */ }
+    return uri;
+  } catch (e) {
+    return LOGO_PASAPORT_URL;
+  }
+}
+
+function htmlPasaport_(implants, codi, opcions) {
+  const avui = Utilities.formatDate(new Date(ahoraMs()), Session.getScriptTimeZone(), 'dd/MM/yyyy');
+  return PortalModel.htmlPasaporte(implants[0] || {}, implants, codi, avui,
+    Object.assign({ variant: VARIANT_PASAPORT, logo: logoPasaport_() }, opcions));
+}
+
+function pdfPasaport_(implants, codi) {
+  const nom = 'Pasaporte_' + String((implants[0] && implants[0].nombre) || 'Paciente').trim().replace(/\s+/g, '_') + '.pdf';
+  return Utilities.newBlob(htmlPasaport_(implants, codi), 'text/html', nom).getAs('application/pdf').setName(nom);
+}
+
+/**
+ * Cómo quedarán las filas del paciente al guardar este formulario: la misma función que usa
+ * el guardado (PacientModel.planificarDesat, de S3), para que la vista previa y lo guardado
+ * no puedan ser distintos.
+ */
+function planificarDesat_(headers, files, formData) {
+  if (typeof PacientModel.planificarDesat === 'function') return PacientModel.planificarDesat(headers, files, formData);
+  // Mientras S3 no esté integrado: añadir implantes a las filas que ya tenga el paciente.
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  const esNou = !formData.codi_acces || formData.codi_acces === 'GENERAR';
+  const codi = esNou ? '' : String(formData.codi_acces).trim().toUpperCase();
+  const paciente = { codi_acces: codi, nombre: String(formData.nombre || '').trim(), dni: formData.dni,
+    sense_dni: formData.sense_dni, cuenta_quartup: formData.cuenta_quartup, email: formData.email };
+  const existents = esNou ? [] : files.map(f => PacientModel.filaAObjecte(f, idx)).filter(o => mismoCodigo(o.codi_acces, codi));
+  const noves = (formData.implantes || []).map(imp => Object.assign({}, imp, paciente));
+  return { errors: [], avisos: [], mode: 'afegir', codi: codi, paciente: paciente, filas: noves, totes: existents.concat(noves) };
+}
+
+/**
+ * El pasaporte que saldría al guardar este formulario y los avisos de la comprobación.
+ * Sin escribir nada en la hoja.
+ * @returns {{ok, errors?, avisos?, implants?, codi?}}
+ */
+function calcularVistaPrevia_(formData) {
+  const { headers, files, objetos } = leerPacientes(hojaPacientes());
+  const pla = planificarDesat_(headers, files, formData || {});
+  if (pla.errors && pla.errors.length) return { ok: false, errors: pla.errors, message: pla.errors.join('\n') };
+  // Las filas del propio paciente no cuentan como "conocidas": un error no se daría por bueno.
+  const historic = pla.codi ? objetos.filter(o => !mismoCodigo(o.codi_acces, pla.codi)) : objetos;
+  const avisos = (pla.avisos || []).concat(
+    ComprovacioModel.comprovarPasaport(pla.totes, historic, { avui: new Date(ahoraMs()) }));
+  return { ok: true, avisos: avisos, implants: implantsPerAlPacient_(pla.totes), codi: pla.codi || "es generarà en desar" };
+}
+
+/**
+ * Panel: abre (o actualiza) la ventana de la vista previa, no modal, para poder seguir
+ * corrigiendo en el panel con ella abierta. Solo mirar, imprimir y descargar: se guarda
+ * desde el panel.
+ * @returns {{ok, avisos?, errors?, message?}}
+ */
+function vistaPreviaPasaport(formData) {
+  exigirUsuariIntern_();
+  try {
+    const r = calcularVistaPrevia_(formData);
+    if (!r.ok) return r;
+    const t = HtmlService.createTemplateFromFile('VistaPreviaFinestra');
+    t.pasaport = htmlPasaport_(r.implants, r.codi, { nomesCos: true });
+    t.avisos = r.avisos;
+    // Dentro de un <script>: sin "<" literal, un "</script>" en un campo no cierra nada.
+    t.formDataJson = JSON.stringify(formData || {}).replace(/</g, '\\u003c');
+    SpreadsheetApp.getUi().showModelessDialog(t.evaluate().setWidth(1000).setHeight(720), 'Vista prèvia del pasaport');
+    return { ok: true, avisos: r.avisos };
+  } catch (e) {
+    Logger.log('Error en vistaPreviaPasaport: ' + e);
+    return { ok: false, message: 'No s\'ha pogut preparar la vista prèvia: ' + e.message };
+  }
+}
+
+/** Ventana de la vista previa: el PDF de lo que se está viendo, para descargarlo. */
+function pdfVistaPreviaPasaport(formData) {
+  exigirUsuariIntern_();
+  const r = calcularVistaPrevia_(formData);
+  if (!r.ok) return r;
+  const b = pdfPasaport_(r.implants, r.codi);
+  return { ok: true, nom: b.getName(), base64: Utilities.base64Encode(b.getBytes()) };
+}
+
+/**
+ * Portal: el PDF del pasaporte, que la página pide en segundo plano al entrar. Mismas
+ * protecciones que la entrada (límite de intentos, lista blanca): pasa por initiateLogin.
+ */
+function pdfPortal_(code) {
+  const r = initiateLogin(code);
+  if (!r.ok) return r;
+  const b = pdfPasaport_(r.implantes, r.codi_acces);
+  return { ok: true, nom: b.getName(), base64: Utilities.base64Encode(b.getBytes()) };
+}
+
 // =================================================================
 // NUEVA API PARA CONECTAR EL PASAPORTE CON NETLIFY
 // =================================================================
@@ -2045,6 +2135,9 @@ function doPost(e) {
       
     } else if (action === 'initiateLogin') {
       result = initiateLogin(params.code);
+
+    } else if (action === 'pdfPasaporte') {
+      result = pdfPortal_(params.code);
 
     } else {
       result = { ok: false, message: 'Acción no reconocida por el servidor.' };

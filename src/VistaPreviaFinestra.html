@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #eef1f5; color: #1f2937; }
+    .barra { position: sticky; top: 0; z-index: 2; background: #fff; border-bottom: 1px solid #d0d7e2;
+             padding: 8px 14px; display: flex; gap: 8px; align-items: center; }
+    .barra button { padding: 8px 14px; border-radius: 5px; border: 1px solid #02234f; background: #02234f;
+                    color: #fff; cursor: pointer; font-size: 13px; }
+    .barra button.sec { background: #fff; color: #02234f; }
+    .barra button:disabled { opacity: .6; cursor: wait; }
+    #estat { font-size: 12px; color: #555; }
+    .avisos { max-width: 794px; margin: 14px auto 0 auto; background: #fffbeb; border: 1px solid #f59e0b;
+              border-left: 5px solid #f59e0b; border-radius: 6px; padding: 10px 14px; font-size: 13px; color: #78350f; }
+    .avisos ul { margin: 6px 0 0 0; padding-left: 18px; }
+    .avisos.cap { background: #f0fdf4; border-color: #22c55e; color: #166534; }
+    .full { background: #fff; width: 794px; margin: 14px auto 30px auto; padding: 32px; box-sizing: border-box;
+            box-shadow: 0 1px 6px rgba(0,0,0,.18); }
+    @media print {
+        .barra, .avisos { display: none; }
+        body { background: #fff; }
+        .full { box-shadow: none; margin: 0; width: auto; padding: 0; }
+    }
+</style>
+</head>
+<body>
+    <div class="barra">
+        <button type="button" onclick="window.print()">🖨️ Imprimir</button>
+        <button type="button" class="sec" id="descarregar">⬇️ Descarregar PDF</button>
+        <span id="estat">Així ho veurà el pacient. Per corregir, fes-ho al panell i torna a prémer «Vista prèvia».</span>
+    </div>
+    <? if (avisos.length) { ?>
+    <div class="avisos">
+        <b>⚠️ Comprova-ho abans de desar:</b>
+        <ul><? avisos.forEach(function (a) { ?><li><?= a ?></li><? }); ?></ul>
+    </div>
+    <? } else { ?>
+    <div class="avisos cap">✅ No he trobat res estrany.</div>
+    <? } ?>
+    <div class="full"><?!= pasaport ?></div>
+<script>
+    const FORM = <?!= formDataJson ?>;
+    document.getElementById('descarregar').addEventListener('click', function () {
+        const btn = this, estat = document.getElementById('estat');
+        btn.disabled = true;
+        estat.textContent = 'Preparant el PDF...';
+        google.script.run
+            .withSuccessHandler(function (r) {
+                btn.disabled = false;
+                if (!r || !r.ok) { estat.textContent = "No s'ha pogut fer el PDF: " + ((r && r.message) || ''); return; }
+                const bytes = Uint8Array.from(atob(r.base64), c => c.charCodeAt(0));
+                const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+                const a = document.createElement('a');
+                a.href = url; a.download = r.nom;
+                document.body.appendChild(a); a.click(); a.remove();
+                estat.textContent = 'PDF descarregat: ' + r.nom;
+            })
+            .withFailureHandler(function (e) { btn.disabled = false; estat.textContent = 'Error: ' + e.message; })
+            .pdfVistaPreviaPasaport(FORM);
+    });
+</script>
+</body>
+</html>

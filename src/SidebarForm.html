@@ -279,6 +279,7 @@
                 <label for="avisSecretaria">Avisar la secretària (li arriba un email amb el codi, el missatge per WhatsApp i el PDF)</label>
             </div>
 
+            <?!= include_('VistaPrevia') ?>
             <button type="submit" class="btn-primary" id="save-btn" style="font-size: 14px; padding: 12px;">💾 Desar-ho tot</button>
         </form>
     </div>
@@ -1579,6 +1580,21 @@
         addImplantSection();
         loadImplantOptions();
     });
+</script>
+<script>
+    // Vista prèvia (S5): el mismo formData que se guardaría. llegirFormulari() es de S3; hasta
+    // integrarlo, se lee igual que el submit (paciente + campos de cada implante).
+    window.formDataVistaPrevia = function () {
+        if (typeof llegirFormulari === 'function') return llegirFormulari();
+        const implantes = [];
+        implantContainer.querySelectorAll('.implant-section').forEach(section => {
+            const imp = {};
+            section.querySelectorAll('.implant-field').forEach(input => { imp[input.name] = input.value.trim(); });
+            implantes.push(imp);
+        });
+        if (!implantes.length) return { error: 'Encara no hi ha cap implant.' };
+        return Object.assign(datosPaciente(), { implantes: implantes });
+    };
 </script>
 </body>
 </html>

@@ -1,0 +1,62 @@
+<!-- Vista prèvia del pasaport (S5). Bloque reutilizable: lo incluyen el panel de alta
+     (SidebarForm) y el de completar (PanelPendents, S3) con <?!= include_('VistaPrevia') ?>.
+     Cada panel define window.formDataVistaPrevia(): el mismo formData que guardaría
+     (o {error: '...'} si aún no se puede). Sin scriptlets: include_ lo inserta tal cual. -->
+<style>
+    .vp-btn { width: 100%; margin: 6px 0 10px 0; padding: 10px; font-size: 14px; border-radius: 6px;
+              border: 1px solid #02234f; background: #fff; color: #02234f; cursor: pointer; font-weight: 600; }
+    .vp-btn:disabled { opacity: .6; cursor: wait; }
+    .vp-estat { font-size: 12px; margin: -4px 0 10px 0; }
+    .vp-estat.ok { color: #166534; }
+    .vp-estat.avis { color: #b45309; }
+    .vp-estat.error { color: #991b1b; }
+</style>
+<button type="button" class="vp-btn" id="vpBtn">👁️ Vista prèvia del pasaport</button>
+<div class="vp-estat" id="vpEstat"></div>
+<script>
+(function () {
+    const btn = document.getElementById('vpBtn');
+    const estat = document.getElementById('vpEstat');
+    const TXT = btn.innerHTML;
+
+    function mostrar(classe, text) {
+        estat.className = 'vp-estat ' + classe;
+        estat.textContent = text;
+    }
+
+    /**
+     * Abre o actualiza la ventana (no modal) con el pasaporte tal como quedará al guardar.
+     * @returns {Promise<{ok: boolean, avisos?: string[], errors?: string[], message?: string}>}
+     */
+    window.obrirVistaPrevia = function (formData) {
+        return new Promise(resolve => {
+            google.script.run
+                .withSuccessHandler(r => resolve(r || { ok: false, message: 'Sense resposta del servidor.' }))
+                .withFailureHandler(e => resolve({ ok: false, message: e && e.message ? e.message : String(e) }))
+                .vistaPreviaPasaport(formData);
+        });
+    };
+
+    btn.addEventListener('click', function () {
+        const fd = typeof window.formDataVistaPrevia === 'function' ? window.formDataVistaPrevia() : null;
+        if (!fd || fd.error) {
+            mostrar('error', (fd && fd.error) || 'Aquest panell no té vista prèvia.');
+            return;
+        }
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Preparant la vista prèvia...';
+        mostrar('', '');
+        window.obrirVistaPrevia(fd).then(r => {
+            btn.disabled = false;
+            btn.innerHTML = TXT;
+            if (!r.ok) {
+                mostrar('error', (r.errors && r.errors.join(' ')) || r.message || "No s'ha pogut obrir.");
+            } else if (r.avisos && r.avisos.length) {
+                mostrar('avis', '⚠️ ' + r.avisos.length + (r.avisos.length === 1 ? ' avís' : ' avisos') + ' a la finestra. Pots corregir aquí amb la finestra oberta i tornar a prémer el botó.');
+            } else {
+                mostrar('ok', "✅ Cap avís. Pots corregir aquí amb la finestra oberta i tornar a prémer el botó.");
+            }
+        });
+    });
+})();
+</script>

@@ -5,8 +5,6 @@
     <title>Consulta implantes - Clínica Dental</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-
     <style>
       body {
         font-family: 'Segoe UI', Arial, sans-serif;
@@ -81,6 +79,26 @@
       .pdf-btn:hover {
         background: white;
         color: #02234f;
+      }
+      .pdf-btn-sec { background: white; color: #02234f; }
+      .pdf-btn-sec:hover { background: #eef4fb; }
+      .pdf-btn:disabled, .pdf-btn:disabled:hover { background: #9bbddf; border-color: #9bbddf; color: white; }
+      .pdf-acciones { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+      .pdf-acciones .pdf-btn { margin: 0; min-width: 170px; padding: 12px 18px; font-size: 15px; }
+      .pdf-estado { font-size: 13px; color: #666; margin: 10px 0 0 0; text-align: center; }
+
+      /* Móvil: la mayoría de pacientes lo abren desde el teléfono. */
+      @media (max-width: 520px) {
+        body { padding: 12px 8px; }
+        .card { padding: 20px 14px; border-radius: 12px; }
+        .logo { width: 170px; }
+        h2 { font-size: 22px; }
+        input[type=text], input[type=email] { width: 100%; margin-bottom: 8px; }
+        #formCode button, #retrieveEmailForm button { width: 100%; }
+        .pdf-acciones .pdf-btn { flex: 1 1 100%; }
+        td { padding: 8px 6px; font-size: 15px; }
+        td.label { width: 38%; }
+        .tooth-btn { padding: 10px 14px; }
       }
 
       .tooth-btn {
@@ -165,61 +183,20 @@
 
       <div id="status"></div>
 
-      <div id="downloadAction" style="display:none; text-align:center; margin-top:25px; margin-bottom:10px;">
-        <button onclick="generatePDF()" class="pdf-btn">
-          📄 Descargar Pasaporte PDF
-        </button>
+      <!-- El PDF lo hace el servidor (el mismo que ve la clínica) y se pide en segundo plano
+           nada más entrar: al pulsar, casi siempre ya está. -->
+      <div id="downloadAction" style="display:none; margin-top:25px; margin-bottom:10px;">
+        <div class="pdf-acciones">
+          <button type="button" id="btnVerPdf" class="pdf-btn" disabled>📄 Ver pasaporte</button>
+          <button type="button" id="btnDescargarPdf" class="pdf-btn pdf-btn-sec" disabled>⬇️ Descargar</button>
+        </div>
+        <p id="pdfEstado" class="pdf-estado">Preparando su pasaporte en PDF…</p>
       </div>
 
       <div id="resultArea"></div>
 
       <footer>© Clínica Dental Dr. Pi Esteller — Todos los derechos reservados</footer>
 
-      <div id="pdf-template" style="display:none;">
-        <div style="padding: 40px; font-family: 'Helvetica', sans-serif; color: #333; background:white;">
-          
-          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 2px solid #02234f; padding-bottom: 20px; margin-bottom: 30px;">
-            <img src="https://i.postimg.cc/tTX6JQ42/DR-PI-ESTELLER.png" style="height: 60px;">
-            <div style="text-align:right;">
-              <h1 style="margin:0; color: #02234f; font-size: 24px;">Pasaporte Implantológico</h1>
-              <p style="margin:5px 0; font-size: 12px; color: #666;">Certificado de Autenticidad y Garantía</p>
-            </div>
-          </div>
-
-          <div style="background: #f4f6f9; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
-            <table style="width:100%; border:none;">
-              <tr>
-                <td style="width:50%; padding:5px;"><strong>Paciente:</strong> <span id="pdf-nombre"></span></td>
-                <td style="width:50%; padding:5px;"><span id="pdf-dni-fila"><strong>DNI:</strong> <span id="pdf-dni"></span></span></td>
-              </tr>
-              <tr>
-                <td style="padding:5px;"><strong>Fecha Emisión:</strong> <span id="pdf-fecha"></span></td>
-                <td style="padding:5px;"><strong>Código de acceso:</strong> <span id="pdf-codigo"></span></td>
-              </tr>
-            </table>
-          </div>
-
-          <h3 style="color:#02234f; border-bottom: 1px solid #ccc; padding-bottom: 5px;">Registro de Implantes Colocados</h3>
-          <table style="width:100%; border-collapse: collapse; margin-top: 15px; font-size: 11px;">
-            <thead style="background: #02234f; color: white;">
-              <tr>
-                <th style="padding: 8px; text-align: left; width: 10%;">Diente</th>
-                <th style="padding: 8px; text-align: left; width: 20%;">Marca / Modelo</th>
-                <th style="padding: 8px; text-align: left; width: 15%;">Medidas</th>
-                <th style="padding: 8px; text-align: left; width: 20%;">Pilar</th> <th style="padding: 8px; text-align: left; width: 20%;">Ref/Lote</th>
-                <th style="padding: 8px; text-align: left; width: 15%;">Fecha</th>
-              </tr>
-            </thead>
-            <tbody id="pdf-table-body">
-              </tbody>
-          </table>
-
-          <div style="margin-top: 60px; font-size: 10px; color: #999; border-top: 1px solid #eee; padding-top: 20px; text-align: center;">
-            <p>Este documento certifica los componentes médicos implantados. Se recomienda conservar este documento para futuras referencias clínicas.</p>
-            <p>© Clínica Dental Dr. Pi Esteller</p>
-          </div>
-        </div>
-      </div>
       </div>
 
     <script>
@@ -305,6 +282,7 @@
                   '<em>Demo mode: fictitious patient, synthetic data.</em></div>');
               }
               downloadAction.style.display = 'block';
+              prepararPdf(currentPatientCode);
             } else if (res.ok) {
               status.innerHTML = '<span class="error">No se encontraron implantes para este código.</span>';
             } else {
@@ -407,17 +385,17 @@
 
         const imp = window.currentImplants[index];
         const container = document.getElementById('technicalDetail');
+        // Los textos de implante, conexión y pilar vienen ya escritos del servidor: son los
+        // mismos que el PDF, la pantalla no los rehace.
         const fields = [
             { label: 'Posición', key: 'posicion' },
-            { label: 'Marca', key: 'marca' },
-            { label: 'Modelo', key: 'modelo' },
-            { label: 'Dimensiones', key: 'dimensiones' },
-            { label: 'Plataforma', key: 'plataforma' },
-            { label: 'Conexión', key: 'conexion' },
-            { label: 'Pilar', key: 'pilar' },
-            { label: 'Fecha Colocación', key: 'fecha_colocacion' }, 
-            { label: 'Cód. Implante', key: 'cod_implante' },
-            { label: 'Lote', key: 'lote' }
+            { label: 'Implante', key: 'implante_texto' },
+            { label: 'Medidas', key: 'dimensiones' },
+            { label: 'Conexión', key: 'conexion_texto' },
+            { label: 'Ref. implante', key: 'cod_implante' },
+            { label: 'Lote', key: 'lote' },
+            { label: 'Pilar', key: 'pilar_texto' },
+            { label: 'Fecha de colocación', key: 'fecha_colocacion' }
         ];
 
         const posVal = String(imp.posicion || imp.posiciondiente || '').toLowerCase().trim();
@@ -454,116 +432,48 @@
         setTimeout(() => container.style.opacity = '1', 100);
       };
 
-// --- GENERAR PDF MEJORADO Y BLINDADO ---
-      window.generatePDF = function() {
-        const implants = window.currentImplants;
-        if (!implants || implants.length === 0) return;
-        const p = implants[0];
+      // --- PDF DEL PASAPORTE (lo genera el servidor: el mismo que ve la clínica) ---
+      // Se pide nada más entrar, en segundo plano: casi siempre está listo antes de pulsar.
+      let pdfUrl = null, pdfNom = 'Pasaporte.pdf';
+      const btnVerPdf = document.getElementById('btnVerPdf');
+      const btnDescargarPdf = document.getElementById('btnDescargarPdf');
+      const pdfEstado = document.getElementById('pdfEstado');
 
-        // 1. Rellenar datos Cabecera
-        document.getElementById('pdf-nombre').textContent = p.nombre || '';
-        document.getElementById('pdf-dni').textContent = p.dni_parcial || '';
-        document.getElementById('pdf-dni-fila').style.display = p.dni_parcial ? '' : 'none';
-        document.getElementById('pdf-codigo').textContent = currentPatientCode;
-        document.getElementById('pdf-fecha').textContent = new Date().toLocaleDateString('es-ES');
+      function prepararPdf(code) {
+        pdfEstado.textContent = 'Preparando su pasaporte en PDF…';
+        llamarApi({ action: 'pdfPasaporte', code: code }, 2)
+          .then(res => {
+            if (!res.ok || !res.base64) throw new Error(res.message || 'sin PDF');
+            const bytes = Uint8Array.from(atob(res.base64), c => c.charCodeAt(0));
+            pdfUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+            pdfNom = res.nom || pdfNom;
+            btnVerPdf.disabled = false;
+            btnDescargarPdf.disabled = false;
+            pdfEstado.textContent = '';
+          })
+          .catch(() => {
+            pdfEstado.innerHTML = 'No hemos podido preparar el PDF. <a href="#" id="pdfReintentar">Volver a intentarlo</a>';
+            document.getElementById('pdfReintentar').addEventListener('click', e => { e.preventDefault(); prepararPdf(code); });
+          });
+      }
 
-        // 2. Rellenar tabla
-        const tbody = document.getElementById('pdf-table-body');
-        tbody.innerHTML = ''; 
+      function descargarPdf() {
+        const a = document.createElement('a');
+        a.href = pdfUrl;
+        a.download = pdfNom;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
 
-        // --- FUNCIÓN HELPER: Buscar valor ignorando mayúsculas/acentos ---
-        // Esto encuentra 'Fecha Colocación', 'fecha_colocacion', 'fechadecolocacion', etc.
-        function findValueFuzzy(obj, searchTerms) {
-            // 1. Búsqueda exacta primero
-            for (let key in obj) {
-                // Quitamos guiones bajos, espacios y pasamos a minúsculas para comparar
-                let cleanKey = key.toLowerCase().replace(/[_ ]/g, '');
-                // Comparamos con cada término de búsqueda limpio
-                for (let term of searchTerms) {
-                    if (cleanKey === term.toLowerCase().replace(/[_ ]/g, '')) return obj[key];
-                }
-            }
-            // 2. Búsqueda "contiene" (para casos difíciles)
-            for (let key in obj) {
-                let k = key.toLowerCase();
-                // Si la clave contiene "fecha" Y "coloca", es la nuestra.
-                if (k.includes('fecha') && k.includes('coloca')) return obj[key];
-            }
-            return null;
-        }
-
-        // --- FUNCIÓN HELPER: Formatear fecha a la fuerza ---
-        function parseDateSecure(raw) {
-            if (!raw) return '-';
-            
-            // Si ya es un objeto fecha
-            if (raw instanceof Date) return raw.toLocaleDateString('es-ES');
-
-            // Si es texto, intentamos detectar si es formato ISO (2023-05-20) o Español (20/05/2023)
-            const str = String(raw).trim();
-            
-            // Caso A: Texto tipo "20/05/2023" (Hoja de cálculo en texto plano)
-            if (str.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
-                return str; // Ya está bien, lo devolvemos tal cual
-            }
-
-            // Caso B: Formato ISO o fecha standard de Google (2023-05-20T...)
-            const d = new Date(str);
-            if (!isNaN(d.getTime())) {
-                return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
-            }
-
-            // Caso C: Devolvemos el texto original si no sabemos qué es, para no mostrar guión
-            return str;
-        }
-
-        implants.forEach(imp => {
-          // Buscamos los datos usando la búsqueda inteligente
-          const diente = imp.posicion || imp.posiciondiente || '-';
-          const marcaModelo = `${imp.marca || ''} ${imp.modelo || ''}`;
-          const medidas = imp.dimensiones || '-';
-          
-          // Busca 'pilar', 'pilar transepitelial', etc.
-          const pilar = findValueFuzzy(imp, ['pilar', 'pilartransepitelial', 'aditamentos']) || '-';
-          
-          const refLote = `Ref: ${escapeHtml(imp.cod_implante || '-')} <br> Lote: ${escapeHtml(imp.lote || '-')}`;
-          
-          // Busca la fecha con lupa
-          const rawDate = findValueFuzzy(imp, ['fecha_de_colocacion', 'fechadecolocacion', 'fecha', 'fechaColocacion']);
-          const fechaStr = parseDateSecure(rawDate);
-
-          const row = `
-            <tr style="border-bottom: 1px solid #eee;">
-              <td style="padding: 8px;"><strong>${escapeHtml(diente)}</strong></td>
-              <td style="padding: 8px;">${escapeHtml(marcaModelo)}</td>
-              <td style="padding: 8px;">${escapeHtml(medidas)}</td>
-              <td style="padding: 8px;">${escapeHtml(pilar)}</td>
-              <td style="padding: 8px;">${refLote}</td>
-              <td style="padding: 8px;">${escapeHtml(fechaStr)}</td>
-            </tr>
-          `;
-          tbody.innerHTML += row;
-        });
-
-        // 3. Configuración y Generación del PDF
-        const element = document.getElementById('pdf-template');
-        const opt = {
-          margin:       10,
-          filename:     `Pasaporte_${(p.nombre || 'Paciente').replace(/\s+/g, '_')}.pdf`,
-          image:        { type: 'jpeg', quality: 0.98 },
-          html2canvas:  { scale: 2, useCORS: true }, 
-          jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-        };
-
-        element.style.display = 'block'; 
-        
-        // Pequeño retardo para asegurar que el DOM se pinte antes de capturar (ayuda con imágenes/fuentes)
-        setTimeout(() => {
-            html2pdf().set(opt).from(element).save().then(() => {
-              element.style.display = 'none';
-            });
-        }, 100);
-      };
+      // Se abre en una pestaña nueva con el visor del teléfono (desde ahí se imprime o se
+      // comparte). Si el navegador bloquea la pestaña, se descarga.
+      btnVerPdf.addEventListener('click', () => {
+        if (!pdfUrl) return;
+        const w = window.open(pdfUrl, '_blank');
+        if (!w) descargarPdf();
+      });
+      btnDescargarPdf.addEventListener('click', () => { if (pdfUrl) descargarPdf(); });
 
       // --- LOGICA RECOVERY (Mantenida) ---
       forgotLink.addEventListener('click', function(e) {

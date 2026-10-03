@@ -108,6 +108,9 @@ function crearPortalModel() {
     'plataforma', 'conexion', 'pilar', 'cod_implante', 'lote',
     // Detalles del pilar (S4); los muestra el pasaporte de S5.
     'pilar_altura', 'pilar_angulacion', 'pilar_marca', 'pilar_conexion', 'pilar_ref'];
+  // Además, perAlPortal añade `pilar_pendiente` (bool) y los textos ya escritos
+  // (implante_texto, conexion_texto, pilar_texto). Las casillas de S3 (`pendent`,
+  // `que_falta`) son internas: no salen nunca.
 
   /** `***4567**` (DNI) o `****4567*` (NIE); null si no hay DNI válido. */
   function emmascararDni(v) {
@@ -131,13 +134,19 @@ function crearPortalModel() {
     return v === true || /^(TRUE|VERDADERO)$/i.test(String(v).trim());
   }
 
-  /** Una fila-implante (objeto de PacientModel) tal como la puede ver el paciente. */
-  function perAlPortal(o) {
+  /**
+   * Una fila-implante (objeto de PacientModel) tal como la puede ver el paciente, con los
+   * textos ya escritos (los mismos que el PDF: la pantalla no los rehace).
+   * @param {{pilarPendiente?: boolean}} [opcions] calculado en el servidor a partir de las
+   *   casillas internas (S3); de la fila nunca se copia nada interno.
+   */
+  function perAlPortal(o, opcions) {
     const out = { nombre: aText(o.nombre) };
     const dni = esCert(o.sense_dni) ? null : emmascararDni(o.dni);
     if (dni) out.dni_parcial = dni;
     CAMPS_PORTAL.forEach(k => { if (k in o) out[k] = aText(o[k]); });
-    return out;
+    out.pilar_pendiente = !!(opcions && opcions.pilarPendiente);
+    return Object.assign(out, textosImplant(out));
   }
 
   // --- Límite de intentos ---
@@ -226,51 +235,170 @@ function crearPortalModel() {
     return { assumpte: 'Pasaport sense email: ' + String(p.nombre || '').trim() + ' (' + p.codi + ')', html, text };
   }
 
+  // --- Pasaporte (renderer único: portal, vista previa y PDF) ---
+
+  function net(v) {
+    return String(v === undefined || v === null ? '' : v).trim();
+  }
+
   /**
-   * HTML del pasaporte para convertir a PDF en el servidor (tablas, sin flex: el
-   * conversor de Apps Script no entiende CSS moderno). Recibe datos ya filtrados por
-   * perAlPortal. S5 lo convertirá en el renderer único del pasaporte.
+   * Lo que el paciente lee del pilar. Vacío = "aún no se sabe": no se dice nada, salvo
+   * que la ficha esté pendiente de ese pilar (pilar_pendiente, derivado en el servidor).
+   * "Multi-unit 30º · 5 mm · Ticare · Externa · ref. pilar HE48865"
    */
-  function htmlPasaporte(pacient, implants, codi, dataEmissio) {
-    const td = 'padding:6px;border-bottom:1px solid #ddd;vertical-align:top;';
-    const files = (implants || []).map(i => `
-        <tr>
-          <td style="${td}"><b>${escapar(i.posicion || '-')}</b></td>
-          <td style="${td}">${escapar([i.marca, i.modelo].filter(Boolean).join(' ') || '-')}</td>
-          <td style="${td}">${escapar(i.dimensiones || '-')}</td>
-          <td style="${td}">${escapar(i.conexion || '-')}</td>
-          <td style="${td}">Ref: ${escapar(i.cod_implante || '-')}<br>Lote: ${escapar(i.lote || '-')}</td>
-          <td style="${td}">${escapar(i.pilar || '-')}</td>
-          <td style="${td}">${escapar(i.fecha_colocacion || '-')}</td>
-        </tr>`).join('');
-    const th = 'padding:6px;text-align:left;background:#02234f;color:#fff;';
-    return `<html><head><meta charset="utf-8"></head>
-      <body style="font-family:Helvetica,Arial,sans-serif;color:#333;font-size:11px;">
-        <table style="width:100%;border-bottom:2px solid #02234f;margin-bottom:20px;"><tr>
-          <td><img src="https://i.postimg.cc/tTX6JQ42/DR-PI-ESTELLER.png" style="height:55px;"></td>
-          <td style="text-align:right;">
-            <div style="font-size:20px;color:#02234f;font-weight:bold;">Pasaporte Implantológico</div>
+  function textPilar(imp) {
+    const tipus = net(imp.pilar);
+    if (!tipus) return imp.pilar_pendiente === true ? 'Pendiente de colocar' : '';
+    if (tipus === 'Sin pilar') return 'Sin pilar';
+    const ang = net(imp.pilar_angulacion), alt = net(imp.pilar_altura), ref = net(imp.pilar_ref);
+    return [tipus, ang && ang + 'º', alt && alt + ' mm', net(imp.pilar_marca), net(imp.pilar_conexion),
+      ref && 'ref. pilar ' + ref].filter(Boolean).join(' · ');
+  }
+
+  /** "Interna · plataforma 4,1"; los vacíos no salen. */
+  function textConexion(imp) {
+    const plat = net(imp.plataforma);
+    return [net(imp.conexion), plat && 'plataforma ' + plat].filter(Boolean).join(' · ');
+  }
+
+  /** Textos ya escritos para el portal: la pantalla no los rehace (los mismos que el PDF). */
+  function textosImplant(imp) {
+    return {
+      implante_texto: [net(imp.marca), net(imp.modelo)].filter(Boolean).join(' '),
+      conexion_texto: textConexion(imp),
+      pilar_texto: textPilar(imp)
+    };
+  }
+
+  const LOGO_URL = 'https://i.postimg.cc/tTX6JQ42/DR-PI-ESTELLER.png';
+  const BLAU = '#02234f';
+
+  function capcalera(pacient, codi, dataEmissio, logo) {
+    return `
+        <table style="width:100%;border-bottom:2px solid ${BLAU};margin-bottom:16px;"><tr>
+          <td style="vertical-align:middle;"><img src="${escapar(logo || LOGO_URL)}" style="height:55px;"></td>
+          <td style="text-align:right;vertical-align:middle;">
+            <div style="font-size:20px;color:${BLAU};font-weight:bold;">Pasaporte Implantológico</div>
             <div style="color:#666;">Certificado de Autenticidad y Garantía</div>
           </td>
         </tr></table>
-        <table style="width:100%;background:#f4f6f9;padding:10px;margin-bottom:20px;"><tr>
-          <td style="padding:4px;"><b>Paciente:</b> ${escapar(pacient.nombre)}</td>
-          <td style="padding:4px;">${pacient.dni_parcial ? '<b>DNI:</b> ' + escapar(pacient.dni_parcial) : ''}</td>
+        <table style="width:100%;background:#f4f6f9;margin-bottom:18px;" cellpadding="6"><tr>
+          <td><b>Paciente:</b> ${escapar(pacient.nombre)}</td>
+          <td>${pacient.dni_parcial ? '<b>DNI:</b> ' + escapar(pacient.dni_parcial) : ''}</td>
         </tr><tr>
-          <td style="padding:4px;"><b>Fecha de emisión:</b> ${escapar(dataEmissio)}</td>
-          <td style="padding:4px;"><b>Código de acceso:</b> ${escapar(codi)}</td>
+          <td><b>Fecha de emisión:</b> ${escapar(dataEmissio)}</td>
+          <td><b>Código de acceso:</b> ${escapar(codi)}</td>
         </tr></table>
-        <div style="font-size:14px;color:#02234f;font-weight:bold;border-bottom:1px solid #ccc;padding-bottom:4px;">Registro de Implantes Colocados</div>
-        <table style="width:100%;border-collapse:collapse;margin-top:10px;">
-          <tr><th style="${th}">Diente</th><th style="${th}">Marca / Modelo</th><th style="${th}">Medidas</th>
-              <th style="${th}">Conexión</th><th style="${th}">Ref / Lote</th><th style="${th}">Pilar</th><th style="${th}">Fecha</th></tr>
-          ${files}
-        </table>
-        <div style="margin-top:40px;font-size:9px;color:#999;text-align:center;border-top:1px solid #eee;padding-top:10px;">
+        <div style="font-size:14px;color:${BLAU};font-weight:bold;border-bottom:1px solid #ccc;padding-bottom:4px;">Registro de Implantes Colocados</div>`;
+  }
+
+  const PEU = `
+        <div style="margin-top:36px;font-size:9px;color:#999;text-align:center;border-top:1px solid #eee;padding-top:10px;">
           Este documento certifica los componentes médicos implantados. Se recomienda conservarlo para futuras referencias clínicas.<br>
           © Clínica Dental Drs. Pi y Esteller
-        </div>
-      </body></html>`;
+        </div>`;
+
+  const e = v => escapar(net(v) || '-');
+  const refLote = i => `Ref: ${e(i.cod_implante)}<br>Lote: ${e(i.lote)}`;
+
+  // A: una fila por implante y, debajo, el pilar en una banda de color unida a él.
+  function cosVariantA(implants) {
+    const th = `padding:6px;text-align:left;background:${BLAU};color:#fff;`;
+    const td = 'padding:7px 6px;vertical-align:top;border-top:1px solid #cfd6df;';
+    const files = implants.map(i => {
+      const pilar = textPilar(i);
+      return `
+          <tr>
+            <td style="${td}"><b>${e(i.posicion)}</b></td>
+            <td style="${td}">${e([net(i.marca), net(i.modelo)].filter(Boolean).join(' '))}</td>
+            <td style="${td}">${e(i.dimensiones)}</td>
+            <td style="${td}">${e(textConexion(i))}</td>
+            <td style="${td}">${refLote(i)}</td>
+            <td style="${td}">${e(i.fecha_colocacion)}</td>
+          </tr>` + (pilar ? `
+          <tr>
+            <td style="padding:0 6px 7px 6px;"></td>
+            <td colspan="5" style="padding:5px 8px;background:#e8eef6;border-left:3px solid #5b7fa8;color:#1f3b5c;">
+              <b>Pilar:</b> ${escapar(pilar)}
+            </td>
+          </tr>` : '');
+    }).join('');
+    return `
+        <table style="width:100%;border-collapse:collapse;margin-top:10px;">
+          <tr><th style="${th}">Posición</th><th style="${th}">Implante</th><th style="${th}">Medidas</th>
+              <th style="${th}">Conexión</th><th style="${th}">Ref / Lote</th><th style="${th}">Fecha</th></tr>
+          ${files}
+        </table>`;
+  }
+
+  // B: una tarjeta por implante, con el pilar en una sub-tarjeta.
+  function cosVariantB(implants) {
+    const k = 'padding:3px 8px 3px 0;color:#666;width:22%;vertical-align:top;';
+    const v = 'padding:3px 12px 3px 0;vertical-align:top;';
+    return implants.map(i => {
+      const pilar = textPilar(i);
+      return `
+        <table style="width:100%;border:1px solid #cfd6df;border-collapse:collapse;margin-top:12px;">
+          <tr><td style="background:${BLAU};color:#fff;padding:6px 10px;font-weight:bold;">${e(i.posicion)}</td>
+              <td style="background:${BLAU};color:#fff;padding:6px 10px;text-align:right;">Colocado: ${e(i.fecha_colocacion)}</td></tr>
+          <tr><td colspan="2" style="padding:8px 10px;">
+            <table style="width:100%;border-collapse:collapse;">
+              <tr><td style="${k}">Implante</td><td style="${v}"><b>${e([net(i.marca), net(i.modelo)].filter(Boolean).join(' '))}</b></td>
+                  <td style="${k}">Ref</td><td style="${v}">${e(i.cod_implante)}</td></tr>
+              <tr><td style="${k}">Medidas</td><td style="${v}">${e(i.dimensiones)}</td>
+                  <td style="${k}">Lote</td><td style="${v}">${e(i.lote)}</td></tr>
+              <tr><td style="${k}">Conexión</td><td style="${v}" colspan="3">${e(textConexion(i))}</td></tr>
+            </table>` + (pilar ? `
+            <table style="width:100%;border-collapse:collapse;margin-top:6px;"><tr>
+              <td style="padding:6px 10px;background:#e8eef6;border-left:3px solid #5b7fa8;color:#1f3b5c;"><b>Pilar:</b> ${escapar(pilar)}</td>
+            </tr></table>` : '') + `
+          </td></tr>
+        </table>`;
+    }).join('');
+  }
+
+  // C: tabla compacta, una fila por implante (referencia para comparar).
+  function cosVariantC(implants) {
+    const th = `padding:5px;text-align:left;background:${BLAU};color:#fff;`;
+    const td = 'padding:5px;border-bottom:1px solid #ddd;vertical-align:top;';
+    const files = implants.map(i => `
+          <tr>
+            <td style="${td}"><b>${e(i.posicion)}</b></td>
+            <td style="${td}">${e([net(i.marca), net(i.modelo)].filter(Boolean).join(' '))}</td>
+            <td style="${td}">${e(i.dimensiones)}</td>
+            <td style="${td}">${e(textConexion(i))}</td>
+            <td style="${td}">${refLote(i)}</td>
+            <td style="${td}">${escapar(textPilar(i))}</td>
+            <td style="${td}">${e(i.fecha_colocacion)}</td>
+          </tr>`).join('');
+    return `
+        <table style="width:100%;border-collapse:collapse;margin-top:10px;font-size:10px;">
+          <tr><th style="${th}">Posición</th><th style="${th}">Implante</th><th style="${th}">Medidas</th>
+              <th style="${th}">Conexión</th><th style="${th}">Ref / Lote</th><th style="${th}">Pilar</th><th style="${th}">Fecha</th></tr>
+          ${files}
+        </table>`;
+  }
+
+  const VARIANTS = { A: cosVariantA, B: cosVariantB, C: cosVariantC };
+
+  /**
+   * HTML del pasaporte: el mismo para el portal, la vista previa y el PDF (que convierte
+   * el servidor). Solo tablas y estilos en línea: el conversor de Apps Script no entiende
+   * CSS moderno. Recibe datos ya filtrados por perAlPortal y ya ordenados.
+   * @param {{variant?: string, logo?: string, nomesCos?: boolean}} [opcions] logo: URL o
+   *   data URI; nomesCos: sin <html>/<body>, para meterlo dentro de otra página
+   */
+  function htmlPasaporte(pacient, implants, codi, dataEmissio, opcions) {
+    const o = opcions || {};
+    const cos = VARIANTS[o.variant] || cosVariantA;
+    const contingut = `
+      <div style="font-family:Helvetica,Arial,sans-serif;color:#333;font-size:11px;">
+        ${capcalera(pacient || {}, codi, dataEmissio, o.logo)}
+        ${cos(implants || [])}
+        ${PEU}
+      </div>`;
+    if (o.nomesCos) return contingut;
+    return `<html><head><meta charset="utf-8"></head><body>${contingut}</body></html>`;
   }
 
   return {
@@ -291,6 +419,9 @@ function crearPortalModel() {
     missatgePacient,
     enllacWhatsApp,
     avisSecretaria,
+    textPilar,
+    textConexion,
+    textosImplant,
     htmlPasaporte
   };
 }
