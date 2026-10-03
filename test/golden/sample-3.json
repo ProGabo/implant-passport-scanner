@@ -10,6 +10,9 @@
     "diametro": 3.75,
     "longitud": 11.5,
     "posicion": "25",
-    "pilar": "NO"
+    "pilar": "Sin pilar",
+    "pilar_altura": "",
+    "pilar_angulacion": "",
+    "pilar_ref": ""
   }
 ]

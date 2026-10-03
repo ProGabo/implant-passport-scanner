@@ -163,6 +163,17 @@
         .inline-check input { width: 16px; height: 16px; margin: 0; accent-color: #0ea5e9; cursor: pointer; }
         .inline-check label { margin: 0; font-weight: 500; cursor: pointer; }
         input:disabled { background: #f1f5f9; color: #64748b; }
+        /* Pilar: tipo obligatorio + detalles opcionales plegados */
+        .pilar-altre { margin-top: 6px; }
+        .pilar-detalls { margin-top: 8px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 10px; background: #f8fafc; }
+        .pilar-detalls summary { cursor: pointer; font-size: 12px; font-weight: 600; color: #0369a1; }
+        .pilar-detalls[open] summary { margin-bottom: 8px; }
+        .pilar-detalls.desactivat { opacity: .5; pointer-events: none; }
+        .pilar-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; margin-bottom: 6px; }
+        .pilar-grid label, .pilar-detalls label { font-size: 12px; }
+        .pilar-enganxa { margin-top: 8px; }
+        .pilar-enganxa textarea { width: 100%; box-sizing: border-box; font-family: 'Inter', sans-serif; font-size: 12px; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; resize: vertical; }
+        .pilar-enganxa button { margin-top: 4px; padding: 6px 8px; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -268,6 +279,8 @@
 <datalist id="marcaOptions"></datalist>
 <datalist id="modeloOptions"></datalist>
 <datalist id="conexionOptions"></datalist>
+<datalist id="posicionOptions"></datalist>
+<datalist id="pilarConexionOptions"><option value="Externa"></option><option value="Interna"></option></datalist>
 
 <template id="implant-template">
     <div class="implant-section" data-index="0">
@@ -277,7 +290,7 @@
 
         <div class="form-group">
             <label>Posició (dent):</label>
-            <input type="text" class="implant-field" name="posicion" placeholder="Ex: 14 o 46" required>
+            <input type="text" class="implant-field" name="posicion" list="posicionOptions" placeholder="Ex: 14, 46 o pterigoidea" required>
         </div>
         <div class="form-group">
             <label>Data de col·locació:</label>
@@ -314,9 +327,37 @@
             <input type="text" class="implant-field" name="conexion" list="conexionOptions" required>
         </div>
 
-        <div class="form-group">
-            <label>Pilar transepitelial:</label>
-            <input type="text" class="implant-field" name="pilar" required>
+        <div class="form-group pilar-block">
+            <label>Pilar:</label>
+            <select class="pilar-tipus" required>
+                <option value="" disabled selected>— Tria el pilar —</option>
+                <option value="Multi-unit">Multi-unit</option>
+                <option value="A cabeza de implante">A cabeza de implante (+PC)</option>
+                <option value="Sin pilar">Sin pilar</option>
+                <option value="__altre">Un altre...</option>
+            </select>
+            <input type="text" class="pilar-altre hidden" placeholder="Escriu el tipus de pilar">
+            <!-- El valor que se guarda: el tipo elegido o el texto de "Un altre..." -->
+            <input type="hidden" class="implant-field" name="pilar">
+
+            <!-- Fuera de los detalles: tiene que poder usarse también cuando el escáner ha
+                 dejado "Sin pilar" (los detalles están desactivados) para corregirlo. -->
+            <div class="pilar-enganxa">
+                <label>📋 Enganxa els detalls del pilar de Quartup:</label>
+                <textarea class="pilar-text-quartup" rows="2" placeholder="Ex: 0196, mult-unit 3mm avinent hexagon externo : 2.00, 25,26"></textarea>
+                <button type="button" class="btn-add pilar-omplir">Omplir els camps</button>
+            </div>
+
+            <details class="pilar-detalls">
+                <summary>Detalls del pilar (opcional)</summary>
+                <div class="pilar-grid">
+                    <div><label>Alçada (mm):</label><input type="text" inputmode="decimal" class="implant-field" name="pilar_altura" placeholder="Ex: 3"></div>
+                    <div><label>Angulació (º):</label><input type="text" inputmode="numeric" class="implant-field" name="pilar_angulacion" placeholder="Ex: 30"></div>
+                    <div><label>Marca:</label><input type="text" class="implant-field" name="pilar_marca" list="marcaOptions"></div>
+                    <div><label>Connexió:</label><input type="text" class="implant-field" name="pilar_conexion" list="pilarConexionOptions"></div>
+                </div>
+                <div><label>Referència:</label><input type="text" class="implant-field" name="pilar_ref" placeholder="Ex: HE48865"></div>
+            </details>
         </div>
         <div class="form-group">
             <label>Codi d'implant (ref.):</label>
@@ -472,9 +513,133 @@
         const dateInput = clone.querySelector('input[name="fecha_colocacion"]');
         if(dateInput) dateInput.valueAsDate = new Date();
 
+        const section = clone.querySelector('.implant-section');
         implantContainer.appendChild(clone);
+        prepararPilar(section);
         updateImplantNumbers();
     };
+
+    // ===============================================
+    //  Pilar: tipo obligatorio (desplegable) + detalles opcionales. Los detalles se
+    //  pueden escribir a mano o rellenar pegando el texto de Quartup (analizador local
+    //  de PacientModel, sin IA).
+    // ===============================================
+    function prepararPilar(section) {
+        const select = section.querySelector('.pilar-tipus');
+        const altre = section.querySelector('.pilar-altre');
+        select.addEventListener('change', () => sincronitzarPilar(section));
+        altre.addEventListener('input', () => sincronitzarPilar(section));
+        // Al salir del campo: si lo escrito es un tipo conocido ("NO", "multi-unit 3 mm"),
+        // se pasa al desplegable con el vocabulario nuevo.
+        altre.addEventListener('change', () => {
+            const t = PacientModel.normalitzarTipusPilar(altre.value);
+            if (PacientModel.TIPUS_PILAR.indexOf(t) !== -1) {
+                const r = PacientModel.analitzarTextPilar(altre.value);
+                altre.value = '';
+                omplirDetallsPilar(section, Object.assign({}, r.camps, { pilar: t }));
+            }
+        });
+        section.querySelector('.pilar-omplir').addEventListener('click', () => enganxarPilarQuartup(section));
+    }
+
+    /** Copia el tipo elegido al campo que se guarda y activa o desactiva los detalles. */
+    function sincronitzarPilar(section) {
+        const select = section.querySelector('.pilar-tipus');
+        const altre = section.querySelector('.pilar-altre');
+        const esAltre = select.value === '__altre';
+        altre.classList.toggle('hidden', !esAltre);
+        altre.required = esAltre;
+        section.querySelector('input[name="pilar"]').value = esAltre ? altre.value.trim() : select.value;
+        const detalls = section.querySelector('.pilar-detalls');
+        const sense = select.value === 'Sin pilar';
+        detalls.classList.toggle('desactivat', sense);
+        if (sense) {
+            detalls.open = false;
+            PacientModel.CAMPS_PILAR.filter(k => k !== 'pilar').forEach(k => {
+                const inp = section.querySelector(`input[name="${k}"]`);
+                if (inp) inp.value = '';
+            });
+        }
+    }
+
+    /** Pone un tipo de pilar en el desplegable (o en "Un altre..." si no es de la lista). */
+    function fixarTipusPilar(section, tipus) {
+        const select = section.querySelector('.pilar-tipus');
+        const altre = section.querySelector('.pilar-altre');
+        const t = PacientModel.normalitzarTipusPilar(tipus);
+        if (!t) {
+            select.value = '';
+        } else if (PacientModel.TIPUS_PILAR.indexOf(t) !== -1) {
+            select.value = t;
+        } else {
+            select.value = '__altre';
+            altre.value = t;
+        }
+        sincronitzarPilar(section);
+    }
+
+    /**
+     * Rellena los detalles del pilar de una sección. Con `substituir`, el texto pegado
+     * describe el pilar entero: los detalles que no trae se vacían, para no mezclar el
+     * pilar nuevo con restos del anterior (p. ej. la angulación de otro multi-unit).
+     */
+    function omplirDetallsPilar(section, camps, substituir) {
+        if (camps.pilar) fixarTipusPilar(section, camps.pilar);
+        PacientModel.CAMPS_PILAR.filter(k => k !== 'pilar').forEach(k => {
+            const inp = section.querySelector(`input[name="${k}"]`);
+            if (!inp) return;
+            if (camps[k]) inp.value = camps[k];
+            else if (substituir) inp.value = '';
+        });
+        if (PacientModel.CAMPS_PILAR.some(k => k !== 'pilar' && camps[k])) {
+            section.querySelector('.pilar-detalls').open = true;
+        }
+    }
+
+    function enganxarPilarQuartup(section) {
+        const textarea = section.querySelector('.pilar-text-quartup');
+        const marques = (catalogOptions && catalogOptions.brands) || [];
+        const r = PacientModel.analitzarTextPilar(textarea.value, marques);
+        if (!r.reconegut) {
+            Swal.fire({ icon: 'info', title: 'No ho he entès', text: 'No he reconegut cap dada del pilar en aquest text. Omple els camps a mà.', confirmButtonColor: '#0ea5e9' });
+            return;
+        }
+        // Si el texto dice a qué dientes va ("25,26"), se aplica a los implantes con esas
+        // posiciones; si no, o si ninguno coincide, al implante donde se ha pegado.
+        let destins = [section];
+        if (r.posicions.length) {
+            const perPosicio = Array.from(implantContainer.querySelectorAll('.implant-section')).filter(s => {
+                const pos = s.querySelector('[name="posicion"]');
+                return pos && r.posicions.indexOf(String(pos.value).trim()) !== -1;
+            });
+            if (perPosicio.length) destins = perPosicio;
+        }
+        // Detalles sin tipo (p. ej. "0196 avinent") en un implante "Sin pilar" o sin tipo:
+        // no se adivina el tipo; se pide antes de rellenar, para no guardar detalles con "Sin pilar".
+        const senseTipus = destins.some(s => {
+            const t = s.querySelector('input[name="pilar"]').value;
+            return !t || t === 'Sin pilar';
+        });
+        if (!r.camps.pilar && senseTipus) {
+            Swal.fire({ icon: 'info', title: 'Tria el tipus de pilar', text: 'El text no diu quin tipus de pilar és (Multi-unit, A cabeza de implante...). Tria\'l al desplegable i torna a prémer "Omplir els camps".', confirmButtonColor: '#0ea5e9' });
+            return;
+        }
+        destins.forEach(s => omplirDetallsPilar(s, r.camps, true));
+        textarea.value = '';
+        const nums = destins.map(s => s.querySelector('.implant-number').textContent).join(', ');
+        Toast.fire({ icon: 'success', title: `Pilar omplert a l'implant ${nums}. Revisa-ho.` });
+    }
+
+    function omplirOpcionsPosicio() {
+        const datalist = document.getElementById('posicionOptions');
+        const dents = [];
+        [1, 2, 3, 4].forEach(q => { for (let d = 1; d <= 8; d++) dents.push(`${q}${d}`); });
+        dents.concat(PacientModel.POSICIONS_PTERIGOIDEES).forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = v;
+            datalist.appendChild(opt);
+        });
+    }
 
     window.removeImplantSection = function(sectionElement) {
         if (implantContainer.querySelectorAll('.implant-section').length > 1) {
@@ -557,8 +722,9 @@
     //  campo por un desplegable naranja obligatorio (cuadrantes FDI 11-48) y el
     //  guardado queda bloqueado hasta que el usuario elija el diente.
     // ===============================================
+    // Diente FDI 11-48 o fisura pterigoidea (cuadrante 1 / 2): la regla vive en PacientModel.
     function isValidTooth(v) {
-        return /^(1[1-8]|2[1-8]|3[1-8]|4[1-8])$/.test(String(v || '').trim());
+        return PacientModel.esPosicioValida(PacientModel.normalitzarPosicio(v));
     }
 
     function markPositionAsDoubt(section) {
@@ -582,7 +748,7 @@
             ['Inferior esquerra (3x)', [31, 32, 33, 34, 35, 36, 37, 38]],
             ['Inferior dreta (4x)', [41, 42, 43, 44, 45, 46, 47, 48]]
         ];
-        quadrants.forEach(([label, teeth]) => {
+        quadrants.forEach(([label, teeth], q) => {
             const group = document.createElement('optgroup');
             group.label = label;
             teeth.forEach(t => {
@@ -591,6 +757,13 @@
                 opt.textContent = String(t);
                 group.appendChild(opt);
             });
+            // La fisura pterigoidea va por detrás del 18 / 28: última opción del cuadrante.
+            if (q < 2) {
+                const opt = document.createElement('option');
+                opt.value = PacientModel.POSICIONS_PTERIGOIDEES[q];
+                opt.textContent = 'Fisura pterigoidea';
+                group.appendChild(opt);
+            }
             select.appendChild(group);
         });
 
@@ -630,13 +803,14 @@
         if(data.lote) setVal('lote', data.lote);
         if(data.cod_implante) setVal('cod_implante', data.cod_implante);
         if (isValidTooth(data.posicion)) {
-            setVal('posicion', String(data.posicion).trim());
+            setVal('posicion', PacientModel.normalitzarPosicio(data.posicion));
         } else {
             markPositionAsDoubt(section);
         }
         if(data.fecha_colocacion) setVal('fecha_colocacion', data.fecha_colocacion);
-        
-        if(data.pilar) { setVal('pilar', data.pilar); } else { setVal('pilar', "No"); }
+
+        // El escáner ya devuelve el tipo canónico; sin dato, "Sin pilar" (como el antiguo "No").
+        omplirDetallsPilar(section, Object.assign({}, data, { pilar: data.pilar || 'Sin pilar' }));
 
         if(data.diametro) {
             const dInput = section.querySelector('.dim-calc-diameter');
@@ -1032,6 +1206,25 @@
             return;
         }
 
+        // Posición escrita a mano: se lleva a la forma canónica ("pterigo 2" -> "Fisura
+        // pterigoidea (cuadrante 2)") y tiene que ser un diente FDI o una pterigoidea.
+        const malPosades = [];
+        implantContainer.querySelectorAll('.implant-section').forEach((section, index) => {
+            const posInput = section.querySelector('input[name="posicion"]');
+            if (!posInput || !posInput.value.trim()) return;
+            posInput.value = PacientModel.normalitzarPosicio(posInput.value);
+            if (!PacientModel.esPosicioValida(posInput.value)) malPosades.push({ num: index + 1, el: posInput });
+        });
+        if (malPosades.length > 0) {
+            reactivarGuardar();
+            Swal.fire({
+                icon: 'warning',
+                title: 'Posició no vàlida',
+                text: `La posició de l'implant ${malPosades.map(p => p.num).join(', ')} ha de ser una dent (11-48) o "Fisura pterigoidea" amb el seu quadrant (1 o 2). Tria-la de la llista.`
+            }).then(() => { malPosades[0].el.focus(); });
+            return;
+        }
+
         const implantsArray = [];
         const sections = implantContainer.querySelectorAll('.implant-section');
 
@@ -1245,7 +1438,8 @@
                     <hr style="margin: 15px 0;">
                     <p style="color: #b91c1c; font-weight: 600;">⚠️ IMPORTANT - REVISA-HO ARA:</p>
                     <ul style="margin-top: 8px;">
-                        <li>Comprova que la <b>POSICIÓ (dent)</b> sigui correcta i, si hi ha pilar MULTI-UNIT, que els seus <b>mm</b> siguin correctes (escrits a mà poden tenir errors).</li>
+                        <li>Comprova que la <b>POSICIÓ (dent)</b> sigui correcta, també si és una <b>fisura pterigoidea</b> (quadrant 1 o 2).</li>
+                        <li>Comprova el <b>PILAR</b>: "+PC" és <b>A cabeza de implante</b>, i als MULTI-UNIT revisa els <b>mm</b>, l'angulació i la referència (escrits a mà poden tenir errors).</li>
                     </ul>
                 </div>
             `,
@@ -1264,7 +1458,8 @@
     }
 
     document.addEventListener('DOMContentLoaded', (event) => {
-        addImplantSection(); 
+        omplirOpcionsPosicio();
+        addImplantSection();
         loadImplantOptions();
     });
 </script>

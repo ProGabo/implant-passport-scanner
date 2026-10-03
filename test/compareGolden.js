@@ -8,15 +8,25 @@
 // safely re-derive from memory later — and report (visibly, but passing) drift on the
 // soft fields the staff already reviews in the editable sidebar form before saving.
 const CRITICAL_FIELDS = ['lote', 'cod_implante', 'diametro', 'longitud'];
-const SOFT_FIELDS = ['fecha_colocacion', 'marca', 'modelo', 'conexion', 'plataforma', 'posicion', 'pilar'];
+const SOFT_FIELDS = ['fecha_colocacion', 'marca', 'modelo', 'conexion', 'plataforma', 'posicion', 'pilar', 'pilar_altura', 'pilar_angulacion', 'pilar_ref'];
 
-function compareToGolden(actual, expected) {
+// The model may list the same implants in a different order between runs (seen
+// 2026-10-03: 24, pterygoid, 25 vs 24, 25, pterygoid), so pair them by the sticker's own
+// identity (REF + LOT + length), never by array index.
+function stickerKey(imp) {
+  return [imp.cod_implante, imp.lote, imp.longitud].map(String).join('|');
+}
+
+function compareToGolden(actualRaw, expectedRaw) {
   const critical = [];
   const soft = [];
-  if (actual.length !== expected.length) {
-    critical.push(`implant count ${actual.length} (expected ${expected.length})`);
+  if (actualRaw.length !== expectedRaw.length) {
+    critical.push(`implant count ${actualRaw.length} (expected ${expectedRaw.length})`);
     return { critical, soft };
   }
+  const byKey = (a, b) => stickerKey(a).localeCompare(stickerKey(b));
+  const actual = actualRaw.slice().sort(byKey);
+  const expected = expectedRaw.slice().sort(byKey);
   expected.forEach((exp, i) => {
     CRITICAL_FIELDS.forEach((k) => {
       if (String(actual[i][k]) !== String(exp[k])) critical.push(`[${i}].${k}: got ${JSON.stringify(actual[i][k])}, expected ${JSON.stringify(exp[k])}`);

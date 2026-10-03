@@ -5,6 +5,7 @@
 // Runs both as a GAS global (Código.js calls ScanEngine.scanPassport(...)) and as a
 // Node require()'d module (test harness). API keys and HTTP transport are injected via
 // `deps`, never read from globals here, so this file has no runtime-specific dependencies.
+// Its only project dependency is PacientModel (clinical vocabulary: positions, pilar).
 
 var ScanEngine = (function () {
 
@@ -16,15 +17,19 @@ var ScanEngine = (function () {
 
       INSTRUCCIONES DE SEGURIDAD (CRÍTICO):
       1. AISLAMIENTO DE FICHA: Cada pegatina es una isla independiente. NUNCA asignes el Lote, la Referencia NI la POSICIÓN de una pegatina a la de al lado, ni siquiera si dos pegatinas son del mismo modelo/lote (esto pasa a menudo cuando se colocan varios implantes iguales en la misma cita). Antes de repetir una posición en dos implantes, vuelve a mirar la anotación manuscrita más cercana a CADA pegatina por separado: dos implantes casi nunca comparten la misma posición de diente. Si una pegatina no tiene lote impreso, déjalo VACÍO ("").
-      2. BASURA: Ignora completamente "Abutment", "Healing Cap", "Cuff", "Membrane", "Sutura". Si la referencia empieza por "MC-M", "AMCZ", "HMC", "B-", o también si ves que o bien no hay dimensiones o bien las dimensiones de longitud son demasiado pequeñas (mayor a 6 mm) como para ser un implante, IGNÓRALO, no es un implante.
+      2. BASURA: Ignora completamente "Abutment", "Healing Cap", "Cuff", "Membrane", "Sutura". Si la referencia empieza por "MC-M", "AMCZ", "HMC", "B-", o también si ves que o bien no hay dimensiones o bien la longitud es demasiado pequeña para ser un implante (6 mm o menos), IGNÓRALO, no es un implante. Las REF que empiezan por "HE" (ej: "HE41404", "HE 48865") escritas a mano junto a "+PC" o "+Mt-U" son del PILAR, nunca del implante.
       3. LOGICA VISUAL Y MANUSCRITA:
          - FECHA: Busca la fecha manuscrita en la parte superior izquierda de la página (ej: "9-9-24" o "09/09/2024" o variaciones). OBLIGATORIO: Traduce y formatea SIEMPRE esta fecha al formato estricto YYYY-MM-DD. Por ejemplo, si lees "9-9-24", debes transformarlo a "2024-09-09".. Añade este valor exacto en el campo 'fecha' para TODOS los implantes encontrados.
          - POSICIÓN: El texto manuscrito al lado de la ficha que empieza por la letra 'Z' (ej: "Z:25", "Z (14)") suele indicar la POSICIÓN del diente y está escrito AL LADO de la pegatina correspondiente. Busca esta anotación de forma individual para CADA pegatina, incluso si dos pegatinas son visualmente casi idénticas. Si no encuentras ninguna anotación clara y fiable para una pegatina concreta, NUNCA la dejes vacía ni copies la de otra pegatina: asigna el valor "No especificado" ÚNICAMENTE en el campo posicion. Esta opción de "No especificado" es EXCLUSIVA del campo posicion: para el resto de campos (marca, modelo, conexión, plataforma, etc.) sigue las reglas de deducción de abajo y da siempre tu mejor respuesta razonada, nunca escribas "No especificado" en ningún otro campo.
+         - FISURA PTERIGOIDEA: a veces la anotación de zona no lleva número sino la palabra "pterigo" o una variante (ej: "Z(Pterigo)", "Z(pteriso)", "Z (pterig.)", "terigoidea", "ptg"), y muy cerca, normalmente justo debajo, el CUADRANTE escrito a mano (ej: "2n Q.", "1r quadrant", "1er cuadrante", "Q1", "2ºC"). Entonces la posicion es EXACTAMENTE "Fisura pterigoidea (cuadrante 1)" o "Fisura pterigoidea (cuadrante 2)" según ese cuadrante. NUNCA la conviertas en 18 ni en 28. El cuadrante suele estar escrito en letra MÁS PEQUEÑA, a veces torcido, justo debajo o pegado a la "Z(...)": míralo con atención antes de rendirte (ej: un "1r quadrant" diminuto bajo "Z(pteriso)"). Solo si de verdad no hay ningún cuadrante legible junto a esa nota, usa "No especificado".
+           * El cuadrante es SOLO el que está escrito junto a la nota "pterigo". NO lo saques de la cabecera: "1ºC" o "1rC" al lado de la fecha (ej: "3/3/26 1ºC 3 impl. SUP") es otra cosa, no el cuadrante.
+         - TRAMPAS DE POSICIÓN: las listas de extracciones ("+EXO 24,25,26,28", "EXO de 17") son dientes extraídos, NO posiciones de implantes. El plan de tratamiento o los informes (ej: "Deixar implants posició 17,16,11..., pterigoideu", "Als 6 mesos col·locació 2 implants") hablan de implantes existentes o futuros, NO de los de las pegatinas. Las páginas siguientes (historial de Quartup con "/2/Z-36,37", emails, radiografías) pueden tener información, pero la posición y el pilar de cada pegatina salen SOLO de las anotaciones manuscritas junto a esa pegatina.
          - CONEXIÓN: Si ves una pegatina que pone "Ref ZYGAN" y mide más de 30mm, el Modelo es "ExHex Zygan" (Cigomático). Si ves "Int Hex" o referencias que empiezan por "I" o "IM", el Modelo es "Internal Hex".
-         - PILAR MULTI-UNIT : Busca notas manuscritas cerca de las fichas que empiecen por un símbolo "+" seguido de una cantidad, unas siglas (como "Mt. U" o similares de "MI.U", "MIU") y una altura en "mm" (ej: "+ 2 Mt.U 3 mm" o "+ (1) Mt.U 1.5 mm").
-           * Si identificas estas siglas como Multi-Unit, extrae la altura y asigna al campo 'pilar' el valor "Multi-unit [altura] mm" (ej: "Multi-unit 3 mm").
+         - PILAR: Busca notas manuscritas junto a cada pegatina que empiecen por un símbolo "+".
+           * MULTI-UNIT: "+" seguido (a veces) de una cantidad, unas siglas de Multi-Unit ("Mt-U", "Mt. U", "MI.U", "MIU") y una altura en "mm" (ej: "+ 2 Mt.U 3 mm", "+ (1) Mt.U 1.5 mm", "+Mt-U 5mm HE48805"). Asigna pilar = "Multi-unit" y pilar_altura = la altura en mm (solo el número, ej "5"). Si pone dos números como "30x5mm" o "30º 5mm", el primero es la ANGULACIÓN en grados (pilar_angulacion = "30") y el segundo la altura (pilar_altura = "5"). Si debajo hay una referencia (ej: "HE 48865"), ponla en pilar_ref sin espacios ("HE48865").
+           * PILAR DE CICATRIZACIÓN: "+PC" o "+ PC 4 (HE41404)" o "+ Pc5 HE 41405" significa pilar de cicatrización: asigna pilar = "A cabeza de implante". Su número (4, 5) y su REF (HE41404) son del pilar provisional: NO los pongas en ningún campo (ni pilar_altura, ni pilar_ref, ni en las medidas o la REF del implante).
            * Si la nota indica una cantidad mayor a 1 (ej: "+ 2..."), aplica este mismo pilar a esa cantidad de implantes MÁS CERCANOS a la nota.
-           * Si la nota manuscrita tiene otras siglas que no son Multi-Unit, o si simplemente no hay ninguna nota de pilar cerca, asigna al campo 'pilar' el valor "NO"
+           * Si no hay ninguna nota de pilar cerca de la pegatina, o tiene otras siglas que no reconoces, asigna pilar = "Sin pilar" y deja vacíos los demás campos del pilar.
 
       INSTRUCCIONES DE LÓGICA DENTAL (CALCULA ESTOS CAMPOS):
       A. PLATAFORMA (Basada estrictamente en el Diámetro):
@@ -50,11 +55,14 @@ var ScanEngine = (function () {
       - lote: (LOT).
       - diámetro: (Número decimal, ej 4.3)
       - longitud: (Número > 6, ej 13, 47.5)
-      - posicion: (Número de diente 11-48, busca anotaciones a mano cercanas después de la letra zeta 'Z' o CUADRANTES. Si no hay anotación fiable para esta pegatina en concreto, usa "No especificado" — nunca la dejes vacía ni la copies de otra pegatina).
-      - pilar: ("Multi-unit [altura] mm" o "NO" según la regla manuscrita).
+      - posicion: (Número de diente 11-48, busca anotaciones a mano cercanas después de la letra zeta 'Z' o CUADRANTES; o "Fisura pterigoidea (cuadrante 1)" / "Fisura pterigoidea (cuadrante 2)" según la regla de la fisura pterigoidea. Si no hay anotación fiable para esta pegatina en concreto, usa "No especificado" — nunca la dejes vacía ni la copies de otra pegatina).
+      - pilar: ("Multi-unit", "A cabeza de implante" o "Sin pilar" según la regla del pilar).
+      - pilar_altura: (altura del pilar en mm, solo el número, ej "3" o "1.5"; "" si no está escrita).
+      - pilar_angulacion: (grados del pilar angulado, ej "30"; "" si no está escrita).
+      - pilar_ref: (REF del pilar escrita a mano, ej "HE48865"; "" si no está o si es la de un pilar de cicatrización).
 
       Salida OBLIGATORIA: Un array JSON puro. Ejemplo:
-      [{"fecha_colocacion":"2024-09-09","marca":"Southern Implants","modelo":"ExHex Zygan","conexion":"Hexágono Externo","plataforma":"RP (Regular)","referencia":"ZYGAN-47.5","lote":"085003","diametro":4.3,"longitud":47.5,"posicion":"25","pilar":"Multi-unit 1.5 mm"}]
+      [{"fecha_colocacion":"2024-09-09","marca":"Southern Implants","modelo":"ExHex Zygan","conexion":"Hexágono Externo","plataforma":"RP (Regular)","referencia":"ZYGAN-47.5","lote":"085003","diametro":4.3,"longitud":47.5,"posicion":"25","pilar":"Multi-unit","pilar_altura":"1.5","pilar_angulacion":"","pilar_ref":""}]
     `;
   }
 
@@ -92,9 +100,23 @@ var ScanEngine = (function () {
     const jsonString = cleanJson(raw);
     const results = JSON.parse(jsonString);
     const items = Array.isArray(results) ? results : [results];
+    const model = pacientModel();
+    const text = function (v) { return v === undefined || v === null ? '' : String(v).trim(); };
     return items
       .filter(function (item) { return item && typeof item === 'object'; })
       .map(function (item) {
+        // Vocabulario canónico (PacientModel): "pterigo 2n Q" -> "Fisura pterigoidea
+        // (cuadrante 2)", "NO" -> "Sin pilar", "Multi-unit 3 mm" -> "Multi-unit" + 3.
+        const pilarCru = text(item.pilar);
+        const pilar = model.normalitzarTipusPilar(pilarCru) || 'Sin pilar';
+        let altura = text(item.pilar_altura);
+        if (!altura && pilar === 'Multi-unit') {
+          const m = pilarCru.match(/(\d+(?:[.,]\d+)?)\s*mm/i);
+          if (m) altura = m[1].replace(',', '.');
+        }
+        // "Sin pilar" no tiene detalles, y "A cabeza de implante" en una ficha es el "+PC":
+        // su altura y su REF son del pilar provisional (no se guardan aunque la IA las dé).
+        const senseDetalls = pilar === 'Sin pilar' || pilar === 'A cabeza de implante';
         return {
           fecha_colocacion: item.fecha_colocacion,
           marca: item.marca,
@@ -105,10 +127,20 @@ var ScanEngine = (function () {
           lote: item.lote,
           diametro: item.diametro,
           longitud: item.longitud,
-          posicion: item.posicion,
-          pilar: item.pilar
+          posicion: model.normalitzarPosicio(item.posicion),
+          pilar: pilar,
+          pilar_altura: senseDetalls ? '' : altura,
+          pilar_angulacion: senseDetalls ? '' : text(item.pilar_angulacion),
+          pilar_ref: senseDetalls ? '' : text(item.pilar_ref).replace(/\s+/g, '').toUpperCase()
         };
       });
+  }
+
+  // En GAS, PacientModel es un global (otro archivo del proyecto); en Node, un módulo.
+  // Se resuelve al usarlo, no al cargar, porque el orden de carga de GAS no está garantizado.
+  function pacientModel() {
+    if (typeof PacientModel !== 'undefined') return PacientModel;
+    return require('./PacientModel.js');
   }
 
   // Ordered by preference, not by whatever order the API happens to return models in.

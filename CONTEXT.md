@@ -42,6 +42,29 @@ Una pieza colocada en una posición dental. En la hoja, cada fila es un implante
 **DNI parcial**:
 El DNI con la mayoría de cifras tapadas (`***4567**`) que el paciente ve en el portal y en el pasaporte, para reconocerse. El DNI completo nunca sale hacia el paciente.
 
+**Posición**:
+Dónde está el implante: un diente en numeración FDI (11-48) o una fisura pterigoidea. En las fichas se anota a mano con una "Z" de zona, como "Z(24)".
+_Avoid_: diente (cuando es pterigoidea)
+
+**Fisura pterigoidea**:
+Posición de un implante que va por detrás del último molar superior, en la apófisis pterigoides. No es el 18 ni el 28. Se escribe "Fisura pterigoidea (cuadrante 1)" o "(cuadrante 2)", en castellano porque la ve el paciente. En la ficha aparece como "Z(Pterigo)", con el cuadrante al lado ("2n Q", "1r quadrant").
+_Avoid_: 18, 28, PT
+
+**Pilar**:
+La pieza que une el implante con la prótesis. Tiene un **tipo** (Multi-unit, A cabeza de implante o Sin pilar), que es obligatorio, y unos **detalles** opcionales: alçada, angulació, marca, connexió y referència.
+_Avoid_: aditamento, pilar transepitelial
+
+**A cabeza de implante**:
+Tipo de pilar en el que la prótesis va directamente sobre el implante. Es lo que significa "+PC" en la ficha.
+
+**PC (pilar de cicatrización)**:
+Pieza provisional que se pone en la cirugía mientras cicatriza la encía, anotada como "+PC 4 (HE41404)". Se cambia por el pilar definitivo meses después. Sus medidas y su referencia no son las del pilar.
+_Avoid_: healing cap (en la interfaz)
+
+**Sin pilar**:
+El implante no lleva pilar. Sustituye al antiguo "NO". No es lo mismo que el pilar vacío, que quiere decir que aún no se sabe.
+_Avoid_: NO, No
+
 ## Envíos
 
 **Avís a la secretària**:

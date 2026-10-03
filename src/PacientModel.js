@@ -16,12 +16,12 @@ function crearPacientModel() {
   // Orden canónico de la hoja: primero los datos del paciente, juntos; después los del
   // implante. Cada fila de la hoja es un implante y repite los datos del paciente.
   const COLUMNES = [
-    { clau: 'codi_acces', capcalera: "Codi d'accés", grup: 'pacient', alies: ['Código', 'Codigo', 'Código Paciente', 'Código de paciente'] },
-    { clau: 'cuenta_quartup', capcalera: 'Cuenta Quartup', grup: 'pacient', alies: ['id_quartup', 'ID Quartup', 'Cuenta'] },
+    { clau: 'codi_acces', capcalera: "Codi d'accés", grup: 'pacient', text: true, alies: ['Código', 'Codigo', 'Código Paciente', 'Código de paciente'] },
+    { clau: 'cuenta_quartup', capcalera: 'Cuenta Quartup', grup: 'pacient', text: true, alies: ['id_quartup', 'ID Quartup', 'Cuenta'] },
     { clau: 'nombre', capcalera: 'Nom', grup: 'pacient', alies: ['Nombre', 'Nombre Completo'] },
     { clau: 'email', capcalera: 'Email', grup: 'pacient', alies: ['Correo', 'E-mail', 'Correo electrónico'] },
     { clau: 'sense_email', capcalera: 'Sense email', grup: 'pacient', casella: true, alies: [] },
-    { clau: 'dni', capcalera: 'DNI', grup: 'pacient', alies: ['NIF', 'DNI/NIE'] },
+    { clau: 'dni', capcalera: 'DNI', grup: 'pacient', text: true, alies: ['NIF', 'DNI/NIE'] },
     { clau: 'sense_dni', capcalera: 'Sense DNI', grup: 'pacient', casella: true, alies: [] },
     { clau: 'posicion', capcalera: 'Posició', grup: 'implant', alies: ['Posición', 'Posición diente', 'Diente'] },
     { clau: 'fecha_colocacion', capcalera: 'Data de col·locació', grup: 'implant', alies: ['Fecha', 'Fecha de colocación', 'Fecha colocación', 'Data'] },
@@ -31,6 +31,13 @@ function crearPacientModel() {
     { clau: 'plataforma', capcalera: 'Plataforma', grup: 'implant', alies: [] },
     { clau: 'conexion', capcalera: 'Connexió', grup: 'implant', alies: ['Conexión'] },
     { clau: 'pilar', capcalera: 'Pilar', grup: 'implant', alies: ['Pilar transepitelial', 'Aditamentos'] },
+    // Detalles del pilar (S4): opcionales. Como texto, para que Sheets no convierta
+    // "0196" en 196 ni "1.5" en una fecha.
+    { clau: 'pilar_altura', capcalera: 'Pilar alçada (mm)', grup: 'implant', text: true, alies: ['Pilar alçada', 'Pilar altura', 'Altura pilar'] },
+    { clau: 'pilar_angulacion', capcalera: 'Pilar angulació (º)', grup: 'implant', text: true, alies: ['Pilar angulació', 'Pilar angulación', 'Angulación pilar'] },
+    { clau: 'pilar_marca', capcalera: 'Pilar marca', grup: 'implant', alies: ['Marca pilar'] },
+    { clau: 'pilar_conexion', capcalera: 'Pilar connexió', grup: 'implant', alies: ['Pilar conexión', 'Conexión pilar'] },
+    { clau: 'pilar_ref', capcalera: 'Pilar ref', grup: 'implant', text: true, alies: ['Pilar referència', 'Pilar referencia', 'Ref pilar'] },
     { clau: 'cod_implante', capcalera: 'Codi implant', grup: 'implant', alies: ['Código de implante', 'Cod. Implante', 'Código implante', 'Referencia'] },
     { clau: 'lote', capcalera: 'Lot', grup: 'implant', alies: ['Lote'] }
   ];
@@ -490,6 +497,203 @@ function crearPacientModel() {
     return { files: novesFiles, pacients: Object.keys(pacients).length, filesTocades };
   }
 
+  // --- Posición dental (S4) ---
+  //
+  // Una posición es un diente FDI (11-48) o una de las dos fisuras pterigoideas, que van
+  // por detrás del 18 / 28 y por eso NO se guardan como 18 / 28. El texto está en
+  // castellano porque lo ve el paciente en el portal y en el PDF.
+
+  const PTERIGOIDEA = {
+    1: 'Fisura pterigoidea (cuadrante 1)',
+    2: 'Fisura pterigoidea (cuadrante 2)'
+  };
+  const POSICIONS_PTERIGOIDEES = [PTERIGOIDEA[1], PTERIGOIDEA[2]];
+  const SENSE_POSICIO = 'No especificado';
+  const RE_FDI = /^(1[1-8]|2[1-8]|3[1-8]|4[1-8])$/;
+
+  function esPterigoidea(v) {
+    return /p?\s*t\s*e\s*r\s*i\s*[gsj]|pterig|ptg/i.test(String(v === undefined || v === null ? '' : v));
+  }
+
+  /**
+   * Lleva a la forma canónica lo que escriba la IA o la persona: "25" -> "25",
+   * "pterigo 2n Q" -> "Fisura pterigoidea (cuadrante 2)". Una pterigoidea sin cuadrante
+   * claro (ninguno o los dos) -> "No especificado", para que se elija a mano.
+   * Lo que no se reconoce se devuelve tal cual (recortado).
+   */
+  function normalitzarPosicio(v) {
+    const s = String(v === undefined || v === null ? '' : v).trim();
+    if (RE_FDI.test(s)) return s;
+    if (!esPterigoidea(s)) return s;
+    // El cuadrante es un 1 o un 2 suelto ("2n Q", "Q1", "1r quadrant", "cuadrante 2").
+    // Fechas y números de dos o más cifras (un diente "16", "12mm") no cuentan: de ahí
+    // NO se deduce el cuadrante, se elige a mano.
+    const net = s.replace(/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/g, ' ').replace(/\d{2,}/g, ' ');
+    const quadrants = unics(net.match(/(?<!\d)[12](?!\d)/g) || []);
+    return quadrants.length === 1 ? PTERIGOIDEA[quadrants[0]] : SENSE_POSICIO;
+  }
+
+  function esPosicioValida(v) {
+    const s = String(v === undefined || v === null ? '' : v).trim();
+    return RE_FDI.test(s) || POSICIONS_PTERIGOIDEES.indexOf(s) !== -1;
+  }
+
+  /** Número para ordenar: el diente FDI; la pterigoidea justo después del 18 / 28. */
+  function ordrePosicio(v) {
+    const s = String(v === undefined || v === null ? '' : v).trim();
+    if (s === PTERIGOIDEA[1]) return 18.5;
+    if (s === PTERIGOIDEA[2]) return 28.5;
+    return parseInt(s.replace(/\D/g, ''), 10) || 0;
+  }
+
+  // --- Pilar (S4) ---
+  //
+  // `pilar` es el TIPO (obligatorio); el resto de campos del pilar son detalles opcionales.
+  // Los valores del tipo van en castellano: los ve el paciente.
+
+  const TIPUS_PILAR = ['Multi-unit', 'A cabeza de implante', 'Sin pilar'];
+  const CAMPS_PILAR = ['pilar', 'pilar_altura', 'pilar_angulacion', 'pilar_marca', 'pilar_conexion', 'pilar_ref'];
+
+  // Marcas que se reconocen en el texto de Quartup aunque no estén aún en el catálogo.
+  // Sin nombres de 3 letras (MIS): se buscan dentro del texto y saldrían en cualquier palabra.
+  const MARQUES_CONEGUDES = ['Avinent', 'Ticare', 'Southern Implants', 'Straumann', 'Nobel Biocare', 'Zimmer', 'Klockner', 'Mozo-Grau', 'BioHorizons', 'Neodent', 'Osstem', 'Elité Medica'];
+
+  /**
+   * "NO" / "No" / "sin pilar" -> "Sin pilar"; "Mt-U", "multi unit"... -> "Multi-unit";
+   * "+PC" (pilar de cicatrización) o "a cabeza" -> "A cabeza de implante".
+   * Vacío se queda vacío (no sabemos). Otro texto se devuelve tal cual.
+   */
+  function normalitzarTipusPilar(v) {
+    const s = String(v === undefined || v === null ? '' : v).trim();
+    if (!s) return '';
+    const n = normalitzar(s);
+    if (n === 'no' || n === 'sinpilar' || n === 'sensepilar' || n === 'nohaypilar') return 'Sin pilar';
+    if (/^(no|sin|sense|sense\s+de)\b/i.test(s)) return s; // "no multi unit": negación, no se adivina
+    if (/mult[iy]?\s*[-.]?\s*u|\bmt\s*[-.]?\s*u\b|\bmiu\b|\bmi\.?\s*u\b/i.test(s)) return 'Multi-unit';
+    if (/cabeza|cap\s+d.?implant|\bpc\s*\d|^\+?\s*pc\b|cicatriz/i.test(s)) return 'A cabeza de implante';
+    return s;
+  }
+
+  function numero(s) {
+    return String(s).replace(',', '.');
+  }
+
+  /**
+   * Analiza el texto de pilar que la Auxiliar copia de Quartup, p. ej.
+   * "0196, mult-unit 3mm avinent hexagon externo : 2.00, 25,26" o "Multi-unit 30x5 mm HE48865".
+   * Tolerante: lo que reconoce lo devuelve; lo que no, no rellena nada.
+   * @param {string} text
+   * @param {string[]} [marques] marcas del catálogo, para reconocer la marca
+   * @returns {{ camps: object, posicions: string[], quantitat: number|null, reconegut: boolean }}
+   *   `camps` solo lleva las claves reconocidas (de CAMPS_PILAR).
+   */
+  function analitzarTextPilar(text, marques) {
+    let resta = ' ' + String(text === undefined || text === null ? '' : text).replace(/\s+/g, ' ') + ' ';
+    const camps = {};
+    const treure = re => { resta = resta.replace(re, ' '); };
+
+    // Fechas fuera: no son ni REF ni posiciones.
+    treure(/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/g);
+
+    // Cantidad de Quartup (": 2.00"), antes que nada para no confundirla con medidas.
+    let quantitat = null;
+    const mQ = resta.match(/:\s*(\d+)[.,]\d{2}\b/);
+    if (mQ) { quantitat = parseInt(mQ[1], 10); treure(mQ[0]); }
+
+    // Angulado: "30x5 mm", "30º 5mm", "30° x 5 mm".
+    const mAng = resta.match(/\b(\d{1,2})\s*(?:º|°|x|×)\s*(?:x\s*)?(\d+(?:[.,]\d+)?)\s*mm\b/i);
+    if (mAng && parseInt(mAng[1], 10) >= 10 && parseInt(mAng[1], 10) <= 60) {
+      camps.pilar_angulacion = mAng[1];
+      camps.pilar_altura = numero(mAng[2]);
+      treure(mAng[0]);
+    } else {
+      const mGraus = resta.match(/\b(\d{1,2})\s*(?:º|°|graus|grados)/i);
+      if (mGraus) { camps.pilar_angulacion = mGraus[1]; treure(mGraus[0]); }
+    }
+    if (!camps.pilar_altura) {
+      const mMm = resta.match(/\b(\d+(?:[.,]\d+)?)\s*mm\b/i);
+      if (mMm) { camps.pilar_altura = numero(mMm[1]); treure(mMm[0]); }
+    }
+
+    const tipus = normalitzarTipusPilar(resta);
+    // "+PC 4 (HE41404)" es el pilar de cicatrización (provisional): su REF no es la del pilar.
+    const esPC = tipus === 'A cabeza de implante' && /\bpc\b|cicatriz/i.test(resta);
+    if (tipus === 'Multi-unit' || tipus === 'A cabeza de implante') {
+      camps.pilar = tipus;
+      treure(/mult[iy]?\s*[-.]?\s*unit|mult[iy]?\s*[-.]?\s*u\b|\bmt\s*[-.]?\s*u\b|\bmiu\b|a cabeza( de implante)?|\+?\s*\bpc\b/ig);
+    }
+
+    // Conexión: "hexagon externo", "hex. interna", "externa"...
+    const mCon = resta.match(/(?:hex[aà]?g?o?n?o?\.?\s*)?\b(extern|intern)[oa]?\b/i);
+    if (mCon) {
+      camps.pilar_conexion = /extern/i.test(mCon[1]) ? 'Externa' : 'Interna';
+      treure(mCon[0]);
+    }
+
+    const llistaMarques = (marques || []).concat(MARQUES_CONEGUDES);
+    const nResta = normalitzar(resta);
+    const marca = llistaMarques.find(m => {
+      const nm = normalitzar(m).replace(/implants?$/, '');
+      return nm.length >= 4 && nResta.indexOf(nm) !== -1;
+    });
+    if (marca) {
+      camps.pilar_marca = marca;
+      const primera = String(marca).split(/\s+/)[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      treure(new RegExp(primera + '\\w*', 'i'));
+    }
+
+    // Referencia: "0196", "HE48865", "HE 41404", "TWADBT2-RP" (la primera que quede). Las
+    // letras sueltas separadas por espacio ("MU 0196") no son parte de la REF.
+    const mRef = resta.match(/\b(HE\s?\d{3,}[A-Z0-9-]*|[A-Z]{1,6}\d[A-Z0-9]*-[A-Z0-9-]+|[A-Z]{1,4}\d{3,}[A-Z0-9-]*|\d{4,}[A-Z0-9-]*)\b/i);
+    if (mRef && !esPC) { camps.pilar_ref = mRef[1].replace(/\s+/g, '').toUpperCase(); treure(mRef[0]); }
+    // El PC es provisional: ni su altura ni su REF son las del pilar.
+    if (esPC) delete camps.pilar_altura;
+
+    // Posiciones: los dientes FDI que quedan sueltos ("25,26").
+    const posicions = unics((resta.match(/\b[1-4][1-8]\b/g) || []).filter(p => RE_FDI.test(p)));
+
+    return { camps, posicions, quantitat, reconegut: Object.keys(camps).length > 0 };
+  }
+
+  /**
+   * Plan puro de la migración del pilar (S4): "NO" / "No" -> "Sin pilar";
+   * "Multi-unit 3 mm" -> tipo "Multi-unit" + alçada 3 (si la alçada estaba vacía).
+   * Vacío no se toca (puede ser que aún no se sepa). Otro texto se deja y se cuenta.
+   * Idempotente. Necesita las columnas Pilar y Pilar alçada (asegurarColumnas).
+   * @returns {{ files: any[][], filesTocades: number, sensePilar: number, multiUnit: number, altres: string[] }}
+   */
+  function planificarMigracioPilars(headers, files) {
+    const { idx } = indexarCapcaleres(headers);
+    if (idx.pilar === undefined || idx.pilar_altura === undefined) {
+      throw new Error('No trobo les columnes "Pilar" i "Pilar alçada (mm)".');
+    }
+    let filesTocades = 0, sensePilar = 0, multiUnit = 0;
+    const altres = [];
+    const novesFiles = files.map(f => {
+      if (filaBuida(f)) return f;
+      const actual = String(f[idx.pilar] === undefined || f[idx.pilar] === null ? '' : f[idx.pilar]).trim();
+      if (!actual) return f;
+      const tipus = normalitzarTipusPilar(actual);
+      let altura = String(f[idx.pilar_altura] || '').trim();
+      if (tipus === 'Multi-unit' && !altura) {
+        const m = actual.match(/(\d+(?:[.,]\d+)?)\s*mm/i);
+        if (m) altura = numero(m[1]);
+      }
+      if (tipus === actual && altura === String(f[idx.pilar_altura] || '').trim()) {
+        if (TIPUS_PILAR.indexOf(actual) === -1 && altres.indexOf(actual) === -1) altres.push(actual);
+        return f;
+      }
+      const copia = f.slice();
+      copia[idx.pilar] = tipus;
+      copia[idx.pilar_altura] = altura;
+      filesTocades++;
+      if (tipus === 'Sin pilar') sensePilar++;
+      if (tipus === 'Multi-unit') multiUnit++;
+      return copia;
+    });
+    return { files: novesFiles, filesTocades, sensePilar, multiUnit, altres };
+  }
+
   function unics(llista) {
     return llista.filter((v, i) => llista.indexOf(v) === i);
   }
@@ -513,7 +717,17 @@ function crearPacientModel() {
     aplicarRevisio,
     planificarFusio,
     planificarCanviCuenta,
-    marcarSenseDni
+    marcarSenseDni,
+    POSICIONS_PTERIGOIDEES,
+    SENSE_POSICIO,
+    normalitzarPosicio,
+    esPosicioValida,
+    ordrePosicio,
+    TIPUS_PILAR,
+    CAMPS_PILAR,
+    normalitzarTipusPilar,
+    analitzarTextPilar,
+    planificarMigracioPilars
   };
 }
 

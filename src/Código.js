@@ -44,7 +44,8 @@ function onOpen() {
       .addSubMenu(ui.createMenu('🗂️ Migració de dades')
           .addItem('1. Migrar la fulla (una sola vegada)', 'migrarDadesS2')
           .addItem('2. Aplicar les Cuentes de la revisió', 'aplicarCuentesRevisio')
-          .addItem('3. Marcar "Sense DNI" als pacients sense DNI', 'marcarSenseDniMenu'))
+          .addItem('3. Marcar "Sense DNI" als pacients sense DNI', 'marcarSenseDniMenu')
+          .addItem('4. Posar al dia els pilars ("NO" -> "Sin pilar")', 'migrarPilarsMenu'))
       .addItem('🔑 Autoritzar el meu compte', 'autorizarCuenta')
       .addToUi();
 }
@@ -136,12 +137,15 @@ function ponerCasillas(sheet, headers, filaInicio, numFilas) {
   });
 }
 
-/** Columnas que se guardan como texto, para que Sheets no convierta 012345 o 4300... en número. */
+/**
+ * Columnas que se guardan como texto (`text: true` en el registro), para que Sheets no
+ * convierta 012345 o 4300... en número, ni "1.5" (alçada del pilar) en una fecha.
+ */
 function ponerFormatoTexto(sheet, headers, filaInicio, numFilas) {
   if (numFilas <= 0) return;
   const { idx } = PacientModel.indexarCapcaleres(headers);
-  ['codi_acces', 'cuenta_quartup', 'dni'].forEach(k => {
-    if (idx[k] !== undefined) sheet.getRange(filaInicio, idx[k] + 1, numFilas, 1).setNumberFormat('@');
+  PacientModel.COLUMNES.filter(c => c.text && idx[c.clau] !== undefined).forEach(c => {
+    sheet.getRange(filaInicio, idx[c.clau] + 1, numFilas, 1).setNumberFormat('@');
   });
 }
 
@@ -1450,6 +1454,56 @@ function marcarSenseDniMenu() {
     lock.releaseLock();
   }
   ui.alert('Fet ✅', `"Sense DNI" marcat a ${r.pacients} pacients.`, ui.ButtonSet.OK);
+}
+
+/**
+ * S4: pone el pilar de las filas antiguas en el vocabulario nuevo ("NO" -> "Sin pilar",
+ * "Multi-unit 3 mm" -> "Multi-unit" + alçada 3) y crea las columnas de detalles del pilar.
+ * Idempotente: se puede volver a lanzar sin cambiar nada.
+ */
+function migrarPilarsMenu() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = hojaPacientes();
+  let previa;
+  try {
+    asegurarColumnas(sheet);
+    const { headers, files } = leerPacientes(sheet);
+    previa = PacientModel.planificarMigracioPilars(headers, files);
+  } catch (e) {
+    ui.alert('Error', e.message, ui.ButtonSet.OK);
+    return;
+  }
+  const altres = previa.altres.length
+    ? `\n\nAquests valors no es toquen (revisa'ls a mà si cal): ${previa.altres.slice(0, 15).join(' | ')}${previa.altres.length > 15 ? '...' : ''}`
+    : '';
+  if (!previa.filesTocades) {
+    ui.alert('Res a canviar', 'Els pilars ja estan al dia.' + altres, ui.ButtonSet.OK);
+    return;
+  }
+  const ok = ui.alert('Posar al dia els pilars',
+    `Es canviaran ${previa.filesTocades} files d'implants:\n` +
+    `- ${previa.sensePilar} amb "NO" passen a "Sin pilar"\n` +
+    `- ${previa.multiUnit} Multi-unit passen a tipus + alçada (mm) a la seva columna` +
+    altres + '\n\nVols continuar?',
+    ui.ButtonSet.YES_NO);
+  if (ok !== ui.Button.YES) return;
+
+  // Se recalcula dentro del lock: mientras el diálogo estaba abierto el panel pudo guardar.
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  let r;
+  try {
+    const { headers, idx, files } = leerPacientes(sheet);
+    r = PacientModel.planificarMigracioPilars(headers, files);
+    if (r.filesTocades) {
+      ponerFormatoTexto(sheet, headers, 2, r.files.length);
+      sheet.getRange(2, idx.pilar + 1, r.files.length, 1).setValues(r.files.map(f => [f[idx.pilar]]));
+      sheet.getRange(2, idx.pilar_altura + 1, r.files.length, 1).setValues(r.files.map(f => [f[idx.pilar_altura]]));
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  ui.alert('Fet ✅', `${r.filesTocades} files d'implants actualitzades.`, ui.ButtonSet.OK);
 }
 
 /**

@@ -1,0 +1,50 @@
+[
+  {
+    "fecha_colocacion": "2026-04-22",
+    "marca": "Ticare",
+    "modelo": "Osseous Implante dental ONE",
+    "conexion": "Hexágono Externo",
+    "plataforma": "RP (Regular)",
+    "referencia": "14623713",
+    "lote": "3808903625",
+    "diametro": 3.75,
+    "longitud": 13.0,
+    "posicion": "35",
+    "pilar": "Multi-unit",
+    "pilar_altura": "5",
+    "pilar_angulacion": "30",
+    "pilar_ref": "HE48865"
+  },
+  {
+    "fecha_colocacion": "2026-04-22",
+    "marca": "Ticare",
+    "modelo": "Osseous Implante dental ONE",
+    "conexion": "Hexágono Externo",
+    "plataforma": "RP (Regular)",
+    "referencia": "14623710",
+    "lote": "4300305025",
+    "diametro": 3.75,
+    "longitud": 10.0,
+    "posicion": "42",
+    "pilar": "Multi-unit",
+    "pilar_altura": "5",
+    "pilar_angulacion": "",
+    "pilar_ref": "HE48805"
+  },
+  {
+    "fecha_colocacion": "2026-04-22",
+    "marca": "Ticare",
+    "modelo": "Osseous Implante dental ONE",
+    "conexion": "Hexágono Externo",
+    "plataforma": "RP (Regular)",
+    "referencia": "14624218",
+    "lote": "3221902923",
+    "diametro": 4.25,
+    "longitud": 18.0,
+    "posicion": "Fisura pterigoidea (cuadrante 1)",
+    "pilar": "A cabeza de implante",
+    "pilar_altura": "",
+    "pilar_angulacion": "",
+    "pilar_ref": ""
+  }
+]

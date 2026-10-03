@@ -664,6 +664,56 @@ test('corregirCuenta cambia la Cuenta equivocada de otra ficha y libera la buena
   assert.equal(ss.getSheetByName('Pacientes').formats.get('2,2'), '@');
 });
 
+test('migrarPilarsMenu crea las columnas del pilar y pone al día los pilares antiguos', () => {
+  const ss = libroAntiguo();
+  const sheet = ss.getSheetByName('Pacientes');
+  sheet.set(3, 12, 'Multi-unit 1.5 mm'); // Maria, 36
+  const { ctx, alerts } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  ctx.migrarPilarsMenu();
+
+  const objs = objetosDe(ctx, ss.getSheetByName('Pacientes'));
+  assert.deepEqual(objs.map(o => [o.posicion, o.pilar, o.pilar_altura]),
+    [[11, 'Sin pilar', ''], [36, 'Multi-unit', '1.5'], [46, 'Sin pilar', '']]);
+  const headers = ss.getSheetByName('Pacientes').rows()[0];
+  const { idx } = ctx.PacientModel.indexarCapcaleres(headers);
+  // La alçada como texto: "1.5" no puede acabar siendo una fecha.
+  assert.equal(ss.getSheetByName('Pacientes').formats.get('3,' + (idx.pilar_altura + 1)), '@');
+  assert.match(alerts[alerts.length - 1][1], /3 files/);
+
+  ctx.migrarPilarsMenu(); // idempotente
+  assert.match(alerts[alerts.length - 1][1], /ja estan al dia/);
+});
+
+test('saveNewImplant guarda la pterigoidea y los detalles del pilar, y el portal los recibe', () => {
+  const ss = libroAntiguo();
+  const { ctx } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  const pterigo = Object.assign({}, IMPLANT, {
+    posicion: 'Fisura pterigoidea (cuadrante 2)', pilar: 'Multi-unit', pilar_altura: '5', pilar_angulacion: '30',
+    pilar_marca: 'Ticare', pilar_conexion: 'Externa', pilar_ref: '0196'
+  });
+  const res = ctx.saveNewImplant({
+    codi_acces: 'GENERAR', cuenta_quartup: '43000600', nombre: 'Jordi Pla', email: '', sense_email: true,
+    dni: '', sense_dni: true, sendEmail: 'false', implantes: [pterigo]
+  });
+  assert.equal(res.ok, true, res.message);
+
+  const sheet = ss.getSheetByName('Pacientes');
+  const jordi = objetosDe(ctx, sheet).find(o => o.nombre === 'Jordi Pla');
+  assert.equal(jordi.posicion, 'Fisura pterigoidea (cuadrante 2)');
+  assert.deepEqual([jordi.pilar, jordi.pilar_altura, jordi.pilar_angulacion, jordi.pilar_marca, jordi.pilar_conexion, jordi.pilar_ref],
+    ['Multi-unit', '5', '30', 'Ticare', 'Externa', '0196']);
+  const { idx } = ctx.PacientModel.indexarCapcaleres(sheet.rows()[0]);
+  assert.equal(sheet.formats.get(sheet.getLastRow() + ',' + (idx.pilar_ref + 1)), '@'); // "0196" no pierde el 0
+
+  // El portal (S5 lo mostrará) recibe la pterigoidea y los detalles del pilar.
+  const portal = JSON.stringify(ctx.getPatientDataVerbose(res.newCode));
+  assert.ok(portal.indexOf('"pilar_ref":"0196"') !== -1, portal.slice(0, 400));
+  assert.ok(portal.indexOf('"pilar_angulacion":"30"') !== -1);
+  assert.ok(portal.indexOf('Fisura pterigoidea (cuadrante 2)') !== -1);
+});
+
 test('marcarSenseDniMenu marca Sense DNI y el DNI que llega después lo desmarca', () => {
   const ss = libroAntiguo();
   const { ctx } = cargarCodigo(ss);

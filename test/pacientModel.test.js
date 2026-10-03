@@ -327,3 +327,132 @@ test('marcarSenseDni marca solo a los pacientes sin DNI en ninguna fila', () => 
   assert.ok(objs.filter(o => o.codi_acces === 'BBB222').every(o => o.sense_dni === false));
   assert.equal(PM.marcarSenseDni(PM.CAPCALERES, r.files).pacients, 0, 'idempotente');
 });
+
+// --- S4: posición (fisura pterigoidea) ---
+
+test('normalitzarPosicio reconoce la fisura pterigoidea y su cuadrante, y nunca la convierte en 18/28', () => {
+  assert.equal(PM.normalitzarPosicio('25'), '25');
+  assert.equal(PM.normalitzarPosicio(' 46 '), '46');
+  assert.equal(PM.normalitzarPosicio('Fisura pterigoidea (cuadrante 2)'), 'Fisura pterigoidea (cuadrante 2)');
+  assert.equal(PM.normalitzarPosicio('Z(Pterigo) 2n Q.'), 'Fisura pterigoidea (cuadrante 2)');
+  assert.equal(PM.normalitzarPosicio('pteriso 1r quadrant'), 'Fisura pterigoidea (cuadrante 1)');
+  assert.equal(PM.normalitzarPosicio('terigoidea Q1'), 'Fisura pterigoidea (cuadrante 1)');
+  assert.equal(PM.normalitzarPosicio('ptg 2'), 'Fisura pterigoidea (cuadrante 2)');
+  // Sin cuadrante, o con los dos: se elige a mano.
+  assert.equal(PM.normalitzarPosicio('pterigoideo'), 'No especificado');
+  assert.equal(PM.normalitzarPosicio('pterigo 1 o 2'), 'No especificado');
+  // Lo que no es pterigoidea se deja tal cual.
+  assert.equal(PM.normalitzarPosicio('No especificado'), 'No especificado');
+  assert.equal(PM.normalitzarPosicio('interior'), 'interior');
+});
+
+test('esPosicioValida acepta 11-48 y las dos pterigoideas, nada más', () => {
+  ['11', '18', '28', '48', 'Fisura pterigoidea (cuadrante 1)', 'Fisura pterigoidea (cuadrante 2)'].forEach(v =>
+    assert.equal(PM.esPosicioValida(v), true, v));
+  ['10', '19', '49', '', 'No especificado', 'Fisura pterigoidea', 'Fisura pterigoidea (cuadrante 3)'].forEach(v =>
+    assert.equal(PM.esPosicioValida(v), false, v));
+});
+
+test('ordrePosicio pone la pterigoidea justo después del 18 / 28', () => {
+  const posicions = ['21', 'Fisura pterigoidea (cuadrante 2)', '28', '11', 'Fisura pterigoidea (cuadrante 1)', '18', '31'];
+  const ordenades = posicions.slice().sort((a, b) => PM.ordrePosicio(a) - PM.ordrePosicio(b));
+  assert.deepEqual(ordenades, ['11', '18', 'Fisura pterigoidea (cuadrante 1)', '21', '28', 'Fisura pterigoidea (cuadrante 2)', '31']);
+  assert.equal(PM.ordrePosicio('No especificado'), 0); // como el portal de antes
+});
+
+// --- S4: pilar ---
+
+test('normalitzarTipusPilar lleva el vocabulario antiguo y el de la ficha al tipo canónico', () => {
+  assert.equal(PM.normalitzarTipusPilar('NO'), 'Sin pilar');
+  assert.equal(PM.normalitzarTipusPilar('No'), 'Sin pilar');
+  assert.equal(PM.normalitzarTipusPilar('Sin pilar'), 'Sin pilar');
+  assert.equal(PM.normalitzarTipusPilar('Multi-unit 3 mm'), 'Multi-unit');
+  assert.equal(PM.normalitzarTipusPilar('+Mt-U 5mm'), 'Multi-unit');
+  assert.equal(PM.normalitzarTipusPilar('+ PC 4 (HE41404)'), 'A cabeza de implante');
+  assert.equal(PM.normalitzarTipusPilar('Pc5'), 'A cabeza de implante');
+  assert.equal(PM.normalitzarTipusPilar('A cabeza de implante'), 'A cabeza de implante');
+  assert.equal(PM.normalitzarTipusPilar(''), ''); // vacío = aún no se sabe
+  assert.equal(PM.normalitzarTipusPilar('Locator'), 'Locator');
+});
+
+test('analitzarTextPilar entiende el texto de Quartup', () => {
+  const r = PM.analitzarTextPilar('0196, mult-unit 3mm avinent hexagon externo : 2.00, 25,26');
+  assert.deepEqual(r.camps, { pilar: 'Multi-unit', pilar_altura: '3', pilar_marca: 'Avinent', pilar_conexion: 'Externa', pilar_ref: '0196' });
+  assert.deepEqual(r.posicions, ['25', '26']);
+  assert.equal(r.quantitat, 2);
+  assert.equal(r.reconegut, true);
+});
+
+test('analitzarTextPilar: angulado "30x5 mm", referencia "ref: 0190" y marca del catálogo', () => {
+  assert.deepEqual(PM.analitzarTextPilar('Multi-unit 30x5 mm HE48865').camps,
+    { pilar: 'Multi-unit', pilar_angulacion: '30', pilar_altura: '5', pilar_ref: 'HE48865' });
+  assert.deepEqual(PM.analitzarTextPilar('multi-unit 1 mm avinent hexagon externo ref: 0190').camps,
+    { pilar: 'Multi-unit', pilar_altura: '1', pilar_marca: 'Avinent', pilar_conexion: 'Externa', pilar_ref: '0190' });
+  assert.deepEqual(PM.analitzarTextPilar('Multi-unit 1,5mm Dentium int.', ['Dentium']).camps,
+    { pilar: 'Multi-unit', pilar_altura: '1.5', pilar_marca: 'Dentium' });
+  assert.equal(PM.analitzarTextPilar('MU 2mm hex interna').camps.pilar_conexion, 'Interna');
+});
+
+test('analitzarTextPilar: "+PC" es A cabeza de implante y su REF (pilar provisional) no se guarda', () => {
+  assert.deepEqual(PM.analitzarTextPilar('+ PC 4 (HE41404)').camps, { pilar: 'A cabeza de implante' });
+});
+
+test('analitzarTextPilar no se inventa nada con un texto que no entiende', () => {
+  const r = PM.analitzarTextPilar('hola, que tal');
+  assert.deepEqual(r.camps, {});
+  assert.equal(r.reconegut, false);
+  assert.deepEqual(PM.analitzarTextPilar('').camps, {});
+  assert.deepEqual(PM.analitzarTextPilar(null).posicions, []);
+});
+
+test('planificarMigracioPilars: "NO" -> "Sin pilar", "Multi-unit 3 mm" -> tipo + alçada; idempotente', () => {
+  const headers = PM.CAPCALERES.slice();
+  const { idx } = PM.indexarCapcaleres(headers);
+  const fila = (pilar, altura) => {
+    const f = headers.map(() => '');
+    f[idx.codi_acces] = 'AAA111';
+    f[idx.posicion] = '21';
+    f[idx.pilar] = pilar;
+    f[idx.pilar_altura] = altura || '';
+    return f;
+  };
+  const files = [fila('NO'), fila('No'), fila('Multi-unit 3 mm'), fila('Multi-unit 1.5 mm', '2'), fila(''), fila('Locator'), fila('Sin pilar')];
+  const r = PM.planificarMigracioPilars(headers, files);
+  assert.deepEqual(r.files.map(f => [f[idx.pilar], f[idx.pilar_altura]]), [
+    ['Sin pilar', ''], ['Sin pilar', ''], ['Multi-unit', '3'], ['Multi-unit', '2'], ['', ''], ['Locator', ''], ['Sin pilar', '']
+  ]);
+  assert.equal(r.filesTocades, 4);
+  assert.equal(r.sensePilar, 2);
+  assert.equal(r.multiUnit, 2);
+  assert.deepEqual(r.altres, ['Locator']);
+  assert.equal(PM.planificarMigracioPilars(headers, r.files).filesTocades, 0, 'idempotente');
+});
+
+// Casos de la revisión adversarial (2026-10-03)
+test('normalitzarPosicio no saca el cuadrante de un diente, unos mm o una fecha', () => {
+  assert.equal(PM.normalitzarPosicio('Z(pterigo) 16'), 'No especificado');
+  assert.equal(PM.normalitzarPosicio('pterigo 28'), 'No especificado');
+  assert.equal(PM.normalitzarPosicio('pterigo Q1 9/2/26'), 'Fisura pterigoidea (cuadrante 1)');
+  assert.equal(PM.normalitzarPosicio('Pterigo 2 quadrant 12mm'), 'Fisura pterigoidea (cuadrante 2)');
+  assert.equal(PM.normalitzarPosicio('pterigo 1r Q 2026'), 'Fisura pterigoidea (cuadrante 1)');
+});
+
+test('analitzarTextPilar: el PC no deja altura, las fechas no son REF ni posición, "MU 0196" -> 0196', () => {
+  assert.deepEqual(PM.analitzarTextPilar('+ PC 4 mm').camps, { pilar: 'A cabeza de implante' });
+  assert.deepEqual(PM.analitzarTextPilar('+PC 4mm HE41404').camps, { pilar: 'A cabeza de implante' });
+  assert.equal(PM.analitzarTextPilar('Multi-unit 3mm Avinent MU 0196').camps.pilar_ref, '0196');
+  assert.equal(PM.analitzarTextPilar('multi-unit hex 0196').camps.pilar_ref, '0196');
+  const conData = PM.analitzarTextPilar('mult-unit 3mm 12/10/2025 0196');
+  assert.equal(conData.camps.pilar_ref, '0196');
+  assert.deepEqual(conData.posicions, []);
+  assert.equal(PM.analitzarTextPilar('multi-unit 2mm TWADBT2-RP').camps.pilar_ref, 'TWADBT2-RP');
+});
+
+test('normalitzarTipusPilar no convierte una negación en Multi-unit', () => {
+  assert.equal(PM.normalitzarTipusPilar('no multi unit'), 'no multi unit');
+  assert.equal(PM.normalitzarTipusPilar('Sin multi-unit'), 'Sin multi-unit');
+});
+
+test('planificarMigracioPilars explica qué falta si no están las columnas', () => {
+  assert.throws(() => PM.planificarMigracioPilars(["Codi d'accés", 'Pilar'], []), /Pilar alçada/);
+});

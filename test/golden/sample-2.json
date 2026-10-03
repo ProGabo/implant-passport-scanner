@@ -10,7 +10,10 @@
     "diametro": 4.1,
     "longitud": 10,
     "posicion": "36",
-    "pilar": "NO"
+    "pilar": "Sin pilar",
+    "pilar_altura": "",
+    "pilar_angulacion": "",
+    "pilar_ref": ""
   },
   {
     "fecha_colocacion": "2023-11-12",
@@ -23,6 +26,9 @@
     "diametro": 3.3,
     "longitud": 12,
     "posicion": "46",
-    "pilar": "NO"
+    "pilar": "Sin pilar",
+    "pilar_altura": "",
+    "pilar_angulacion": "",
+    "pilar_ref": ""
   }
 ]

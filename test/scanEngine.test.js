@@ -63,6 +63,30 @@ test('parseResponse renames referencia to cod_implante and keeps diametro/longit
   assert.equal(result[0].dimensiones, undefined);
 });
 
+test('parseResponse lleva la IA al vocabulario canónico: pterigoidea, "NO", "Multi-unit 3 mm" y +PC', () => {
+  const raw = JSON.stringify([
+    { referencia: 'A', posicion: 'Fisura pterigoidea (cuadrante 2)', pilar: '+PC', pilar_altura: '4', pilar_ref: 'HE41404' },
+    { referencia: 'B', posicion: 'pterigoidea 1r quadrant', pilar: 'NO' },
+    { referencia: 'C', posicion: 25, pilar: 'Multi-unit 3 mm' },
+    { referencia: 'D', posicion: '35', pilar: 'Multi-unit', pilar_altura: 5, pilar_angulacion: '30', pilar_ref: 'HE 48865' },
+    { referencia: 'E', posicion: 'pterigo', pilar: '' },
+    { referencia: 'F', posicion: '41', pilar: 'Sin pilar', pilar_altura: '3', pilar_ref: 'X1' }
+  ]);
+  const r = ScanEngine.parseResponse(raw);
+  assert.equal(r[0].posicion, 'Fisura pterigoidea (cuadrante 2)');
+  assert.equal(r[0].pilar, 'A cabeza de implante');
+  // El PC es provisional: su altura y su REF no se guardan aunque la IA las devuelva.
+  assert.deepEqual([r[0].pilar_altura, r[0].pilar_ref], ['', '']);
+  assert.equal(r[1].posicion, 'Fisura pterigoidea (cuadrante 1)');
+  assert.equal(r[1].pilar, 'Sin pilar');
+  assert.equal(r[2].posicion, '25');
+  assert.deepEqual([r[2].pilar, r[2].pilar_altura], ['Multi-unit', '3']);
+  assert.deepEqual([r[3].pilar, r[3].pilar_altura, r[3].pilar_angulacion, r[3].pilar_ref], ['Multi-unit', '5', '30', 'HE48865']);
+  assert.equal(r[4].posicion, 'No especificado');
+  assert.equal(r[4].pilar, 'Sin pilar');
+  assert.deepEqual([r[5].pilar_altura, r[5].pilar_ref], ['', '']);
+});
+
 test('parseResponse skips malformed (null/non-object) entries instead of throwing', () => {
   const raw = JSON.stringify([
     { fecha_colocacion: '2024-01-01', marca: 'Ticare', modelo: 'Inhex', referencia: 'ABC', lote: 'L1', diametro: 4, longitud: 10, posicion: '11', pilar: 'NO' },

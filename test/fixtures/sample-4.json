@@ -1,0 +1,50 @@
+[
+  {
+    "fecha_colocacion": "2026-03-04",
+    "marca": "Ticare",
+    "modelo": "Osseous",
+    "conexion": "Hexágono Externo",
+    "plataforma": "RP (Regular)",
+    "referencia": "14624213",
+    "lote": "4208204425",
+    "diametro": 4.25,
+    "longitud": 13.0,
+    "posicion": "24",
+    "pilar": "A cabeza de implante",
+    "pilar_altura": "",
+    "pilar_angulacion": "",
+    "pilar_ref": ""
+  },
+  {
+    "fecha_colocacion": "2026-03-04",
+    "marca": "Ticare",
+    "modelo": "Osseous",
+    "conexion": "Hexágono Externo",
+    "plataforma": "RP (Regular)",
+    "referencia": "14623710",
+    "lote": "4300305025",
+    "diametro": 3.75,
+    "longitud": 10.0,
+    "posicion": "25",
+    "pilar": "A cabeza de implante",
+    "pilar_altura": "",
+    "pilar_angulacion": "",
+    "pilar_ref": ""
+  },
+  {
+    "fecha_colocacion": "2026-03-04",
+    "marca": "Ticare",
+    "modelo": "Osseous",
+    "conexion": "Hexágono Externo",
+    "plataforma": "RP (Regular)",
+    "referencia": "14623715",
+    "lote": "3207102425",
+    "diametro": 3.75,
+    "longitud": 15.0,
+    "posicion": "Fisura pterigoidea (cuadrante 2)",
+    "pilar": "A cabeza de implante",
+    "pilar_altura": "",
+    "pilar_angulacion": "",
+    "pilar_ref": ""
+  }
+]
