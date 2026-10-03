@@ -1582,18 +1582,12 @@
     });
 </script>
 <script>
-    // Vista prèvia (S5): el mismo formData que se guardaría. llegirFormulari() es de S3; hasta
-    // integrarlo, se lee igual que el submit (paciente + campos de cada implante).
+    // Vista prèvia (S5): el mismo formData que se guardaría (llegirFormulari, el del submit).
+    // null = no se abre (el error ya se ha enseñado como al guardar).
     window.formDataVistaPrevia = function () {
-        if (typeof llegirFormulari === 'function') return llegirFormulari();
-        const implantes = [];
-        implantContainer.querySelectorAll('.implant-section').forEach(section => {
-            const imp = {};
-            section.querySelectorAll('.implant-field').forEach(input => { imp[input.name] = input.value.trim(); });
-            implantes.push(imp);
-        });
-        if (!implantes.length) return { error: 'Encara no hi ha cap implant.' };
-        return Object.assign(datosPaciente(), { implantes: implantes });
+        const r = llegirFormulari();
+        if (r.error) { mostrarErrorFormulari(r.error); return null; }
+        return r.formData;
     };
 </script>
 </body>

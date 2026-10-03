@@ -1,7 +1,8 @@
 <!-- Vista prèvia del pasaport (S5). Bloque reutilizable: lo incluyen el panel de alta
      (SidebarForm) y el de completar (PanelPendents, S3) con <?!= include_('VistaPrevia') ?>.
-     Cada panel define window.formDataVistaPrevia(): el mismo formData que guardaría
-     (o {error: '...'} si aún no se puede). Sin scriptlets: include_ lo inserta tal cual. -->
+     Cada panel define window.formDataVistaPrevia(): el mismo formData que guardaría, o null
+     si aún no se puede (el panel ya ha enseñado el error). Sin scriptlets: include_ lo
+     inserta tal cual. -->
 <style>
     .vp-btn { width: 100%; margin: 6px 0 10px 0; padding: 10px; font-size: 14px; border-radius: 6px;
               border: 1px solid #02234f; background: #fff; color: #02234f; cursor: pointer; font-weight: 600; }
@@ -38,11 +39,13 @@
     };
 
     btn.addEventListener('click', function () {
-        const fd = typeof window.formDataVistaPrevia === 'function' ? window.formDataVistaPrevia() : null;
-        if (!fd || fd.error) {
-            mostrar('error', (fd && fd.error) || 'Aquest panell no té vista prèvia.');
+        if (typeof window.formDataVistaPrevia !== 'function') {
+            mostrar('error', 'Aquest panell no té vista prèvia.');
             return;
         }
+        // null: el formulario aún no está listo y el panel ya ha enseñado por qué.
+        const fd = window.formDataVistaPrevia();
+        if (!fd) { mostrar('', ''); return; }
         btn.disabled = true;
         btn.innerHTML = '⏳ Preparant la vista prèvia...';
         mostrar('', '');
