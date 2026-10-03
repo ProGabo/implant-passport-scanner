@@ -427,6 +427,40 @@ function crearPacientModel() {
   }
 
   /**
+   * Corrige la Cuenta Quartup de una ficha (caso raro: chocaba con otra persona porque
+   * estaba mal puesta). `novaCuenta` vacía = se quita y la ficha queda sin Cuenta.
+   * @returns {{ files: any[][], errors: string[], filesTocades: number }}
+   */
+  function planificarCanviCuenta(headers, files, codi, novaCuenta) {
+    const { idx } = indexarCapcaleres(headers);
+    const c = String(codi || '').trim().toUpperCase();
+    const nova = String(novaCuenta === undefined || novaCuenta === null ? '' : novaCuenta).trim();
+    const errors = [];
+    const objectes = files.map(f => filaAObjecte(f, idx));
+    const codiDe = o => String(o.codi_acces || '').trim().toUpperCase();
+    if (!objectes.some(o => codiDe(o) === c)) errors.push(`No trobo la fitxa ${c}.`);
+    if (nova) {
+      const tipus = classificarIdentificador(nova);
+      if (tipus === 'dni') errors.push('Hi has posat un DNI, no la Cuenta.');
+      else if (tipus !== 'cuenta') errors.push('La Cuenta només pot tenir xifres.');
+      else {
+        const altre = pacientsUnics(objectes).find(p => p.codi_acces !== c && String(p.cuenta_quartup).trim() === nova);
+        if (altre) errors.push(`La Cuenta ${nova} també és de ${altre.nombre} (codi ${altre.codi_acces}).`);
+      }
+    }
+    if (errors.length) return { files, errors, filesTocades: 0 };
+    let filesTocades = 0;
+    const novesFiles = files.map((f, i) => {
+      if (codiDe(objectes[i]) !== c) return f;
+      const copia = f.slice();
+      copia[idx.cuenta_quartup] = nova;
+      filesTocades++;
+      return copia;
+    });
+    return { files: novesFiles, errors, filesTocades };
+  }
+
+  /**
    * Marca "Sense DNI" a todos los pacientes que no tienen DNI (no lo tenemos y no se va a
    * pedir en el panel). Si más adelante llega el DNI, al ponerlo se desmarca.
    * @returns {{ files: any[][], pacients: number, filesTocades: number }}
@@ -478,6 +512,7 @@ function crearPacientModel() {
     planificarMigracio,
     aplicarRevisio,
     planificarFusio,
+    planificarCanviCuenta,
     marcarSenseDni
   };
 }

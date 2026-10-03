@@ -655,8 +655,10 @@
     const TXT_GUARDAR = '💾 Desar-ho tot';
     const CAMPOS_PACIENTE = [cuentaInput, nombreInput, emailInput, dniInput];
     let pacienteActual = null; // datos de la ficha encontrada (null si es nueva)
+    let dadesPortades = null;  // lo escrito antes de "Obrir la fitxa", para no perderlo
 
-    function buscarPaciente() {
+    function buscarPaciente(portades) {
+        dadesPortades = portades || null; // solo "Obrir la fitxa" lleva datos
         const termino = busquedaInput.value.trim();
         if (!termino) {
             Toast.fire({ icon: 'warning', title: "Escriu la Cuenta Quartup, el DNI o el codi d'accés." });
@@ -715,8 +717,16 @@
             fijarCasilla(senseEmailCheckbox, d.sense_email, !!d.email);
             fijarCampo(dniInput, d.dni, !!d.dni);
             fijarCasilla(senseDniCheckbox, d.sense_dni, !!d.dni);
+            const portades = aplicarDadesPortades();
 
-            if (!d.cuenta_quartup) {
+            if (portades.length) {
+                Swal.fire({
+                    icon: 'info',
+                    title: `Fitxa de ${escapeHtml(d.nombre)}`,
+                    html: `<p style="text-align:left; font-size:14px;">Hi he afegit el que havies escrit i faltava: <b>${escapeHtml(portades.join(', '))}</b>. Es guardarà quan desis els implants.</p>`,
+                    confirmButtonColor: '#0ea5e9'
+                });
+            } else if (!d.cuenta_quartup) {
                 Swal.fire({
                     icon: 'warning',
                     title: 'Falta la Cuenta Quartup',
@@ -728,6 +738,7 @@
             }
         } else {
             pacienteActual = null;
+            dadesPortades = null;
             pacienteCodigoInput.value = 'GENERAR';
             patientCodeDisplay.textContent = 'NOU (es generarà un codi)';
             patientCodeDisplay.style.color = '#d97706';
@@ -822,13 +833,14 @@
             if (!res || !res.ok || res.lliure || cuentaInput.value.trim() !== valor) return;
             const a = res.altre;
             const quien = `<b>${escapeHtml(a.nombre)}</b> (codi ${escapeHtml(a.codi_acces)}, ${a.n_implants} implant(s)${a.dni ? ', DNI ' + escapeHtml(a.dni) : ''})`;
+            const noEs = `<button type="button" onclick="corregirAltra()">No és la mateixa persona</button>`;
             if (pacienteActual) {
                 cuentaConflicte.innerHTML = `Aquesta Cuenta ja és de ${quien}.<br>
                     Si és la mateixa persona, uneix les dues fitxes.<br>
-                    <button type="button" onclick="unirFitxes()">És la mateixa persona: unir</button>`;
+                    <button type="button" onclick="unirFitxes()">És la mateixa persona: unir</button> ${noEs}`;
             } else {
-                cuentaConflicte.innerHTML = `Aquesta Cuenta ja és de ${quien}. No el donis d'alta de nou: obre la seva fitxa.<br>
-                    <button type="button" onclick="obrirFitxa()">Obrir la fitxa de ${escapeHtml(a.nombre)}</button>`;
+                cuentaConflicte.innerHTML = `Aquesta Cuenta ja és de ${quien}. No el donis d'alta de nou: obre la seva fitxa (s'hi afegiran les dades que ja has escrit).<br>
+                    <button type="button" onclick="obrirFitxa()">Obrir la fitxa de ${escapeHtml(a.nombre)}</button> ${noEs}`;
             }
             cuentaConflicte.dataset.altre = JSON.stringify(a);
             cuentaConflicte.classList.remove('hidden');
@@ -836,9 +848,67 @@
     }
 
     window.obrirFitxa = function() {
+        // Lo ya escrito (sobre todo el DNI) se lleva a la ficha que se abre, si allí falta.
+        const portades = {
+            nombre: nombreInput.value.trim(),
+            email: senseEmailCheckbox.checked ? '' : emailInput.value.trim(),
+            dni: senseDniCheckbox.checked ? '' : dniInput.value.trim()
+        };
         busquedaInput.value = cuentaInput.value.trim();
         ocultarConflicte();
-        buscarPaciente();
+        buscarPaciente(portades);
+    };
+
+    /** Rellena en la ficha abierta los campos que falten con lo que se había escrito antes. */
+    function aplicarDadesPortades() {
+        const d = dadesPortades;
+        dadesPortades = null;
+        if (!d) return [];
+        const posats = [];
+        if (d.nombre && !nombreInput.value.trim()) { nombreInput.value = d.nombre; posats.push('nom'); }
+        [[d.email, emailInput, senseEmailCheckbox, 'email'], [d.dni, dniInput, senseDniCheckbox, 'DNI']]
+            .forEach(([valor, input, casilla, nom]) => {
+                if (!valor || input.dataset.guardado === '1') return;
+                casilla.checked = false;
+                input.disabled = false;
+                input.value = valor;
+                posats.push(nom);
+            });
+        return posats;
+    }
+
+    window.corregirAltra = function() {
+        const a = JSON.parse(cuentaConflicte.dataset.altre || 'null');
+        if (!a) return;
+        const cuenta = cuentaInput.value.trim();
+        Swal.fire({
+            icon: 'warning',
+            title: 'Una de les dues Cuentes està malament',
+            html: `<p style="text-align:left; font-size:13px;">Comprova a Quartup de qui és la Cuenta <b>${escapeHtml(cuenta)}</b>.</p>
+                   <p style="text-align:left; font-size:13px;">Si és d'aquest pacient, la de <b>${escapeHtml(a.nombre)}</b> (codi ${escapeHtml(a.codi_acces)}) està malament: escriu aquí la seva Cuenta correcta, o deixa-ho buit si no la saps.</p>
+                   <p style="text-align:left; font-size:13px;">Si no, cancel·la i corregeix la Cuenta d'aquí dalt.</p>`,
+            input: 'text',
+            inputPlaceholder: 'Cuenta correcta de ' + a.nombre,
+            showCancelButton: true,
+            confirmButtonText: 'Corregir la seva Cuenta',
+            cancelButtonText: 'Cancel·lar',
+            confirmButtonColor: '#0ea5e9',
+            inputValidator: v => {
+                const t = PacientModel.classificarIdentificador(v);
+                if (t === 'buit' || t === 'cuenta') return v.trim() === cuenta ? 'És la mateixa Cuenta.' : null;
+                return t === 'dni' ? 'Això és un DNI, no una Cuenta.' : 'Només xifres.';
+            }
+        }).then(r => {
+            if (!r.isConfirmed) return;
+            llamarServidor('corregirCuenta', [a.codi_acces, r.value.trim()], res => {
+                if (!res.ok) {
+                    Swal.fire({ icon: 'error', title: "No s'ha pogut corregir", html: res.errors ? listaHtml(res.errors) : `<p>${escapeHtml(res.message)}</p>` });
+                    return;
+                }
+                ocultarConflicte();
+                Toast.fire({ icon: 'success', title: `Cuenta de ${a.nombre} corregida.` });
+            }, handleError);
+        });
     };
 
     window.unirFitxes = function() {

@@ -244,6 +244,28 @@ function fusionarPacients(codiQueQueda, codiQueMarxa) {
 }
 
 /**
+ * Corrige la Cuenta Quartup de OTRA ficha que chocaba con la que se está escribiendo y
+ * que no es la misma persona (su Cuenta estaba mal). Vacía = se le quita.
+ */
+function corregirCuenta(codi, novaCuenta) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = hojaPacientes();
+    const { headers, files } = leerPacientes(sheet);
+    const r = PacientModel.planificarCanviCuenta(headers, files, codi, novaCuenta);
+    if (r.errors.length) return { ok: false, message: r.errors.join('\n'), errors: r.errors };
+    escribirColumnasPaciente(sheet, headers, r.files);
+    return { ok: true, filesTocades: r.filesTocades };
+  } catch (e) {
+    Logger.log('Error en corregirCuenta: ' + e);
+    return { ok: false, message: 'Error en corregir la Cuenta: ' + e.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
  * Busca TODAS las filas-implante de un Codi d'accés (portal del paciente). Devuelve las
  * claves estables del registro, independientes del texto de las cabeceras.
  */

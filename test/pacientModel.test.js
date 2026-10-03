@@ -303,6 +303,19 @@ test('aplicarRevisio une las fichas si la Cuenta es de otro paciente y la revisi
   assert.equal(objs.filter(o => o.codi_acces === 'BBB222' && o.cuenta_quartup === '43000001').length, 3);
 });
 
+test('planificarCanviCuenta corrige o quita la Cuenta de una ficha y valida', () => {
+  const files = hojaDuplicada();
+  const { idx } = PM.indexarCapcaleres(PM.CAPCALERES);
+  const r = PM.planificarCanviCuenta(PM.CAPCALERES, files, 'aaa111', '43000099');
+  assert.deepEqual(r.errors, []);
+  assert.equal(r.filesTocades, 2);
+  assert.ok(r.files.filter(f => f[idx.codi_acces] === 'AAA111').every(f => f[idx.cuenta_quartup] === '43000099'));
+  assert.equal(PM.planificarCanviCuenta(PM.CAPCALERES, files, 'AAA111', '').files[0][idx.cuenta_quartup], '');
+  assert.match(PM.planificarCanviCuenta(PM.CAPCALERES, files, 'AAA111', '43000003').errors.join(), /Joan Mas/);
+  assert.match(PM.planificarCanviCuenta(PM.CAPCALERES, files, 'AAA111', '12345678Z').errors.join(), /DNI/);
+  assert.match(PM.planificarCanviCuenta(PM.CAPCALERES, files, 'ZZZ999', '43000099').errors.join(), /ZZZ999/);
+});
+
 test('marcarSenseDni marca solo a los pacientes sin DNI en ninguna fila', () => {
   const files = hojaDuplicada();
   const r = PM.marcarSenseDni(PM.CAPCALERES, files);

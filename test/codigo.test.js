@@ -351,6 +351,17 @@ test('aplicarCuentesRevisio añade la columna "Unir" a una revisión creada ante
   assert.equal(rev.get(2, 8), '✅ Aplicada');
 });
 
+test('corregirCuenta cambia la Cuenta equivocada de otra ficha y libera la buena', () => {
+  const ss = libroAntiguo();
+  const { ctx } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  const res = ctx.corregirCuenta('AAA111', '43000111');
+  assert.equal(res.ok, true, res.message);
+  assert.equal(ctx.buscarPacient('43000111').data.codi_acces, 'AAA111');
+  assert.equal(ctx.comprovarCuenta('43000001', 'BBB222').lliure, true);
+  assert.equal(ss.getSheetByName('Pacientes').formats.get('2,2'), '@');
+});
+
 test('marcarSenseDniMenu marca Sense DNI y el DNI que llega después lo desmarca', () => {
   const ss = libroAntiguo();
   const { ctx } = cargarCodigo(ss);
