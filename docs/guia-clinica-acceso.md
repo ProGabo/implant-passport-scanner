@@ -127,17 +127,26 @@ Dos maneras, las dos valen:
    Pilar tiene un desplegable).
 2. **Seleccionar la fila** y pulsar **Pasaport Implantològic 🦷 → ✏️ Completar i enviar**
    (o el botón que hay encima de la hoja). Se abre un panel con los implantes pendientes de
-   ese paciente, con el pilar y **📋 Enganxa els detalls del pilar de Quartup**.
+   ese paciente, con el pilar y el enlace **📋 Enganxa els detalls del pilar de Quartup**
+   (al pulsarlo se abre la caja para pegar el texto de Quartup).
 
 En el panel:
 
 - **💾 Desar**: guarda y deja la marca de pendiente como esté.
 - **✅ Completar i enviar**: guarda, quita la marca de pendiente (y el naranja) y envía el
-  pasaporte por email. Con la casilla **Avisar també la secretària** también le llega el
+  pasaporte por email. El resultado del envío sale arriba del panel; si falla, pulsa
+  **🔁 Tornar a enviar**. Con la casilla **Avisar també la secretària** también le llega el
   aviso. Si el paciente no tiene email, el botón dice **Completar i avisar la secretària**.
 - Si la fila ya se completó a mano en las celdas, el panel solo ofrece **📨 Enviar el
   pasaport**.
-- Si cambias de fila con el panel abierto, pulsa **↻ tornar a carregar**.
+- Si cambias de fila con el panel abierto, pulsa el enlace **↻ He canviat de fila: tornar a
+  carregar**, al final del panel.
+
+### Borrar un implante o un paciente
+
+Selecciona sus filas en la hoja y **borra el contenido** (tecla Supr). No hace falta
+eliminar la fila: una fila vacía no cuenta para nada y el hueco puede quedarse. También
+vale clic derecho → **Eliminar fila**.
 
 ### ¿Reenviar a un paciente que ya existe?
 

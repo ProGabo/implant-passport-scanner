@@ -37,7 +37,7 @@ El conjunto de implantes de un paciente, tal como lo ve en el portal y en el PDF
 _Avoid_: informe, ficha (en la interfaz del paciente)
 
 **Implante**:
-Una pieza colocada en una posición dental. En la hoja, cada fila es un implante, y los datos del paciente se repiten en todas sus filas.
+Una pieza colocada en una posición dental. En la hoja, cada fila es un implante, y los datos del paciente se repiten en todas sus filas. Para borrar un implante basta con vaciar su fila: una fila vacía no es nadie y el hueco puede quedarse.
 
 **DNI parcial**:
 El DNI con la mayoría de cifras tapadas (`***4567**`) que el paciente ve en el portal y en el pasaporte, para reconocerse. El DNI completo nunca sale hacia el paciente.
