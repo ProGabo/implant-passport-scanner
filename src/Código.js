@@ -5,6 +5,26 @@ let DIAG_ = null;
 function marca_(pas) {
   if (DIAG_) DIAG_.passos.push([pas, Date.now() - DIAG_.inici]);
 }
+
+// Lo mismo para el guardado y el envío del sidebar: se apuntan siempre los últimos tiempos
+// (solo nombres de paso y milisegundos) y `node scripts/medir-portal.js desat` los lee.
+const CLAU_DIAG_INTERN = 'DIAG_INTERN';
+function iniciDiag_() {
+  DIAG_ = { inici: Date.now(), passos: [] };
+}
+function desarDiag_(nom) {
+  if (!DIAG_) return;
+  try {
+    const cache = CacheService.getScriptCache();
+    const llista = JSON.parse(cache.get(CLAU_DIAG_INTERN) || '[]');
+    llista.unshift({ nom: nom, quan: new Date().toISOString(), carrega_ms: DIAG_.inici - T_INICI_SCRIPT_,
+      total_ms: Date.now() - DIAG_.inici, passos: DIAG_.passos });
+    cache.put(CLAU_DIAG_INTERN, JSON.stringify(llista.slice(0, 10)), 21600);
+  } catch (e) {
+    Logger.log('No es poden desar els temps: ' + e);
+  }
+  DIAG_ = null;
+}
 const SPREADSHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
 const SHEET_NAME = "Pacientes";
 const CATALOG_SHEET_NAME = "Catálogo de Implantes";
@@ -211,18 +231,27 @@ const MARGE_FILES = 200;
 
 /**
  * Deja MARGE_FILES filas por debajo de las nDades filas de datos: las añade si faltan y les
- * pone la casilla "Pendent". Devuelve hasta qué fila (sin cabecera) llega el margen.
+ * pone la casilla "Pendent". Mientras quede al menos la mitad del margen con casilla (lo
+ * normal), no rehace nada: en cada guardado solo cuesta una lectura. `forcar` lo rehace.
+ * @returns {{afegides: number}} cuántas filas se han añadido a la hoja
  */
-function assegurarMarge_(sheet, headers, nDades) {
-  const n = nDades + MARGE_FILES;
-  const falten = n + 1 - sheet.getMaxRows();
-  if (falten > 0) sheet.insertRowsAfter(sheet.getMaxRows(), falten);
+function assegurarMarge_(sheet, headers, nDades, forcar) {
   const { idx } = PacientModel.indexarCapcaleres(headers);
+  const maxFiles = sheet.getMaxRows();
+  const meitat = nDades + 1 + MARGE_FILES / 2;
+  let prou = maxFiles >= meitat;
+  if (prou && idx.pendent !== undefined) {
+    const regla = sheet.getRange(meitat, idx.pendent + 1).getDataValidation();
+    prou = !!regla && regla.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.CHECKBOX;
+  }
+  if (prou && !forcar) return { afegides: 0 };
+  const afegides = Math.max(nDades + 1 + MARGE_FILES - maxFiles, 0);
+  if (afegides) sheet.insertRowsAfter(maxFiles, afegides);
   if (idx.pendent !== undefined) {
     sheet.getRange(nDades + 2, idx.pendent + 1, MARGE_FILES, 1)
         .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
   }
-  return n;
+  return { afegides: afegides };
 }
 
 function mismoCodigo(a, b) {
@@ -238,10 +267,9 @@ function asegurarColumnas(sheet) {
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   const { idx } = PacientModel.indexarCapcaleres(headers);
   const faltan = PacientModel.COLUMNES.filter(c => idx[c.clau] === undefined);
-  if (faltan.length) {
-    const primeraLibre = headers.filter(h => String(h).trim() !== '').length === 0 ? 1 : lastCol + 1;
-    sheet.getRange(1, primeraLibre, 1, faltan.length).setValues([faltan.map(c => c.capcalera)]);
-  }
+  if (!faltan.length) return headers;
+  const primeraLibre = headers.filter(h => String(h).trim() !== '').length === 0 ? 1 : lastCol + 1;
+  sheet.getRange(1, primeraLibre, 1, faltan.length).setValues([faltan.map(c => c.capcalera)]);
   return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 }
 
@@ -455,14 +483,18 @@ function getPatientDataVerbose_(code) {
  */
 function saveNewImplant(formData) {
   exigirUsuariIntern_();
+  iniciDiag_();
   // Dos guardados a la vez podrían generar el mismo código o pisarse la última fila.
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
+  marca_('lock');
   let paciente, plan, filas, recordatori;
   try {
     const sheet = hojaPacientes();
     const headers = asegurarColumnas(sheet);
+    marca_('capcaleres');
     const { files, objetos } = leerPacientes(sheet);
+    marca_('llegir ' + files.length);
 
     plan = PacientModel.planificarDesat(headers, files, Object.assign({}, formData, { mode: 'afegir' }));
     const rec = RecordatoriModel.validar(formData.recordatori);
@@ -475,29 +507,38 @@ function saveNewImplant(formData) {
       paciente.codi_acces = generarCodigoUnico(objetos.map(o => o.codi_acces));
       plan.filas.forEach(f => { f.codi_acces = paciente.codi_acces; });
     } else {
-      completarDatosPaciente(sheet, headers, paciente, files.length);
+      completarDatosPaciente(sheet, headers, paciente, files.length, files);
     }
+    marca_('pla');
 
     filas = plan.filas.map(o => PacientModel.objecteAFila(o, headers));
     // Justo después de la última fila con datos (no getLastRow(): ver filesAmbDades).
     // Antes, el margen: si la hoja se ha quedado corta, se añaden filas.
     const primera = files.length + 2;
-    assegurarMarge_(sheet, headers, files.length + filas.length);
+    const marge = assegurarMarge_(sheet, headers, files.length + filas.length);
+    marca_('marge');
     ponerFormatoTexto(sheet, headers, primera, filas.length);
     sheet.getRange(primera, 1, filas.length, headers.length).setValues(filas);
     ponerCasillas(sheet, headers, primera, filas.length);
+    marca_('escriure');
 
-    plan.filas.forEach(imp => {
-      updateCatalog_({ marca: imp.marca, modelo: imp.modelo, conexion: imp.conexion });
-    });
-    // La primera vez que se guarda algo pendiente: color, desplegable y pestaña "Pendents".
-    if (plan.filas.some(f => f.pendent)) prepararHoja_(sheet, headers);
+    actualitzarCataleg_(plan.filas);
+    marca_('cataleg');
+    // Color, desplegable y pestaña "Pendents": la primera vez que se guarda algo pendiente,
+    // y otra vez si la hoja ha crecido (las reglas no llegan a las filas nuevas).
+    if (marge.afegides || (plan.filas.some(f => f.pendent) && !hojaPreparada_(sheet, headers))) {
+      prepararHoja_(sheet, headers);
+      if (marge.afegides) prepararColorRecordatoris_();
+    }
+    marca_('preparar');
     recordatori = desarRecordatoriSegur_(rec.recordatori, paciente);
+    marca_('recordatori');
   } catch (e) {
     Logger.log('Error en saveNewImplant: ' + e.message);
     return { ok: false, message: 'Error en desar: ' + e.message };
   } finally {
     lock.releaseLock();
+    desarDiag_('saveNewImplant');
   }
 
   oblidarLogin_(paciente.codi_acces);
@@ -523,12 +564,15 @@ function saveNewImplant(formData) {
  * Paciente existente: rellena en TODAS sus filas los datos de identidad que estaban
  * vacíos (p. ej. la Cuenta Quartup de un paciente antiguo dado de alta con el DNI).
  * Nunca sobrescribe un dato ya guardado; editar datos existentes es cosa de S3.
+ * `filesLlegides`: las filas ya leídas en el mismo lock y sin escribir nada después, para
+ * no volver a leer la hoja (si no, las lee).
  */
-function completarDatosPaciente(sheet, headers, paciente, nFiles) {
+function completarDatosPaciente(sheet, headers, paciente, nFiles, filesLlegides) {
   if (nFiles < 1) return;
   const { idx } = PacientModel.indexarCapcaleres(headers);
-  const rango = sheet.getRange(2, 1, nFiles, headers.length);
-  const filas = rango.getValues();
+  const filas = filesLlegides
+    ? filesLlegides.slice(0, nFiles).map(f => headers.map((_, i) => (f[i] === undefined ? '' : f[i])))
+    : sheet.getRange(2, 1, nFiles, headers.length).getValues();
   const campos = ['cuenta_quartup', 'email', 'sense_email', 'dni', 'sense_dni'];
   let cambios = false;
 
@@ -594,12 +638,8 @@ function prepararHoja_(sheet, headers) {
   if (idx.que_falta !== undefined) sheet.getRange(2, idx.que_falta + 1, nFiles, 1).setNumberFormat('@');
 
   // Formato condicional: se reconoce el propio por su fórmula y se sustituye.
-  const formula = '=$' + columnaLletra_(idx.pendent + 1) + '2=TRUE';
-  const esPropia = r => {
-    const c = r.getBooleanCondition();
-    return !!c && RE_REGLA_PENDENT.test(String((c.getCriteriaValues() || [])[0]));
-  };
-  const regles = sheet.getConditionalFormatRules().filter(r => !esPropia(r));
+  const formula = formulaPendent_(idx);
+  const regles = sheet.getConditionalFormatRules().filter(r => !esReglaPendent_(r));
   // Delante de la del recordatorio vencido (S6): la primera regla que se cumple manda.
   const iRecordatori = regles.findIndex(r => {
     const c = r.getBooleanCondition();
@@ -620,6 +660,28 @@ function prepararHoja_(sheet, headers) {
         .build());
   }
   prepararPestanyaPendents_(sheet, idx);
+}
+
+function formulaPendent_(idx) {
+  return '=$' + columnaLletra_(idx.pendent + 1) + '2=TRUE';
+}
+
+function esReglaPendent_(r) {
+  const c = r.getBooleanCondition();
+  return !!c && RE_REGLA_PENDENT.test(String((c.getCriteriaValues() || [])[0]));
+}
+
+/**
+ * ¿Ya se hizo prepararHoja_ con las columnas actuales? Dos lecturas (las reglas de color
+ * y si existe la pestaña), para no rehacerlo todo en cada guardado con un pendiente.
+ */
+function hojaPreparada_(sheet, headers) {
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  if (idx.pendent === undefined) return true;
+  const formula = formulaPendent_(idx);
+  return sheet.getConditionalFormatRules().some(r =>
+    esReglaPendent_(r) && String(r.getBooleanCondition().getCriteriaValues()[0]) === formula) &&
+    !!SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(HOJA_PENDENTS);
 }
 
 /** Pestaña "Pendents": lista en vivo de los implantes pendientes, con enlace a su fila. */
@@ -767,7 +829,7 @@ function desarPanell_(formData, completar) {
     });
     completarDatosPaciente(sheet, headers, plan.paciente, files.length);
     if (['marca', 'modelo', 'conexion'].some(k => plan.claus_tocades.indexOf(k) !== -1)) {
-      plan.filas.forEach(imp => updateCatalog_({ marca: imp.marca, modelo: imp.modelo, conexion: imp.conexion }));
+      actualitzarCataleg_(plan.filas);
     }
     oblidarLogin_(plan.codi);
     const recordatori = desarRecordatoriSegur_(rec.recordatori, plan.paciente);
@@ -998,8 +1060,13 @@ function llistarRecordatoris() {
   exigirUsuariIntern_();
   try {
     const avui = avuiIso_();
-    const llista = RecordatoriModel.llistaActius(llegirRecordatoris_(fullRecordatoris_(false)).objectes, avui)
+    const actius = RecordatoriModel.llistaActius(llegirRecordatoris_(fullRecordatoris_(false)).objectes, avui);
+    // Un paciente cuyas filas se han vaciado (o unido a otra ficha) deja el recordatorio
+    // solo: no se cierra solo, por si se recupera la fila; la lista lo dice.
+    const codis = actius.length ? codisDeLaFulla_() : new Set();
+    const llista = actius
       .map(o => ({
+        sensePacient: !codis.has(String(o.codi_acces).trim().toUpperCase()),
         codi_acces: String(o.codi_acces).trim().toUpperCase(),
         cuenta_quartup: String(o.cuenta_quartup || ''),
         nombre: String(o.nombre || ''),
@@ -1032,6 +1099,17 @@ function tancarRecordatori(codi) {
   }
 }
 
+/** Los Codis d'accés que hay en la hoja Pacientes (solo lee esa columna). */
+function codisDeLaFulla_() {
+  const sheet = hojaPacientes();
+  const nCols = Math.max(sheet.getLastColumn(), 1);
+  const { idx } = PacientModel.indexarCapcaleres(sheet.getRange(1, 1, 1, nCols).getValues()[0]);
+  const n = sheet.getLastRow() - 1;
+  if (idx.codi_acces === undefined || n < 1) return new Set();
+  return new Set(sheet.getRange(2, idx.codi_acces + 1, n, 1).getValues()
+    .map(f => String(f[0]).trim().toUpperCase()).filter(Boolean));
+}
+
 /** Menú y sidebar: abre la ventana de los recordatorios (no modal, como la vista prèvia). */
 function obrirRecordatoris() {
   exigirUsuariIntern_();
@@ -1049,7 +1127,7 @@ function obrirPacientDesdeRecordatori(codi) {
     const sheet = hojaPacientes();
     const { objetos } = leerPacientes(sheet);
     const i = objetos.findIndex(o => mismoCodigo(o.codi_acces, codi));
-    if (i === -1) return { ok: false, message: "No hi ha cap implant amb el codi " + codi + " a la pestanya " + SHEET_NAME + ". Potser s'ha unit amb una altra fitxa." };
+    if (i === -1) return { ok: false, message: "No hi ha cap implant amb el codi " + codi + " a la pestanya " + SHEET_NAME + ": potser se n'han buidat les files o s'ha unit amb una altra fitxa. Si el recordatori ja no cal, treu-lo amb la ✕." };
     SpreadsheetApp.getActiveSpreadsheet().setActiveRange(sheet.getRange(i + 2, 1));
     obrirPanellPendents();
     return { ok: true, fila: i + 2 };
@@ -1090,9 +1168,11 @@ function avisarRecordatorisEnObrir_() {
  */
 function enviarPasaport(codi, opcions) {
   exigirUsuariIntern_();
+  iniciDiag_();
   const o = opcions || {};
   try {
     const env = enviarPasaport_(codi, { email: !!o.email, avisSecretaria: !!o.avisSecretaria, avisSiSenseEmail: !!o.avisSiSenseEmail });
+    marca_('enviat');
     // Recordatorios (S6): reenviar el pasaporte cierra el que ya toca. Si eso falla, el
     // envío ya ha salido: no se da por fallido (el panel lo volvería a enviar).
     let recordatoriTancat = null;
@@ -1101,10 +1181,13 @@ function enviarPasaport(codi, opcions) {
     } catch (e) {
       Logger.log('Error en tancar el recordatori de ' + codi + ': ' + e);
     }
+    marca_('recordatori');
     return Object.assign({ ok: true, codi: String(codi || '').trim().toUpperCase() }, env, { recordatoriTancat });
   } catch (e) {
     Logger.log('Error en enviarPasaport: ' + e);
     return { ok: false, message: 'Error en enviar: ' + e.message };
+  } finally {
+    desarDiag_('enviarPasaport');
   }
 }
 
@@ -1274,10 +1357,12 @@ function enviarPasaport_(codi, opcions) {
     res.emailDesti = p.email;
     res.emailSent = r.ok;
     res.emailError = r.ok ? null : r.message;
+    marca_('email');
   }
   if (o.avisSecretaria || (o.avisSiSenseEmail && !String(p.email).trim())) {
     const r = enviarAvisSecretaria_(p);
     res.avisSecretaria = { enviat: r.ok, error: r.ok ? null : r.message };
+    marca_('avis');
   }
   return res;
 }
@@ -1399,7 +1484,7 @@ function getImplantOptions() {
       return { ok: false, message: "No existeix la pestanya del catàleg d'implants." };
     }
 
-    // Cada columna del catálogo es una lista independiente (updateCatalog_ las ordena por
+    // Cada columna del catálogo es una lista independiente (actualitzarCataleg_ las ordena por
     // separado): la fila NO empareja marca y modelo. Los pares salen de la hoja Pacientes.
     const data = sheet.getDataRange().getValues();
     const headers = (data[0] || []).map(h => PacientModel.normalitzar(h));
@@ -1419,68 +1504,43 @@ function getImplantOptions() {
 }
 
 /**
- * Actualiza el catálogo manteniendo listas ÚNICAS e independientes por columna.
- * Si la Marca ya existe, no la añade, aunque el modelo sea nuevo.
- * Compacta las columnas para que no queden huecos vacíos.
+ * Añade al catálogo las marcas, modelos y conexiones nuevas de unos implantes, manteniendo
+ * listas ÚNICAS (sin distinguir mayúsculas), compactas y ordenadas, independientes por
+ * columna. Lee el catálogo una sola vez y solo reescribe las columnas que cambian.
  * Ojo: como cada columna se ordena aparte, una fila del catálogo no es un par marca-modelo
  * (getImplantOptions empareja desde la hoja Pacientes y descarta las erratas aprendidas).
+ * @param {{marca, modelo, conexion}[]} implants
  */
-function updateCatalog_(newItem) {
+function actualitzarCataleg_(implants) {
+  const ple = v => v !== undefined && v !== null && String(v).trim() !== '';
+  if (!implants.some(imp => ple(imp.marca) || ple(imp.modelo) || ple(imp.conexion))) return;
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   let sheet = ss.getSheetByName(CATALOG_SHEET_NAME);
-  
-  // Si la hoja no existe, la crea
   if (!sheet) {
     sheet = ss.insertSheet(CATALOG_SHEET_NAME);
-    sheet.appendRow(["Marca", "Modelo", "Conexión"]); // Cabeceras
+    sheet.appendRow(['Marca', 'Modelo', 'Conexión']);
     sheet.setFrozenRows(1);
   }
 
-  // Función auxiliar para procesar una columna individualmente
-  // colIndex: número de columna (1-based); value: el valor que queremos guardar
-  function processColumn(colIndex, value) {
-    if (!value || String(value).trim() === "") return; // No guardar vacíos
-
-    const lastRow = Math.max(sheet.getLastRow(), 1);
-    // Leemos toda la columna (hasta donde haya datos en la hoja)
-    const range = sheet.getRange(2, colIndex, lastRow, 1);
-    const currentValues = range.getValues().flat(); // Convertimos a lista simple: ["Dentsply", "Nobel", "", ""]
-
-    // 1. Limpiamos: Quitamos vacíos existentes para tener una lista compacta
-    const cleanList = currentValues.filter(item => String(item).trim() !== "");
-
-    // 2. Normalizamos para comparar (ignoramos mayúsculas/minúsculas)
-    const normalize = s => String(s).trim().toLowerCase();
-    const target = normalize(value);
-
-    // 3. Verificamos si YA existe en esta lista específica
-    const exists = cleanList.some(item => normalize(item) === target);
-
-    // 4. Si NO existe, lo añadimos y reescribimos la columna
-    if (!exists) {
-      cleanList.push(value); // Añadimos el nuevo valor al final de la lista limpia
-      
-      // Ordenamos alfabéticamente (Opcional, pero queda muy profesional para los desplegables)
-      cleanList.sort(); 
-
-      // Escribimos de vuelta la columna actualizada
-      // Primero limpiamos la columna en la hoja para evitar restos viejos
-      sheet.getRange(2, colIndex, lastRow + 1, 1).clearContent();
-      
-      // Preparamos el formato de matriz vertical para setValues: [[val1], [val2], ...]
-      const writeValues = cleanList.map(v => [v]);
-      sheet.getRange(2, colIndex, writeValues.length, 1).setValues(writeValues);
-      
-      Logger.log(`Valor añadido a columna ${colIndex}: ${value}`);
-    }
-  }
-
-  // Procesamos las 3 columnas por separado, localizadas por su cabecera.
-  const headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0]
-    .map(h => PacientModel.normalitzar(h));
-  [['marca', newItem.marca], ['modelo', newItem.modelo], ['conexion', newItem.conexion]].forEach(([cab, valor]) => {
+  const data = sheet.getDataRange().getValues();
+  const headers = (data[0] || []).map(h => PacientModel.normalitzar(h));
+  const normalize = s => String(s).trim().toLowerCase();
+  ['marca', 'modelo', 'conexion'].forEach(cab => {
     const i = headers.indexOf(cab);
-    if (i !== -1) processColumn(i + 1, valor);
+    if (i === -1) return;
+    const llista = data.slice(1).map(r => r[i]).filter(ple);
+    let canvi = false;
+    implants.forEach(imp => {
+      const valor = imp[cab];
+      if (!ple(valor) || llista.some(v => normalize(v) === normalize(valor))) return;
+      llista.push(valor);
+      canvi = true;
+    });
+    if (!canvi) return;
+    llista.sort();
+    // Se limpia la columna entera (puede tener huecos) y se escribe compacta.
+    sheet.getRange(2, i + 1, Math.max(data.length, 1), 1).clearContent();
+    sheet.getRange(2, i + 1, llista.length, 1).setValues(llista.map(v => [v]));
   });
 }
 
@@ -1975,7 +2035,7 @@ function retallarFilesBuides() {
         missatge = `No he retallat res: la fila ${finsA + 1 + plena} té dades. Revisa-la abans.`;
       } else {
         sheet.deleteRows(finsA + 1, maxFiles - finsA);
-        assegurarMarge_(sheet, headers, files.length);
+        assegurarMarge_(sheet, headers, files.length, true);
         missatge = `Fet: ${maxFiles - finsA} files buides esborrades. Queden ${files.length} files amb dades i ${MARGE_FILES} de marge.`;
       }
     }
@@ -2128,6 +2188,47 @@ function pdfPortal_(code) {
   return { ok: true, nom: b.getName(), base64: Utilities.base64Encode(b.getBytes()) };
 }
 
+/**
+ * TEMPORAL (S8): la forma de la hoja Pacientes, solo números y nombres de columna, nunca
+ * valores: cuántas filas, cuántas vacías entre medio y qué columnas tienen algo en las
+ * últimas filas con datos. En memoria 10 minutos (leer la hoja entera es caro).
+ */
+function formaFull_() {
+  const cache = CacheService.getScriptCache();
+  const desat = cache.get('DIAG_FORMA');
+  if (desat) return JSON.parse(desat);
+  const sheet = hojaPacientes();
+  const t0 = Date.now();
+  const data = sheet.getDataRange().getValues();
+  const llegir_ms = Date.now() - t0;
+  const headers = data[0] || [];
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  const files = data.slice(1);
+  const n = PacientModel.filesAmbDades(files);
+  const buida = f => PacientModel.filaBuida(f);
+  let buides = 0, ambCodi = 0, darreraAmbCodi = 0;
+  const trams = []; // tramos de filas vacías de más de 20 seguidas dentro de los datos
+  let inici = -1;
+  for (let i = 0; i < n; i++) {
+    const b = buida(files[i]);
+    if (b) { buides++; if (inici === -1) inici = i; }
+    if (!b && inici !== -1) { if (i - inici > 20) trams.push([inici + 2, i + 1]); inici = -1; }
+    if (idx.codi_acces !== undefined && String(files[i][idx.codi_acces]).trim()) { ambCodi++; darreraAmbCodi = i + 2; }
+  }
+  const darreres = [];
+  for (let i = n - 1; i >= 0 && darreres.length < 5; i--) {
+    if (buida(files[i])) continue;
+    darreres.push({ fila: i + 2, columnes: headers.filter((h, j) => {
+      const v = files[i][j];
+      return v !== '' && v !== null && v !== false;
+    }).map(String) });
+  }
+  const r = { maxRows: sheet.getMaxRows(), lastRow: sheet.getLastRow(), lastCol: sheet.getLastColumn(), llegir_ms,
+    filesAmbDades: n, buidesEntremig: buides, ambCodi, darreraAmbCodi, tramsBuits: trams.slice(0, 20), darreres };
+  cache.put('DIAG_FORMA', JSON.stringify(r), 600);
+  return r;
+}
+
 // =================================================================
 // NUEVA API PARA CONECTAR EL PASAPORTE CON NETLIFY
 // =================================================================
@@ -2148,6 +2249,10 @@ function doPost(e) {
 
     } else if (action === 'pdfPasaporte') {
       result = pdfPortal_(params.code);
+
+    } else if (action === 'diagIntern') {
+      // Solo tiempos de los últimos guardados y envíos, nunca datos (ver desarDiag_).
+      result = { ok: true, desats: JSON.parse(CacheService.getScriptCache().get(CLAU_DIAG_INTERN) || '[]'), forma: formaFull_() };
 
     } else {
       result = { ok: false, message: 'Acción no reconocida por el servidor.' };

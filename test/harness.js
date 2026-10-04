@@ -39,6 +39,11 @@ class FakeRange {
     this.each((i, j) => { if (regla === undefined || regla === 'checkbox') this.sheet.checkboxes.add(i + ',' + j); else this.sheet.validations.set(i + ',' + j, regla); });
     return this;
   }
+  getDataValidation() {
+    const k = this.r + ',' + this.c;
+    if (this.sheet.checkboxes.has(k)) return { getCriteriaType: () => 'CHECKBOX' };
+    return this.sheet.validations.has(k) ? { getCriteriaType: () => 'VALUE_IN_LIST' } : null;
+  }
   setFormula(fm) { this.sheet.formulas.set(this.r + ',' + this.c, fm); return this; }
   getFormula() { return this.sheet.formulas.get(this.r + ',' + this.c) || ''; }
   getRow() { return this.r; }
@@ -165,6 +170,7 @@ function cargarCodigo(ss, opts) {
           Button: { YES: 'YES', OK: 'OK' }
         };
       },
+      DataValidationCriteria: { CHECKBOX: 'CHECKBOX', VALUE_IN_LIST: 'VALUE_IN_LIST' },
       newDataValidation: () => {
         const r = { tipus: 'checkbox' };
         return {

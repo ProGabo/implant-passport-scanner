@@ -404,7 +404,7 @@ test('avís de prova: envía a la dirección indicada lo mismo que a la consulta
 test('las funciones internas no se pueden llamar desde el portal (terminan en "_")', () => {
   const { ctx } = cargarCodigo(libro());
   ['getPatientDataVerbose', 'sendPassportEmail', 'enviarAvisSecretaria', 'generarPasaportePDF', 'enviarEmail',
-    'registrarEnviament', 'gasHttpFetch', 'updateCatalog', 'contarIntentoFallido', 'avisarLimitPortal']
+    'registrarEnviament', 'gasHttpFetch', 'actualitzarCataleg', 'contarIntentoFallido', 'formaFull', 'iniciDiag', 'desarDiag', 'avisarLimitPortal']
     .forEach(n => {
       assert.equal(typeof ctx[n], 'undefined', n + ' debe ser privada');
       assert.equal(typeof ctx[n + '_'], 'function', n + '_');

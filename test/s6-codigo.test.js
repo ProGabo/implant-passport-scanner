@@ -247,3 +247,21 @@ test('revisión: si el 🔔 falla, el guardado sigue siendo ok y lo dice', () =>
   assert.equal(r.recordatori.accio, 'error');
   assert.match(r.recordatori.message, /quota/);
 });
+
+test('paciente con las filas vaciadas: su recordatorio sigue en la lista, marcado y sin Obrir, y la ✕ lo quita', () => {
+  const ss = libro([
+    { codi_acces: 'J0AN22', nombre: 'Joan Mas', data: '2001-09-01', estat: 'Actiu' },
+    { codi_acces: 'K7XH3P', nombre: 'Maria Puig', data: '2001-09-02', estat: 'Actiu' }
+  ]);
+  const { ctx } = cargarCodigo(ss);
+  const p = ss.getSheetByName('Pacientes');
+  p.getRange(4, 1, 1, H.length).clearContent(); // la única fila de Joan, borrada a mano
+  const l = pla(ctx.llistarRecordatoris());
+  assert.deepEqual(l.recordatoris.map(o => [o.codi_acces, o.sensePacient]), [['J0AN22', true], ['K7XH3P', false]]);
+  assert.match(ctx.obrirPacientDesdeRecordatori('J0AN22').message, /buidat les files.*✕/);
+  // No se cierra solo (por si la fila se recupera) y el resto sigue funcionando.
+  assert.deepEqual(rec(ss).map(o => o.estat), ['Actiu', 'Actiu']);
+  assert.equal(ctx.saveNewImplant(NOU).ok, true);
+  assert.deepEqual(pla(ctx.tancarRecordatori('J0AN22')), { ok: true, tancat: true });
+  assert.deepEqual(pla(ctx.llistarRecordatoris().recordatoris).map(o => o.codi_acces), ['K7XH3P']);
+});

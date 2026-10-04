@@ -293,3 +293,73 @@ test('enviarPasaport: si cerrar el recordatorio falla, el envío ya hecho no se 
   assert.equal(r.recordatoriTancat, null);
   assert.equal(sent.length, 1);
 });
+
+// --- Guardar rápido: lo que no hace falta rehacer en cada guardado ----------------------
+
+// Cuenta las llamadas a setDataValidation y setConditionalFormatRules de una pestaña.
+function espiar(sheet) {
+  const n = { validacions: 0, regles: 0 };
+  const getRange = sheet.getRange.bind(sheet);
+  sheet.getRange = (...a) => {
+    const r = getRange(...a);
+    const set = r.setDataValidation.bind(r);
+    r.setDataValidation = v => { n.validacions++; return set(v); };
+    return r;
+  };
+  const setRegles = sheet.setConditionalFormatRules.bind(sheet);
+  sheet.setConditionalFormatRules = rs => { n.regles++; return setRegles(rs); };
+  return n;
+}
+
+test('guardar: el margen de casillas y el color naranja no se rehacen en cada guardado', () => {
+  const ss = libro();
+  const { ctx } = cargarCodigo(ss);
+  const pendent = Object.assign({}, NOU, { implantes: [Object.assign({}, NOU.implantes[0], { pendent: true })] });
+  assert.equal(ctx.saveNewImplant(pendent).ok, true);
+  assert.ok(pacientes(ss).checkboxes.has((5 + 1 + 2 + 199) + ',' + col('pendent')), 'margen puesto la primera vez');
+  const n = espiar(pacientes(ss));
+  const otra = Object.assign({}, pendent, { cuenta_quartup: '43006666', dni: '33333333P', email: 'b@x.cat' });
+  assert.equal(ctx.saveNewImplant(otra).ok, true);
+  assert.equal(n.regles, 0, 'el color ya estaba');
+  // Solo la casilla Pendent de la fila nueva (ponerCasillas), no las 200 del margen.
+  const casellesNoves = PM.COLUMNES.filter(c => c.casella).length;
+  assert.ok(n.validacions <= casellesNoves, 'validacions: ' + n.validacions);
+});
+
+test('guardar: cuando el margen baja de la mitad, lo vuelve a llenar y añade filas a la hoja', () => {
+  const ss = libro();
+  const { ctx } = cargarCodigo(ss);
+  pacientes(ss).maxRows = 6 + 120; // 5 filas de datos y un margen de 120 sin casillas
+  assert.equal(ctx.saveNewImplant(NOU).ok, true);
+  assert.equal(pacientes(ss).getMaxRows(), 1 + 6 + 200);
+  assert.ok(pacientes(ss).checkboxes.has((1 + 6 + 200) + ',' + col('pendent')));
+});
+
+test('catálogo: una sola lectura para todos los implantes, sin repetir valores ni mayúsculas', () => {
+  const ss = libro();
+  const { ctx } = cargarCodigo(ss);
+  const cat = ss.getSheetByName('Catálogo de Implantes');
+  let lectures = 0;
+  const getDataRange = cat.getDataRange.bind(cat);
+  cat.getDataRange = () => { lectures++; return getDataRange(); };
+  ctx.actualitzarCataleg_([
+    { marca: 'Nobel', modelo: 'Active', conexion: 'Interna' },
+    { marca: 'nobel', modelo: 'Parallel', conexion: '' },
+    { marca: 'TICARE', modelo: 'Inhex' }
+  ]);
+  assert.equal(lectures, 1);
+  assert.deepEqual(cat.rows().slice(1).map(r => r[0]).filter(Boolean), ['Nobel', 'Ticare']);
+  assert.deepEqual(cat.rows().slice(1).map(r => r[1]).filter(Boolean), ['Active', 'Inhex', 'Parallel']);
+  assert.deepEqual(cat.rows().slice(1).map(r => r[2]).filter(Boolean), ['Interna']);
+});
+
+test('guardar y enviar dejan sus tiempos (sin datos) para medirlos desde fuera', () => {
+  const ss = libro();
+  const { ctx, cache } = cargarCodigo(ss);
+  const r = ctx.saveNewImplant(NOU);
+  ctx.enviarPasaport(r.newCode, r.enviar);
+  const desats = JSON.parse(cache.get('DIAG_INTERN'));
+  assert.deepEqual(desats.map(d => d.nom), ['enviarPasaport', 'saveNewImplant']);
+  assert.ok(desats[1].passos.some(p => /^llegir \d+$/.test(p[0])));
+  assert.doesNotMatch(cache.get('DIAG_INTERN'), /Anna|anna@x\.cat|43005555/);
+});

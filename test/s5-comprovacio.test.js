@@ -71,7 +71,7 @@ test('fechas aaaa-mm-dd y Date también valen', () => {
 });
 
 test('opcionsImplant empareja marca y modelo desde la hoja, no desde las filas del catálogo', () => {
-  // Catálogo "desordenado" como lo dejaba updateCatalog_: cada columna ordenada aparte.
+  // Catálogo "desordenado" como lo deja actualitzarCataleg_: cada columna ordenada aparte.
   const cataleg = { marques: ['Avinent', 'Ticare'], models: ['Inhex Quattro', 'Ocean'], connexions: ['Externa', 'Interna'] };
   const o = C.opcionsImplant(cataleg, [
     { marca: 'Ticare', modelo: 'Inhex Quattro', conexion: 'Interna' },

@@ -22,6 +22,8 @@
         .nom { font-weight: 600; }
         .sub { font-size: 12px; color: #64748b; overflow-wrap: anywhere; }
         .motiu { font-size: 12px; color: #334155; margin-top: 2px; overflow-wrap: anywhere; }
+        .orfe { font-size: 12px; color: #b45309; margin-top: 4px; }
+        .rec.sense-pacient { opacity: .85; border-left-color: #cbd5e1; background: #f8fafc; }
         .botons { display: flex; gap: 6px; }
         button { font-family: inherit; font-weight: 600; font-size: 12px; border-radius: 6px; cursor: pointer; padding: 7px 10px; }
         button:disabled { opacity: .5; cursor: wait; }
@@ -74,21 +76,23 @@
         const rs = res.recordatoris;
         mostrarEstat(rs.length ? '' : 'No hi ha cap recordatori actiu.');
         llista.innerHTML = rs.map(r => `
-            <div class="rec ${r.vencut ? 'vencut' : ''}" data-codi="${escapeHtml(r.codi_acces)}">
+            <div class="rec ${r.sensePacient ? 'sense-pacient' : (r.vencut ? 'vencut' : '')}" data-codi="${escapeHtml(r.codi_acces)}">
                 <div><div class="data">${escapeHtml(r.dataText)}</div><div class="quan">${escapeHtml(quan(r))}</div></div>
                 <div>
                     <div class="nom">${escapeHtml(r.nombre || '(sense nom)')}</div>
                     <div class="sub">${escapeHtml(r.codi_acces)}${r.cuenta_quartup ? ' · Cuenta ' + escapeHtml(r.cuenta_quartup) : ''}</div>
                     <div class="motiu">${escapeHtml(r.motiu)}</div>
+                    ${r.sensePacient ? '<div class="orfe">⚠️ Aquest pacient ja no és a la fulla (se n’han buidat les files). Si ja no cal, treu-lo amb la ✕.</div>' : ''}
                 </div>
                 <div class="botons">
-                    <button type="button" class="obrir">Obrir</button>
+                    ${r.sensePacient ? '' : '<button type="button" class="obrir">Obrir</button>'}
                     <button type="button" class="tancar" title="Fet: treure'l de la llista">✕</button>
                 </div>
             </div>`).join('');
         llista.querySelectorAll('.rec').forEach(card => {
             const codi = card.dataset.codi;
-            card.querySelector('.obrir').addEventListener('click', e => {
+            const obrir = card.querySelector('.obrir');
+            if (obrir) obrir.addEventListener('click', e => {
                 e.target.disabled = true;
                 servidor('obrirPacientDesdeRecordatori', [codi], res => {
                     e.target.disabled = false;
