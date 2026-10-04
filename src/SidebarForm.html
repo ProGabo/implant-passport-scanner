@@ -1508,7 +1508,7 @@
             // Recordatorios (S6): si el envío ha cerrado uno, se dice aquí.
             const rec = typeof window.textRecordatori === 'function' ? window.textRecordatori(res) : '';
             if (errors.length) {
-                tornar(repetir, fets.concat(errors).join('</p><p>'));
+                tornar(repetir, fets.concat(errors, rec ? [rec] : []).join('</p><p>'));
                 return;
             }
             if (!fets.length) fets.push(`ℹ️ No hi havia res a enviar${qui}.`);
