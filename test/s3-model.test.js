@@ -35,26 +35,6 @@ test('pilarPendent: solo si es Pendent y el pilar está vacío', () => {
   assert.equal(PM.pilarPendent({ pendent: false, pilar: '' }), false);
 });
 
-test('suggereixPendent: pilar vacío o "+PC" (A cabeza de implante); nunca Sin pilar ni Multi-unit', () => {
-  assert.equal(PM.suggereixPendent({ pilar: '' }), true);
-  assert.equal(PM.suggereixPendent({ pilar: 'A cabeza de implante' }), true);
-  assert.equal(PM.suggereixPendent({ pilar: '+PC 4' }), true);
-  assert.equal(PM.suggereixPendent({ pilar: 'Sin pilar' }), false);
-  assert.equal(PM.suggereixPendent({ pilar: 'Multi-unit' }), false);
-});
-
-test('parseData: Date, aaaa-mm-dd y d/m/aaaa (día primero); lo demás null', () => {
-  const d = PM.parseData('9/3/2026');
-  assert.equal(d.getDate(), 9);
-  assert.equal(d.getMonth(), 2);
-  assert.equal(PM.parseData('2026-10-03').getDate(), 3);
-  assert.equal(PM.parseData('03-10-26').getFullYear(), 2026);
-  assert.equal(PM.parseData(new Date(2026, 0, 15)).getMonth(), 0);
-  assert.equal(PM.parseData('31/02/2026'), null);
-  assert.equal(PM.parseData('ahir'), null);
-  assert.equal(PM.parseData(''), null);
-});
-
 test('planificarDesat afegir: paciente nuevo -> codi vacío, filas con claves del registro y Pendent del formulario', () => {
   const r = PM.planificarDesat(H, hoja(), {
     codi_acces: 'GENERAR', cuenta_quartup: '43005555', nombre: 'Joan Mas', email: 'joan@x.cat', dni: '11111111H',
@@ -142,36 +122,6 @@ test('planificarDesat completar: datos de paciente solo rellenan huecos, validad
   assert.ok(r.totes.every(o => o.dni === '12345678Z'));
   assert.match(PM.planificarDesat(H, files, { mode: 'completar', codi_acces: 'K7XH3P', dni: 'xx', implantes: imp }).errors[0], /DNI no és vàlid/);
   assert.match(PM.planificarDesat(H, files, { mode: 'completar', codi_acces: 'K7XH3P', cuenta_quartup: '43009999', implantes: imp }).errors[0], /ja és de Pere Vila/);
-});
-
-test('proposarPendents: últimos 6 meses, pilar vacío o +PC, no los ya pendientes; fechas raras salen sin proponer', () => {
-  const files = hoja();
-  [0, 1].forEach(i => { files[i][H.indexOf('Pendent')] = false; });
-  files.push(fila(Object.assign({}, PACIENT, IMP, { posicion: '46', fecha_colocacion: 'algun dia', pilar: '' })));
-  files.push(fila(Object.assign({}, PACIENT, IMP, { posicion: '47', fecha_colocacion: '2025-01-01', pilar: '' })));
-  const p = PM.proposarPendents(H, files, new Date(2026, 9, 3).getTime());
-  assert.deepEqual(p.map(x => x.fila), [2, 3, 6]);
-  assert.equal(p[0].motiu, 'A cabeza de implante (+PC?)');
-  assert.equal(p[1].motiu, 'Pilar buit');
-  assert.equal(p[0].proposat, true);
-  assert.equal(p[2].proposat, false);
-  assert.match(p[2].motiu, /data no entesa/);
-  assert.equal(PM.proposarPendents(H, hoja(), new Date(2026, 9, 3).getTime()).length, 0); // ya pendientes
-});
-
-test('aplicarPendents: marca las confirmadas y no toca filas que han cambiado', () => {
-  const files = hoja();
-  [0, 1].forEach(i => { files[i][H.indexOf('Pendent')] = false; });
-  const r = PM.aplicarPendents(H, files, [
-    { fila: 2, codi_acces: 'K7XH3P', posicion: '25', pendent: true },
-    { fila: 3, codi_acces: 'K7XH3P', posicion: '99', pendent: true },
-    { fila: 4, codi_acces: 'K7XH3P', posicion: '36', pendent: false }
-  ]);
-  assert.equal(r.marcades, 1);
-  assert.deepEqual(r.resultats, ['Marcat pendent', 'ERROR: la fila ha canviat; torna a proposar', 'No marcat']);
-  assert.equal(r.files[0][H.indexOf('Pendent')], true);
-  assert.equal(r.files[1][H.indexOf('Pendent')], false);
-  assert.equal(files[0][H.indexOf('Pendent')], false); // puro
 });
 
 test('portal: Pendent y Què falta nunca salen hacia el paciente', () => {

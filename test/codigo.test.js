@@ -5,14 +5,34 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { FakeSheet, FakeSpreadsheet, cargarCodigo } = require('./harness');
 
-// --- Datos: la hoja tal como está antes de S2 ------------------------------------------
+// --- Datos -------------------------------------------------------------------------------
 
+const PM = require('../src/PacientModel.js');
+const IMPLANT_HOJA = { fecha_colocacion: '15/01/2026', marca: 'Straumann', modelo: 'BLT', dimensiones: '4.1 x 10 mm',
+  plataforma: 'RC', conexion: 'CrossFit', pilar: 'Sin pilar', cod_implante: '021.5310', lote: 'AB123' };
+const filaNova = o => PM.objecteAFila(Object.assign(PM.filaAObjecte([], {}), IMPLANT_HOJA, o), PM.CAPCALERES);
+const catalogo = () => new FakeSheet('Catálogo de Implantes', [['Marca', 'Modelo', 'Conexión'], ['Straumann', 'BLT', 'CrossFit']]);
+
+// Pere: importado de Quartup, con Cuenta y email. Maria: dada de alta con el DNI, sin Cuenta ni email.
+function libro() {
+  return new FakeSpreadsheet([
+    new FakeSheet('Pacientes', [
+      PM.CAPCALERES.slice(),
+      filaNova({ codi_acces: 'AAA111', cuenta_quartup: '43000001', nombre: 'Pere Vila', email: 'pere@x.cat', posicion: '11' }),
+      filaNova({ codi_acces: 'BBB222', nombre: 'Maria Roca', sense_email: true, dni: '12345678Z', posicion: '36' }),
+      filaNova({ codi_acces: 'BBB222', nombre: 'Maria Roca', sense_email: true, dni: '12345678Z', posicion: '46' })
+    ]),
+    catalogo()
+  ]);
+}
+
+// La hoja tal como estaba antes de S2: el código la sigue leyendo por alias de cabecera.
 const ANTIGUES = ['Código', 'id_quartup', 'Nombre', 'Email', 'Posición', 'Fecha', 'Marca', 'Modelo',
   'Dimensiones', 'Plataforma', 'Conexión', 'Pilar', 'Código de implante', 'Lote'];
 const fila = (codi, ident, nom, email, pos) =>
   [codi, ident, nom, email, pos, '15/01/2026', 'Straumann', 'BLT', '4.1 x 10 mm', 'RC', 'CrossFit', 'No', '021.5310', 'AB123'];
 
-function libroAntiguo() {
+function libroCabecerasAntiguas() {
   return new FakeSpreadsheet([
     new FakeSheet('Pacientes', [
       ANTIGUES,
@@ -20,7 +40,7 @@ function libroAntiguo() {
       fila('BBB222', '12345678Z', 'Maria Roca', '', 36),
       fila('BBB222', '12345678Z', 'Maria Roca', '', 46)
     ]),
-    new FakeSheet('Catálogo de Implantes', [['Marca', 'Modelo', 'Conexión'], ['Straumann', 'BLT', 'CrossFit']])
+    catalogo()
   ]);
 }
 
@@ -35,48 +55,9 @@ function objetosDe(ctx, sheet) {
 
 // --- Tests ------------------------------------------------------------------------------
 
-test('migrarDadesS2 reordena, separa el DNI, marca Sense email y crea la revisión y la copia', () => {
-  const ss = libroAntiguo();
-  const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
-
-  const sheet = ss.getSheetByName('Pacientes');
-  assert.deepEqual(sheet.rows()[0], [...ctx.PacientModel.CAPCALERES]); // copia: otro realm (vm)
-  const objs = objetosDe(ctx, sheet);
-  assert.equal(objs.length, 3);
-  assert.equal(objs[0].cuenta_quartup, '43000001');
-  assert.equal(objs[1].dni, '12345678Z');
-  assert.equal(objs[1].cuenta_quartup, '');
-  assert.equal(objs[1].sense_email, true);
-  assert.equal(objs[0].sense_email, false);
-
-  // Casillas nativas en "Sense email" (columna 5) y texto en la Cuenta (columna 2).
-  assert.ok(sheet.checkboxes.has('2,5'));
-  assert.equal(sheet.formats.get('2,2'), '@');
-
-  assert.ok(ss.sheets.some(s => s.name.startsWith('Còpia abans S2')));
-  const rev = ss.getSheetByName('Revisió migració').rows();
-  assert.equal(rev.length, 2);
-  assert.equal(rev[1][0], 'BBB222');
-  assert.equal(rev[1][3], 2);
-});
-
-test('aplicarCuentesRevisio escribe la Cuenta en todas las filas del paciente', () => {
-  const ss = libroAntiguo();
-  const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
-  ss.getSheetByName('Revisió migració').getRange(2, 7).setValue(43000077);
-  ctx.aplicarCuentesRevisio();
-
-  const maria = objetosDe(ctx, ss.getSheetByName('Pacientes')).filter(o => o.codi_acces === 'BBB222');
-  assert.ok(maria.every(o => o.cuenta_quartup === '43000077'));
-  assert.equal(ss.getSheetByName('Revisió migració').get(2, 8), '✅ Aplicada');
-});
-
 test('saveNewImplant da de alta un paciente nuevo con las columnas en su sitio', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
 
   const res = ctx.saveNewImplant({
     codi_acces: 'GENERAR', cuenta_quartup: '43000500', nombre: 'Anna Puig', email: 'anna@x.cat',
@@ -95,9 +76,8 @@ test('saveNewImplant da de alta un paciente nuevo con las columnas en su sitio',
 });
 
 test('saveNewImplant guarda justo después de la última fila con datos, aunque haya casillas vacías hasta abajo', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   const sh = ss.getSheetByName('Pacientes');
   const ultima = sh.getLastRow();
   // Como "Pendent": casilla vacía (FALSE) hasta el final de la hoja.
@@ -120,9 +100,8 @@ test('filesAmbDades: las casillas FALSE y las celdas vacías del final no cuenta
 });
 
 test('saveNewImplant bloquea una Cuenta repetida y un DNI en el campo Cuenta', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   const base = { codi_acces: 'GENERAR', nombre: 'Algú', email: '', sense_email: true, dni: '', sense_dni: true, sendEmail: 'false', implantes: [IMPLANT] };
 
   const repetida = ctx.saveNewImplant(Object.assign({}, base, { cuenta_quartup: '43000001' }));
@@ -135,9 +114,8 @@ test('saveNewImplant bloquea una Cuenta repetida y un DNI en el campo Cuenta', (
 });
 
 test('un paciente antiguo encontrado por DNI completa su Cuenta en todas sus filas al guardar', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
 
   const b = ctx.buscarPacient('12345678-z');
   assert.equal(b.found, true);
@@ -161,18 +139,16 @@ test('un paciente antiguo encontrado por DNI completa su Cuenta en todas sus fil
 });
 
 test('buscarPacient busca solo en Cuenta, DNI y Codi d\'accés, y exacto', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   assert.equal(ctx.buscarPacient('aaa111').data.cuenta_quartup, '43000001');
   assert.equal(ctx.buscarPacient('Straumann').found, false);
   assert.equal(ctx.buscarPacient('4300000').found, false);
 });
 
 test('el portal recibe solo la lista blanca: ni email ni Cuenta, DNI enmascarado', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
 
   const datos = ctx.getPatientDataVerbose_('aaa111');
   assert.equal(datos.found, true);
@@ -188,9 +164,8 @@ test('el portal recibe solo la lista blanca: ni email ni Cuenta, DNI enmascarado
 });
 
 test('login sin PIN: con email o sin él, entra directo y no se envía nada', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
 
   const pere = ctx.initiateLogin('AAA111'); // tiene email
   assert.equal(pere.ok, true);
@@ -206,9 +181,8 @@ test('login sin PIN: con email o sin él, entra directo y no se envía nada', ()
 });
 
 test('login tolerante: O/0, I/L/1, minúsculas y espacios', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   const r = ctx.initiateLogin(' aaa l1I ');
   assert.equal(r.ok, true, r.message);
   assert.equal(r.codi_acces, 'AAA111');
@@ -216,7 +190,7 @@ test('login tolerante: O/0, I/L/1, minúsculas y espacios', () => {
 });
 
 test('login: dos códigos que chocan al normalizar no enseñan ninguno', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const sheet = ss.getSheetByName('Pacientes');
   sheet.getRange(2, 1).setValue('KKOZ2L');
   sheet.getRange(3, 1).setValue('KK0Z21');
@@ -229,9 +203,8 @@ test('login: dos códigos que chocan al normalizar no enseñan ninguno', () => {
 });
 
 test('límite: 20 códigos fallidos pausan el portal y avisan una vez al responsable', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   for (let i = 0; i < 19; i++) {
     const r = ctx.initiateLogin('ZZZZ' + String(10 + i));
     assert.equal(r.ok, false);
@@ -248,7 +221,7 @@ test('límite: 20 códigos fallidos pausan el portal y avisan una vez al respons
 });
 
 test('límite: sin ALERT_EMAIL pausa igual y no falla', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx, sent } = cargarCodigo(ss, { props: { ALERT_EMAIL: null } });
   for (let i = 0; i < 21; i++) ctx.initiateLogin('ZZZZ' + String(10 + i));
   assert.equal(sent.length, 0);
@@ -256,9 +229,8 @@ test('límite: sin ALERT_EMAIL pausa igual y no falla', () => {
 });
 
 test('recuperar código: misma respuesta exista o no el email, y queda en el registro', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   const si = ctx.retrieveCodeByEmail(' PERE@x.cat ');
   const no = ctx.retrieveCodeByEmail('nadie@x.cat');
   assert.equal(si.ok, true);
@@ -276,9 +248,8 @@ test('recuperar código: misma respuesta exista o no el email, y queda en el reg
 });
 
 test('envío de pasaporte que falla: el sidebar recibe el error y queda en el registro', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx } = cargarCodigo(ss, { gmailFalla: 'Service invoked too many times for one day: email.' });
-  ctx.migrarDadesS2();
   const res = ctx.saveNewImplant({
     codi_acces: 'GENERAR', cuenta_quartup: '43000500', nombre: 'Anna Puig', email: 'anna@hotmail.com',
     sense_email: false, dni: '87654321x', sense_dni: false, sendEmail: 'true', implantes: [IMPLANT]
@@ -294,9 +265,8 @@ test('envío de pasaporte que falla: el sidebar recibe el error y queda en el re
 });
 
 test('saveNewImplant genera códigos del alfabeto nuevo', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   const res = ctx.saveNewImplant({
     codi_acces: 'GENERAR', cuenta_quartup: '43000501', nombre: 'Joan Mas', email: '', sense_email: true,
     dni: '', sense_dni: true, sendEmail: 'false', avisSecretaria: 'false', implantes: [IMPLANT]
@@ -306,9 +276,8 @@ test('saveNewImplant genera códigos del alfabeto nuevo', () => {
 });
 
 test('Sense email + avís: email a la secretaria con quién es, WhatsApp y el PDF adjunto', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   const res = ctx.saveNewImplant({
     codi_acces: 'BBB222', cuenta_quartup: '43000222', nombre: 'Maria Roca', email: '', sense_email: true,
     dni: '12345678Z', sense_dni: false, sendEmail: 'false', avisSecretaria: 'true', implantes: [IMPLANT]
@@ -333,9 +302,8 @@ test('Sense email + avís: email a la secretaria con quién es, WhatsApp y el PD
 });
 
 test('Sense email con el avís desmarcado: no se envía nada', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   const res = ctx.saveNewImplant({
     codi_acces: 'BBB222', cuenta_quartup: '43000222', nombre: 'Maria Roca', email: '', sense_email: true,
     dni: '12345678Z', sense_dni: false, sendEmail: 'false', avisSecretaria: 'false', implantes: [IMPLANT]
@@ -346,9 +314,8 @@ test('Sense email con el avís desmarcado: no se envía nada', () => {
 });
 
 test('con email, el avís a la secretaria no se envía aunque llegue marcado', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   ctx.saveNewImplant({
     codi_acces: 'AAA111', cuenta_quartup: '43000001', nombre: 'Pere Vila', email: 'pere@x.cat', sense_email: false,
     dni: '', sense_dni: true, sendEmail: 'false', avisSecretaria: 'true', implantes: [IMPLANT]
@@ -357,7 +324,7 @@ test('con email, el avís a la secretaria no se envía aunque llegue marcado', (
 });
 
 test('comprobarTodo lista los códigos rotos y los rebotes', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const sheet = ss.getSheetByName('Pacientes');
   sheet.getRange(2, 1).setValue(12345);
   sheet.getRange(3, 1).setValue('ABCO12');
@@ -378,9 +345,7 @@ test('comprobarTodo lista los códigos rotos y los rebotes', () => {
 });
 
 test('visitante anónimo del web app: el portal funciona, el panel y el menú no', () => {
-  const ss = libroAntiguo();
-  const { ctx: intern } = cargarCodigo(ss);
-  intern.migrarDadesS2();
+  const ss = libro();
   const { ctx, sent } = cargarCodigo(ss, { usuari: '' });
 
   assert.equal(ctx.initiateLogin('AAA111').ok, true);
@@ -396,11 +361,6 @@ test('visitante anónimo del web app: el portal funciona, el panel y el menú no
     () => ctx.corregirCuenta('AAA111', ''),
     () => ctx.getImplantOptions(),
     () => ctx.processImplantFile('data:image/png;base64,AAAA', 'x.png'),
-    () => ctx.migrarDadesS2(),
-    () => ctx.aplicarCuentesRevisio(),
-    () => ctx.marcarSenseDniMenu(),
-    () => ctx.migrarPilarsMenu(),
-    () => ctx.recuperarPilarsMenu(),
     () => ctx.eliminarDuplicados(),
     () => ctx.comprobarTodo(),
     () => ctx.registrarDuda(1),
@@ -410,22 +370,19 @@ test('visitante anónimo del web app: el portal funciona, el panel y el menú no
 });
 
 test('panel sin el permiso userinfo.email (como en vivo): funciona igual y no habla de autorizar', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx } = cargarCodigo(ss, { senseUserinfo: true });
-  ctx.migrarDadesS2();
   assert.equal(ctx.buscarPacient('43000001').data.codi_acces, 'AAA111');
   ctx.comprobarTodo();
 });
 
 test('anónimo y sin permiso userinfo.email: bloqueado, sin la palabra "autoritzar"', () => {
-  const { ctx } = cargarCodigo(libroAntiguo(), { usuari: '', senseUserinfo: true });
+  const { ctx } = cargarCodigo(libro(), { usuari: '', senseUserinfo: true });
   assert.throws(() => ctx.buscarPacient('43000001'), err => !/autoriz/i.test(err.message) && /des del full/.test(err.message));
 });
 
 test('avís de prova: envía a la dirección indicada lo mismo que a la consulta, con [PROVA]', () => {
-  const ss = libroAntiguo();
-  const { ctx: intern } = cargarCodigo(ss);
-  intern.migrarDadesS2();
+  const ss = libro();
   const { ctx, sent, alerts } = cargarCodigo(ss, { prompts: ['bbb-222', 'prova@example.com'] });
   ctx.provarAvisSecretaria();
   assert.equal(sent.length, 1);
@@ -438,7 +395,7 @@ test('avís de prova: envía a la dirección indicada lo mismo que a la consulta
 });
 
 test('las funciones internas no se pueden llamar desde el portal (terminan en "_")', () => {
-  const { ctx } = cargarCodigo(libroAntiguo());
+  const { ctx } = cargarCodigo(libro());
   ['getPatientDataVerbose', 'sendPassportEmail', 'enviarAvisSecretaria', 'generarPasaportePDF', 'enviarEmail',
     'registrarEnviament', 'gasHttpFetch', 'updateCatalog', 'contarIntentoFallido', 'avisarLimitPortal']
     .forEach(n => {
@@ -448,17 +405,16 @@ test('las funciones internas no se pueden llamar desde el portal (terminan en "_
 });
 
 test('recuperar código: como mucho un email cada 15 minutos a la misma dirección', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   ctx.retrieveCodeByEmail('pere@x.cat');
   const r = ctx.retrieveCodeByEmail('PERE@x.cat');
   assert.equal(r.ok, true);
   assert.equal(sent.length, 1);
 });
 
-test('el código funciona también ANTES de migrar (cabeceras antiguas por alias)', () => {
-  const ss = libroAntiguo();
+test('el código lee también una hoja con las cabeceras antiguas (por alias)', () => {
+  const ss = libroCabecerasAntiguas();
   const { ctx } = cargarCodigo(ss);
   assert.equal(ctx.getPatientDataVerbose_('AAA111').implantes[0].nombre, 'Pere Vila');
   assert.equal(ctx.buscarPacient('43000001').data.codi_acces, 'AAA111');
@@ -466,9 +422,8 @@ test('el código funciona también ANTES de migrar (cabeceras antiguas por alias
 });
 
 test('comprovarCuenta avisa en vivo si la Cuenta ya es de otra ficha', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   const r = ctx.comprovarCuenta('43000001', 'GENERAR');
   assert.equal(r.lliure, false);
   assert.equal(r.altre.codi_acces, 'AAA111');
@@ -479,9 +434,8 @@ test('comprovarCuenta avisa en vivo si la Cuenta ya es de otra ficha', () => {
 });
 
 test('fusionarPacients deja una sola ficha con el codi del DNI y el portal ve todos los implantes', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   const res = ctx.fusionarPacients('BBB222', 'AAA111');
   assert.equal(res.ok, true, res.message);
   assert.equal(res.filesMogudes, 1);
@@ -495,38 +449,9 @@ test('fusionarPacients deja una sola ficha con el codi del DNI y el portal ve to
   assert.equal(ctx.buscarPacient('43000001').data.codi_acces, 'BBB222');
 });
 
-test('aplicarCuentesRevisio con "Unir" = SÍ fusiona; sin él explica cómo hacerlo', () => {
-  const ss = libroAntiguo();
-  const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
-  const rev = ss.getSheetByName('Revisió migració');
-  rev.getRange(2, 7).setValue('43000001');
-  ctx.aplicarCuentesRevisio();
-  assert.match(rev.get(2, 8), /^❌ .*Pere Vila.*Unir/);
-
-  rev.getRange(2, 9).setValue('sí');
-  ctx.aplicarCuentesRevisio();
-  assert.match(rev.get(2, 8), /^✅ .*unida.*AAA111/);
-  const objs = objetosDe(ctx, ss.getSheetByName('Pacientes'));
-  assert.ok(objs.every(o => o.codi_acces === 'BBB222' && o.cuenta_quartup === '43000001'));
-});
-
-test('aplicarCuentesRevisio añade la columna "Unir" a una revisión creada antes de existir', () => {
-  const ss = libroAntiguo();
-  const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
-  const rev = ss.getSheetByName('Revisió migració');
-  rev.getRange(1, 9).setValue('');
-  rev.getRange(2, 7).setValue('43000077');
-  ctx.aplicarCuentesRevisio();
-  assert.equal(rev.get(1, 9), 'Unir');
-  assert.equal(rev.get(2, 8), '✅ Aplicada');
-});
-
 test('corregirCuenta cambia la Cuenta equivocada de otra ficha y libera la buena', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   const res = ctx.corregirCuenta('AAA111', '43000111');
   assert.equal(res.ok, true, res.message);
   assert.equal(ctx.buscarPacient('43000111').data.codi_acces, 'AAA111');
@@ -534,73 +459,11 @@ test('corregirCuenta cambia la Cuenta equivocada de otra ficha y libera la buena
   assert.equal(ss.getSheetByName('Pacientes').formats.get('2,2'), '@');
 });
 
-test('migrarPilarsMenu crea las columnas del pilar y pone al día los pilares antiguos', () => {
-  const ss = libroAntiguo();
-  const sheet = ss.getSheetByName('Pacientes');
-  sheet.set(3, 12, 'Multi-unit 1.5 mm Straumann hexágono externo'); // Maria, 36
-  const { ctx, alerts } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
-  ctx.migrarPilarsMenu();
-
-  const objs = objetosDe(ctx, ss.getSheetByName('Pacientes'));
-  assert.deepEqual(objs.map(o => [o.posicion, o.pilar, o.pilar_altura, o.pilar_marca, o.pilar_conexion]),
-    [[11, 'Sin pilar', '', '', ''], [36, 'Multi-unit', '1.5', 'Straumann', 'Externa'], [46, 'Sin pilar', '', '', '']]);
-  assert.match(alerts[alerts.length - 2][1], /"Multi-unit 1.5 mm Straumann hexágono externo" -> Multi-unit · 1.5 mm · Straumann · Externa/);
-  const headers = ss.getSheetByName('Pacientes').rows()[0];
-  const { idx } = ctx.PacientModel.indexarCapcaleres(headers);
-  // La alçada como texto: "1.5" no puede acabar siendo una fecha.
-  assert.equal(ss.getSheetByName('Pacientes').formats.get('3,' + (idx.pilar_altura + 1)), '@');
-  assert.match(alerts[alerts.length - 1][1], /3 files/);
-
-  ctx.migrarPilarsMenu(); // idempotente
-  assert.match(alerts[alerts.length - 1][1], /ja estan al dia/);
-});
-
 // Lo que pasó en vivo el 2026-10-03: la primera versión del paso 4 dejó "Multi-unit" + alçada
 // y tiró la marca y la conexión.
-function libroConPilarRecortado(original) {
-  const ss = libroAntiguo();
-  ss.getSheetByName('Pacientes').set(3, 12, original);
-  const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
-  const sheet = ss.getSheetByName('Pacientes');
-  const headers = ctx.asegurarColumnas(sheet);
-  const { idx } = ctx.PacientModel.indexarCapcaleres(headers);
-  sheet.set(3, idx.pilar + 1, 'Multi-unit');
-  sheet.set(3, idx.pilar_altura + 1, '1.5');
-  [2, 4].forEach(r => sheet.set(r, idx.pilar + 1, 'Sin pilar'));
-  return ss;
-}
-
-test('recuperarPilarsMenu recupera el texto de la pestaña "Còpia abans S2" y lo reparte sin perder nada', () => {
-  const ss = libroConPilarRecortado('Multi-unit 1.5 mm Straumann hexágono externo');
-  const { ctx, alerts } = cargarCodigo(ss, { prompts: [''] });
-  ctx.recuperarPilarsMenu();
-  const objs = objetosDe(ctx, ss.getSheetByName('Pacientes'));
-  assert.deepEqual([objs[1].pilar, objs[1].pilar_altura, objs[1].pilar_marca, objs[1].pilar_conexion],
-    ['Multi-unit', '1.5', 'Straumann', 'Externa']);
-  assert.deepEqual([objs[0].pilar, objs[2].pilar], ['Sin pilar', 'Sin pilar']);
-  assert.match(alerts[0][1], /de 1 files/);
-  assert.match(alerts[alerts.length - 1][1], /1 pilars recuperats/);
-});
-
-test('recuperarPilarsMenu con el enlace de una copia del historial; lo que no entiende se queda entero', () => {
-  const ss = libroConPilarRecortado('Multi-unit 1.5 mm Straumann, revisar en 4 meses');
-  const copiaHistorial = libroAntiguo();
-  copiaHistorial.getSheetByName('Pacientes').set(3, 12, 'Multi-unit 1.5 mm Straumann, revisar en 4 meses');
-  const { ctx, alerts } = cargarCodigo(ss, {
-    prompts: ['https://docs.google.com/spreadsheets/d/COPIA_123/edit#gid=0'], libres: { COPIA_123: copiaHistorial }
-  });
-  ctx.recuperarPilarsMenu();
-  const objs = objetosDe(ctx, ss.getSheetByName('Pacientes'));
-  assert.deepEqual([objs[1].pilar, objs[1].pilar_altura], ['Multi-unit 1.5 mm Straumann, revisar en 4 meses', '']);
-  assert.match(alerts[0][1], /No es toquen.*revisar en 4 meses/s);
-});
-
 test('saveNewImplant guarda la pterigoidea y los detalles del pilar, y el portal los recibe', () => {
-  const ss = libroAntiguo();
+  const ss = libro();
   const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
   const pterigo = Object.assign({}, IMPLANT, {
     posicion: 'Fisura pterigoidea (cuadrante 2)', pilar: 'Multi-unit', pilar_altura: '5', pilar_angulacion: '30',
     pilar_marca: 'Ticare', pilar_conexion: 'Externa', pilar_ref: '0196'
@@ -627,21 +490,19 @@ test('saveNewImplant guarda la pterigoidea y los detalles del pilar, y el portal
   assert.ok(portal.indexOf('Fisura pterigoidea (cuadrante 2)') !== -1);
 });
 
-test('marcarSenseDniMenu marca Sense DNI y el DNI que llega después lo desmarca', () => {
-  const ss = libroAntiguo();
+test('un DNI que llega después desmarca "Sense DNI" en todas las filas del paciente', () => {
+  const ss = libro();
+  const sh = ss.getSheetByName('Pacientes');
+  const col = PM.CAPCALERES.indexOf(PM.COLUMNES.find(c => c.clau === 'sense_dni').capcalera) + 1;
+  sh.getRange(2, col).setValue(true); // Pere, importado sin DNI
   const { ctx } = cargarCodigo(ss);
-  ctx.migrarDadesS2();
-  ctx.marcarSenseDniMenu();
-  let pere = objetosDe(ctx, ss.getSheetByName('Pacientes')).find(o => o.codi_acces === 'AAA111');
-  assert.equal(pere.sense_dni, true);
-  assert.equal(objetosDe(ctx, ss.getSheetByName('Pacientes')).find(o => o.codi_acces === 'BBB222').sense_dni, false);
 
   const res = ctx.saveNewImplant({
     codi_acces: 'AAA111', cuenta_quartup: '43000001', nombre: 'Pere Vila', email: 'pere@x.cat', sense_email: false,
     dni: '11111111H', sense_dni: false, sendEmail: 'false', implantes: [IMPLANT]
   });
   assert.equal(res.ok, true, res.message);
-  const files = objetosDe(ctx, ss.getSheetByName('Pacientes')).filter(o => o.codi_acces === 'AAA111');
+  const files = objetosDe(ctx, sh).filter(o => o.codi_acces === 'AAA111');
   assert.equal(files.length, 2);
   assert.ok(files.every(o => o.dni === '11111111H' && o.sense_dni === false));
 });

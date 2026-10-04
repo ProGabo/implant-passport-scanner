@@ -38,20 +38,12 @@ function onOpen() {
       .addItem('➕ Afegir implant / pacient', 'showSidebar')
       .addItem('✏️ Completar i enviar (fila seleccionada)', 'obrirPanellPendents')
       .addSeparator()
-      .addItem('✨ Arreglar codis undefined o en blanc', 'arreglarCodigosUndefined')
-      .addItem('🧹 Eliminar files duplicades', 'eliminarDuplicados')
-      .addItem('🩺 Comprovar-ho tot', 'comprobarTodo')
-      .addItem('✉️ Enviar un avís de prova', 'provarAvisSecretaria')
-      .addSubMenu(ui.createMenu('🗂️ Migració de dades')
-          .addItem('1. Migrar la fulla (una sola vegada)', 'migrarDadesS2')
-          .addItem('2. Aplicar les Cuentes de la revisió', 'aplicarCuentesRevisio')
-          .addItem('3. Marcar "Sense DNI" als pacients sense DNI', 'marcarSenseDniMenu')
-          .addItem('4. Posar al dia els pilars ("NO" -> "Sin pilar")', 'migrarPilarsMenu')
-          .addItem("5. Recuperar el text original dels pilars d'una còpia", 'recuperarPilarsMenu')
-          .addItem('6. Proposar pendents (últims 6 mesos)', 'proposarPendentsMenu')
-          .addItem('7. Aplicar pendents', 'aplicarPendentsMenu'))
       .addItem('🔑 Autoritzar el meu compte', 'autorizarCuenta')
+      .addSubMenu(ui.createMenu('⚙️ Manteniment')
+          .addItem('🩺 Comprovar-ho tot', 'comprobarTodo'))
       .addToUi();
+  // Sin menú a propósito (solo para quien mantiene la herramienta, desde el editor de
+  // Apps Script): arreglarCodigosUndefined, eliminarDuplicados, provarAvisSecretaria.
 }
 
 /**
@@ -449,8 +441,6 @@ function completarDatosPaciente(sheet, headers, paciente) {
 
 const HOJA_PENDENTS = 'Pendents';
 const COLOR_PENDENT = '#ffedd5';
-const HOJA_PROPOSTA = 'Proposta pendents';
-const CAB_PROPOSTA = ['Fila', "Codi d'accés", 'Nom', 'Posició', 'Data', 'Pilar', 'Motiu', 'Pendent?', 'Resultat'];
 const RE_REGLA_PENDENT = /^=\$[A-Z]+2=TRUE$/;
 
 function columnaLletra_(n) {
@@ -682,93 +672,6 @@ function enviarPasaportPanell(codi, opcions) {
 
 function opcionsEnviament_(opcions) {
   return { email: true, avisSecretaria: !!(opcions && opcions.avisSecretaria), avisSiSenseEmail: true };
-}
-
-/**
- * Menú 🗂️ 6: propone como "Pendent" los implantes recientes que lo parecen (pilar vacío o
- * +PC) en la pestaña "Proposta pendents". La Auxiliar revisa y aplica con el 7.
- */
-function proposarPendentsMenu() {
-  exigirUsuariIntern_();
-  const ui = SpreadsheetApp.getUi();
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const sheet = hojaPacientes();
-  const headers = asegurarColumnas(sheet);
-  prepararHoja_(sheet, headers);
-  const { files } = leerPacientes(sheet);
-  const prop = PacientModel.proposarPendents(headers, files, ahoraMs());
-
-  const vella = ss.getSheetByName(HOJA_PROPOSTA);
-  if (vella) ss.deleteSheet(vella);
-  if (!prop.length) {
-    ui.alert('Proposar pendents', 'No hi ha cap implant dels últims 6 mesos amb el pilar buit o «A cabeza de implante» que no estigui ja marcat com a pendent.', ui.ButtonSet.OK);
-    return;
-  }
-  const hoja = ss.insertSheet(HOJA_PROPOSTA);
-  const tz = Session.getScriptTimeZone();
-  const filas = prop.map(p => [p.fila, p.codi_acces, p.nombre, p.posicion,
-    p.fecha instanceof Date ? Utilities.formatDate(p.fecha, tz, 'dd/MM/yyyy') : p.fecha, p.pilar, p.motiu, p.proposat, '']);
-  hoja.getRange(1, 1, 1, CAB_PROPOSTA.length).setValues([CAB_PROPOSTA]).setFontWeight('bold');
-  hoja.getRange(2, 2, filas.length, 4).setNumberFormat('@');
-  hoja.getRange(2, 1, filas.length, CAB_PROPOSTA.length).setValues(filas);
-  hoja.getRange(2, 8, filas.length, 1)
-      .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
-      .setBackground('#fef9c3');
-  hoja.getRange(1, 8).setNote('Deixa marcats els implants que encara esperen alguna cosa (normalment el pilar definitiu) i desmarca els que ja estan acabats.');
-  hoja.setFrozenRows(1);
-  hoja.autoResizeColumns(1, CAB_PROPOSTA.length);
-  ui.alert('Proposar pendents',
-    `He trobat ${prop.length} implants que podrien estar pendents (pestanya "${HOJA_PROPOSTA}").\n\n` +
-    'Revisa la columna «Pendent?»: deixa marcats els que encara esperen alguna cosa i desmarca els acabats. Després prem:\n' +
-    `${NOM_MENU} → 🗂️ Migració de dades → 7. Aplicar pendents.`,
-    ui.ButtonSet.OK);
-}
-
-/** Menú 🗂️ 7: marca "Pendent" en las filas confirmadas de "Proposta pendents". */
-function aplicarPendentsMenu() {
-  exigirUsuariIntern_();
-  const ui = SpreadsheetApp.getUi();
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const hojaProp = ss.getSheetByName(HOJA_PROPOSTA);
-  if (!hojaProp) {
-    ui.alert('Res a aplicar', `No existeix la pestanya "${HOJA_PROPOSTA}". Primer prem «6. Proposar pendents».`, ui.ButtonSet.OK);
-    return;
-  }
-  const rev = hojaProp.getDataRange().getValues();
-  const cab = rev[0].map(h => String(h).trim());
-  const i = k => cab.indexOf(k);
-  if ([CAB_PROPOSTA[0], CAB_PROPOSTA[1], CAB_PROPOSTA[3], CAB_PROPOSTA[7], CAB_PROPOSTA[8]].some(k => i(k) === -1)) {
-    ui.alert('Error', `La pestanya "${HOJA_PROPOSTA}" no té les columnes esperades. Torna a prémer «6. Proposar pendents».`, ui.ButtonSet.OK);
-    return;
-  }
-  const decisions = rev.slice(1).map(f => ({
-    fila: f[i('Fila')], codi_acces: f[i("Codi d'accés")], posicion: f[i('Posició')], pendent: f[i('Pendent?')]
-  }));
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  let r;
-  try {
-    const sheet = hojaPacientes();
-    const headers = asegurarColumnas(sheet);
-    const { idx, files } = leerPacientes(sheet);
-    r = PacientModel.aplicarPendents(headers, files, decisions);
-    decisions.forEach((d, n) => {
-      if (r.resultats[n] === 'Marcat pendent') sheet.getRange(parseInt(d.fila, 10), idx.pendent + 1).setValue(true);
-    });
-    prepararHoja_(sheet, headers);
-  } catch (e) {
-    ui.alert('Error', e.message, ui.ButtonSet.OK);
-    return;
-  } finally {
-    lock.releaseLock();
-  }
-  if (r.resultats.length) hojaProp.getRange(2, i('Resultat') + 1, r.resultats.length, 1).setValues(r.resultats.map(x => [x]));
-  const errors = r.resultats.filter(x => /^ERROR/.test(x)).length;
-  ui.alert('Pendents aplicats',
-    `Marcats com a pendents: ${r.marcades}` + (errors ? `\nAmb error (mira la columna «Resultat»): ${errors}` : '') +
-    `\n\nAra surten en taronja i a la pestanya "${HOJA_PENDENTS}".`,
-    ui.ButtonSet.OK);
 }
 
 // ==========================================
@@ -1399,11 +1302,6 @@ function diagnosticRebots_() {
   }
 }
 
-// Alias de compatibilidad con el nombre anterior del diagnóstico.
-function comprobarEscaner() {
-  comprobarTodo();
-}
-
 /**
  * Contador de escaneos donde la IA dudó de alguna posición ("No especificado").
  * Sirve para decidir con datos reales si merece la pena que el modelo proponga
@@ -1433,23 +1331,10 @@ function autorizarCuenta() {
     SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
-// Alias de compatibilidad: hay instrucciones antiguas (WhatsApp, sessions/2026-07-09-resume.md)
-// que nombran estas dos funciones.
-function forzarPermisosGmail() {
-  autorizarCuenta();
-}
-function forzarPermisosPDF() {
-  autorizarCuenta();
-}
-
 // ==========================================
 //  ADMINISTRACIÓN DE LA HOJA (menú)
 // ==========================================
 
-/**
- * Elimina las filas 100% idénticas (mismo paciente, mismo implante, todo igual). No
- * depende de la posición de ninguna columna.
- */
 /**
  * Busca filas con Codi d'accés "undefined", "UNDEFINED" o vacío, y les asigna el código
  * correcto del paciente (si ya tiene uno en otras filas) o les genera uno nuevo.
@@ -1541,6 +1426,10 @@ function arreglarCodigosUndefined() {
   }
 }
 
+/**
+ * Elimina las filas 100% idénticas (mismo paciente, mismo implante, todo igual). No
+ * depende de la posición de ninguna columna.
+ */
 function eliminarDuplicados() {
   exigirUsuariIntern_();
   const sheet = hojaPacientes();
@@ -1553,222 +1442,11 @@ function eliminarDuplicados() {
   SpreadsheetApp.getUi().alert('Neteja feta', `S'han eliminat ${eliminadas} files duplicades.`, SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
-const HOJA_REVISION = 'Revisió migració';
-const CAB_REVISION = ["Codi d'accés", 'Nom', 'DNI', 'Nº implants', 'Valor antic', 'Motiu', 'Cuenta Quartup (a omplir)', 'Resultat', 'Unir'];
-const NOTA_UNIR = "Si la Cuenta ja és d'una altra fitxa i és la MATEIXA persona, escriu SÍ: s'uneixen les dues fitxes i es queda el codi d'accés d'aquesta fila.";
-
-/**
- * Migración S2 (una sola vez, idempotente): reordena la hoja al formato nuevo con
- * cabeceras en catalán, separa los DNIs que estaban en la columna del identificador,
- * marca "Sense email" a quien no tiene email y crea la pestaña "Revisió migració" con
- * los pacientes que necesitan su Cuenta Quartup. Antes hace una copia de la pestaña.
- */
-function migrarDadesS2() {
-  exigirUsuariIntern_();
-  const ui = SpreadsheetApp.getUi();
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const sheet = hojaPacientes();
-  const data = sheet.getDataRange().getValues();
-
-  let plan;
-  try {
-    plan = PacientModel.planificarMigracio(data[0] || [], data.slice(1));
-  } catch (e) {
-    ui.alert('No es pot migrar', e.message, ui.ButtonSet.OK);
-    return;
-  }
-
-  const r = plan.recompte;
-  const lineas = [
-    `Files d'implants: ${r.files} (${r.pacients} pacients)`,
-    `DNIs que passen de la columna de l'identificador a la columna DNI: ${r.mogutsADni} files`,
-    `Files sense email (es marcaran "Sense email"): ${r.senseEmail}`,
-    `Pacients sense Cuenta Quartup (aniran a la pestanya "${HOJA_REVISION}"): ${r.senseCuenta}`,
-    `Pacients amb dades a revisar: ${r.revisar}`
-  ];
-  if (r.columnesDesconegudes.length) {
-    lineas.push(`Columnes no reconegudes (es conserven al final): ${r.columnesDesconegudes.join(', ')}`);
-  }
-  lineas.push('', "Abans de canviar res es farà una còpia de la pestanya. Vols continuar?");
-  const resumen = lineas.join('\n');
-
-  if (ui.alert('Migració de dades', resumen, ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  try {
-    const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH.mm');
-    sheet.copyTo(ss).setName('Còpia abans S2 ' + stamp);
-
-    const numFilas = plan.files.length;
-    const numCols = plan.capcaleres.length;
-
-    // Se vacía todo (valores, formatos y validaciones de la disposición antigua: las
-    // columnas cambian de sitio y un formato viejo caería sobre otro dato) y se reescribe.
-    const todo = sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns());
-    todo.clearContent();
-    todo.clearFormat();
-    todo.clearDataValidations();
-
-    if (sheet.getMaxColumns() < numCols) {
-      sheet.insertColumnsAfter(sheet.getMaxColumns(), numCols - sheet.getMaxColumns());
-    }
-    sheet.getRange(1, 1, 1, numCols).setValues([plan.capcaleres]).setFontWeight('bold');
-    if (numFilas > 0) {
-      ponerFormatoTexto(sheet, plan.capcaleres, 2, numFilas);
-      const { idx } = PacientModel.indexarCapcaleres(plan.capcaleres);
-      sheet.getRange(2, idx.fecha_colocacion + 1, numFilas, 1).setNumberFormat('dd/mm/yyyy');
-      sheet.getRange(2, 1, numFilas, numCols).setValues(plan.files.map(f => f.map(textoSiId(plan.capcaleres))));
-      ponerCasillas(sheet, plan.capcaleres, 2, numFilas);
-    }
-    sheet.setFrozenRows(1);
-    // El vaciado de arriba se ha llevado el naranja de los pendientes y el desplegable.
-    prepararHoja_(sheet, plan.capcaleres);
-
-    crearHojaRevision(ss, plan.revisio);
-  } finally {
-    lock.releaseLock();
-  }
-
-  ui.alert('Migració feta ✅',
-    plan.revisio.length
-      ? `Ara omple la columna "Cuenta Quartup (a omplir)" de la pestanya "${HOJA_REVISION}" (${plan.revisio.length} pacients) i després prem:\n${NOM_MENU} → 🗂️ Migració de dades → 2. Aplicar les Cuentes de la revisió.`
-      : 'Tots els pacients tenen la seva Cuenta Quartup. No cal revisar res.',
-    ui.ButtonSet.OK);
-}
-
 /** Codi d'accés, Cuenta y DNI se escriben como texto (sin conversión a número). */
 function textoSiId(headers) {
   const { idx } = PacientModel.indexarCapcaleres(headers);
   const ids = [idx.codi_acces, idx.cuenta_quartup, idx.dni];
   return (v, i) => (ids.indexOf(i) !== -1 && v !== '' && v !== null && v !== undefined) ? String(v) : v;
-}
-
-function crearHojaRevision(ss, revisio) {
-  let hoja = ss.getSheetByName(HOJA_REVISION);
-  if (hoja) ss.deleteSheet(hoja);
-  if (!revisio.length) return;
-
-  hoja = ss.insertSheet(HOJA_REVISION);
-  const filas = revisio.map(r => [r.codi_acces, r.nombre, r.dni, r.n_implants, r.valor_antic, r.motiu, '', '', '']);
-  hoja.getRange(1, 1, 1, CAB_REVISION.length).setValues([CAB_REVISION]).setFontWeight('bold');
-  hoja.getRange(2, 7, filas.length, 1).setNumberFormat('@');
-  hoja.getRange(2, 1, filas.length, CAB_REVISION.length).setValues(filas);
-  hoja.getRange(2, 7, filas.length, 1).setBackground('#fef9c3');
-  hoja.getRange(1, 7).setNote("Busca el pacient a Quartup (pel DNI o pel nom) i copia aquí el número de 'Cuenta'. Només xifres.");
-  hoja.getRange(1, 9).setNote(NOTA_UNIR);
-  hoja.setFrozenRows(1);
-  hoja.autoResizeColumns(1, CAB_REVISION.length);
-}
-
-/**
- * Escribe las Cuentes rellenadas en "Revisió migració" en todas las filas de cada
- * paciente. Valida formato y unicidad, y deja el resultado en la columna "Resultat".
- */
-function aplicarCuentesRevisio() {
-  exigirUsuariIntern_();
-  const ui = SpreadsheetApp.getUi();
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const hojaRev = ss.getSheetByName(HOJA_REVISION);
-  if (!hojaRev) {
-    ui.alert('Res a aplicar', `No existeix la pestanya "${HOJA_REVISION}".`, ui.ButtonSet.OK);
-    return;
-  }
-
-  // Las pestañas de revisión creadas antes de existir la fusión no tienen la columna "Unir".
-  if (String(hojaRev.getRange(1, CAB_REVISION.length).getValue()).trim() !== CAB_REVISION[8]) {
-    hojaRev.getRange(1, CAB_REVISION.length).setValue(CAB_REVISION[8]).setFontWeight('bold').setNote(NOTA_UNIR);
-  }
-
-  const rev = hojaRev.getDataRange().getValues();
-  const cab = rev[0].map(h => String(h).trim());
-  const iCodi = cab.indexOf(CAB_REVISION[0]);
-  const iCuenta = cab.indexOf(CAB_REVISION[6]);
-  const iRes = cab.indexOf(CAB_REVISION[7]);
-  const iUnir = cab.indexOf(CAB_REVISION[8]);
-  if (iCodi === -1 || iCuenta === -1 || iRes === -1 || iUnir === -1) {
-    ui.alert('Error', `La pestanya "${HOJA_REVISION}" no té les columnes esperades. Torna a executar la migració.`, ui.ButtonSet.OK);
-    return;
-  }
-  const esSi = v => ['SI', 'SÍ', 'S', 'YES', 'TRUE', 'VERDADERO'].indexOf(String(v).trim().toUpperCase()) !== -1;
-  const revisions = rev.slice(1).map(f => ({ codi_acces: f[iCodi], cuenta_quartup: f[iCuenta], unir: esSi(f[iUnir]) }));
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  let resultado;
-  try {
-    const sheet = hojaPacientes();
-    const { headers, files } = leerPacientes(sheet);
-    resultado = PacientModel.aplicarRevisio(headers, files, revisions);
-    if (resultado.aplicats.length) escribirColumnasPaciente(sheet, headers, resultado.files);
-  } catch (e) {
-    ui.alert('Error', e.message, ui.ButtonSet.OK);
-    return;
-  } finally {
-    lock.releaseLock();
-  }
-
-  const porCodigo = {};
-  resultado.aplicats.forEach(a => {
-    porCodigo[a.codi_acces] = a.unitAmb
-      ? `✅ Aplicada i unida amb la fitxa de ${a.unitAmb.nombre} (el codi ${a.unitAmb.codi_acces} ja no existeix)`
-      : '✅ Aplicada';
-  });
-  resultado.errors.forEach(e => { porCodigo[e.codi_acces] = '❌ ' + e.motiu; });
-  const columnaRes = rev.slice(1).map((f, i) => {
-    const codi = String(f[iCodi] || '').trim().toUpperCase();
-    return [porCodigo[codi] !== undefined ? porCodigo[codi] : rev[i + 1][iRes]];
-  });
-  if (columnaRes.length) hojaRev.getRange(2, iRes + 1, columnaRes.length, 1).setValues(columnaRes);
-
-  const pendientes = revisions.filter(r => String(r.cuenta_quartup || '').trim() === '').length;
-  ui.alert('Cuentes aplicades',
-    `Pacients actualitzats: ${resultado.aplicats.length} (${resultado.filesTocades} files d'implants)\n` +
-    `Amb error (mira la columna "Resultat"): ${resultado.errors.length}\n` +
-    `Encara per omplir: ${pendientes}`,
-    ui.ButtonSet.OK);
-}
-
-/**
- * Marca "Sense DNI" a todos los pacientes sin DNI: no lo tenemos, y así el panel no lo
- * pide. Si más adelante llega (p. ej. de Quartup), al ponerlo se desmarca.
- */
-function marcarSenseDniMenu() {
-  exigirUsuariIntern_();
-  const ui = SpreadsheetApp.getUi();
-  const sheet = hojaPacientes();
-  let previa;
-  try {
-    const { headers, files } = leerPacientes(sheet);
-    previa = PacientModel.marcarSenseDni(headers, files);
-  } catch (e) {
-    ui.alert('Error', e.message, ui.ButtonSet.OK);
-    return;
-  }
-  if (!previa.pacients) {
-    ui.alert('Res a marcar', 'Tots els pacients ja tenen DNI o "Sense DNI".', ui.ButtonSet.OK);
-    return;
-  }
-  const ok = ui.alert('Marcar "Sense DNI"',
-    `Es marcarà "Sense DNI" a ${previa.pacients} pacients (${previa.filesTocades} files d'implants) que no tenen DNI. Vols continuar?`,
-    ui.ButtonSet.YES_NO);
-  if (ok !== ui.Button.YES) return;
-
-  // Se recalcula dentro del lock: mientras el diálogo estaba abierto el panel pudo guardar.
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  let r;
-  try {
-    const { headers, idx, files } = leerPacientes(sheet);
-    r = PacientModel.marcarSenseDni(headers, files);
-    if (r.pacients) {
-      sheet.getRange(2, idx.sense_dni + 1, r.files.length, 1).setValues(r.files.map(f => [PacientModel.esCert(f[idx.sense_dni])]));
-      ponerCasillas(sheet, headers, 2, r.files.length);
-    }
-  } finally {
-    lock.releaseLock();
-  }
-  ui.alert('Fet ✅', `"Sense DNI" marcat a ${r.pacients} pacients.`, ui.ButtonSet.OK);
 }
 
 /** Marcas del catálogo, para reconocerlas dentro del texto del pilar. */
@@ -1779,210 +1457,6 @@ function marquesCataleg_() {
   const iMarca = (data[0] || []).map(h => String(h).trim()).indexOf('Marca');
   if (iMarca === -1) return [];
   return data.slice(1).map(f => String(f[iMarca] || '').trim()).filter((m, i, a) => m && a.indexOf(m) === i);
-}
-
-/** Escribe las 6 columnas del pilar (tipo + detalles) de todas las filas, como texto. */
-function escribirColumnasPilar_(sheet, headers, files) {
-  const { idx } = PacientModel.indexarCapcaleres(headers);
-  if (!files.length) return;
-  ponerFormatoTexto(sheet, headers, 2, files.length);
-  PacientModel.CAMPS_PILAR.forEach(k => {
-    sheet.getRange(2, idx[k] + 1, files.length, 1).setValues(files.map(f => [f[idx[k]] === undefined ? '' : f[idx[k]]]));
-  });
-}
-
-/** Resumen de lo que hará la migración de pilares, para el diálogo de confirmación. */
-function resumenMigracioPilars_(m) {
-  const linies = [];
-  if (m.sensePilar) linies.push(`- ${m.sensePilar} files amb "NO" passen a "Sin pilar"`);
-  if (m.reclassificats) {
-    linies.push(`- ${m.reclassificats} files es reparteixen en tipus + detalls (columnes "Pilar ..."):`);
-    m.canvis.slice(0, 12).forEach(c => linies.push(`    "${c.abans}" -> ${c.despres}${c.files > 1 ? ` (${c.files} files)` : ''}`));
-    if (m.canvis.length > 12) linies.push(`    ... i ${m.canvis.length - 12} textos més`);
-  }
-  if (m.altres.length) {
-    linies.push('', `No es toquen (no els entenc del tot; el text es queda tal qual a "Pilar"): ${m.altres.slice(0, 15).join(' | ')}${m.altres.length > 15 ? '...' : ''}`);
-  }
-  return linies.join('\n');
-}
-
-/**
- * S4: pone el pilar de las filas antiguas en el vocabulario nuevo ("NO" -> "Sin pilar";
- * "Multi-unit 3 mm Avinent hexagon externo" -> tipo + alçada + marca + connexió) y crea las
- * columnas de detalles del pilar. Un texto que no entiende entero NO lo toca.
- * Idempotente: se puede volver a lanzar sin cambiar nada.
- */
-function migrarPilarsMenu() {
-  exigirUsuariIntern_();
-  const ui = SpreadsheetApp.getUi();
-  const sheet = hojaPacientes();
-  const marques = marquesCataleg_();
-  let previa;
-  try {
-    asegurarColumnas(sheet);
-    const { headers, files } = leerPacientes(sheet);
-    previa = PacientModel.planificarMigracioPilars(headers, files, marques);
-  } catch (e) {
-    ui.alert('Error', e.message, ui.ButtonSet.OK);
-    return;
-  }
-  if (!previa.filesTocades) {
-    ui.alert('Res a canviar', 'Els pilars ja estan al dia.\n' + resumenMigracioPilars_(previa), ui.ButtonSet.OK);
-    return;
-  }
-  const ok = ui.alert('Posar al dia els pilars',
-    `Es canviaran ${previa.filesTocades} files d'implants:\n` + resumenMigracioPilars_(previa) + '\n\nVols continuar?',
-    ui.ButtonSet.YES_NO);
-  if (ok !== ui.Button.YES) return;
-
-  // Se recalcula dentro del lock: mientras el diálogo estaba abierto el panel pudo guardar.
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  let r;
-  try {
-    const { headers, files } = leerPacientes(sheet);
-    r = PacientModel.planificarMigracioPilars(headers, files, marques);
-    if (r.filesTocades) escribirColumnasPilar_(sheet, headers, r.files);
-  } finally {
-    lock.releaseLock();
-  }
-  ui.alert('Fet ✅', `${r.filesTocades} files d'implants actualitzades.`, ui.ButtonSet.OK);
-}
-
-/**
- * Arregla la primera versión del paso 4 (2026-10-03), que dejó "Multi-unit" + alçada y
- * tiró la marca y la conexión: recupera el texto original del pilar de una copia anterior
- * (la pestaña "Còpia abans S2 ..." de este mismo libro, o una copia hecha desde el
- * historial de versiones) y lo vuelve a clasificar con el paso 4 nuevo, que no tira nada.
- */
-function recuperarPilarsMenu() {
-  exigirUsuariIntern_();
-  const ui = SpreadsheetApp.getUi();
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const pestanyaS2 = ss.getSheets().map(s => s.getName()).filter(n => /^Còpia abans S2/.test(n)).sort().pop();
-  const resp = ui.prompt('Recuperar els pilars',
-    "Enganxa l'enllaç d'una còpia del full feta des de l'historial de versions (Fitxer -> Historial de versions -> la versió d'abans de posar al dia els pilars -> Fes una còpia).\n\n" +
-    (pestanyaS2 ? `O deixa-ho en blanc per fer servir la pestanya "${pestanyaS2}".` : 'No he trobat cap pestanya "Còpia abans S2".'),
-    ui.ButtonSet.OK_CANCEL);
-  if (resp.getSelectedButton() !== ui.Button.OK) return;
-  const enllac = String(resp.getResponseText() || '').trim();
-
-  let hojaCopia;
-  try {
-    if (enllac) {
-      const m = enllac.match(/\/d\/([a-zA-Z0-9_-]+)/);
-      const copia = SpreadsheetApp.openById(m ? m[1] : enllac);
-      hojaCopia = copia.getSheetByName(SHEET_NAME) || copia.getSheets()[0];
-    } else {
-      if (!pestanyaS2) throw new Error('Enganxa l\'enllaç d\'una còpia del full.');
-      hojaCopia = ss.getSheetByName(pestanyaS2);
-    }
-  } catch (e) {
-    ui.alert('Error', 'No puc obrir la còpia: ' + e.message, ui.ButtonSet.OK);
-    return;
-  }
-  const dadesCopia = hojaCopia.getDataRange().getValues();
-  const sheet = hojaPacientes();
-  const marques = marquesCataleg_();
-
-  const planificar = () => {
-    const { headers, files } = leerPacientes(sheet);
-    const rec = PacientModel.planificarRecuperacioPilars(headers, files, dadesCopia[0] || [], dadesCopia.slice(1));
-    const mig = PacientModel.planificarMigracioPilars(headers, rec.files, marques);
-    return { headers, rec, mig };
-  };
-  let previa;
-  try {
-    asegurarColumnas(sheet);
-    previa = planificar();
-  } catch (e) {
-    ui.alert('Error', e.message, ui.ButtonSet.OK);
-    return;
-  }
-  const { rec } = previa;
-  const avisos = [];
-  if (rec.canviadesDespres) avisos.push(`- ${rec.canviadesDespres} files s'han canviat després a mà: no es toquen.`);
-  if (rec.noTrobades) avisos.push(`- ${rec.noTrobades} files no són a la còpia (p. ex. afegides després): no es toquen.`);
-  if (!rec.restaurades) {
-    ui.alert('Res a recuperar', 'Cap pilar de la còpia és diferent del que hi ha ara.\n' + avisos.join('\n'), ui.ButtonSet.OK);
-    return;
-  }
-  const ok = ui.alert('Recuperar els pilars',
-    `Es recupera el text original del pilar de ${rec.restaurades} files i es torna a classificar:\n` +
-    resumenMigracioPilars_(previa.mig) + (avisos.length ? '\n\n' + avisos.join('\n') : '') + '\n\nVols continuar?',
-    ui.ButtonSet.YES_NO);
-  if (ok !== ui.Button.YES) return;
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  let r;
-  try {
-    r = planificar();
-    escribirColumnasPilar_(sheet, r.headers, r.mig.files);
-  } finally {
-    lock.releaseLock();
-  }
-  ui.alert('Fet ✅', `${r.rec.restaurades} pilars recuperats. ${r.mig.reclassificats} repartits en tipus + detalls; ` +
-    `${r.mig.altres.length} textos es queden tal qual a "Pilar" per revisar-los a mà.`, ui.ButtonSet.OK);
-}
-
-/**
- * Cruce de emails desde un export de Quartup pegado en la pestaña "EmailsQuartup"
- * (columnas "Cuenta contable" y "Email"). Rellena el email por Cuenta Quartup y desmarca
- * "Sense email" de quien lo recibe. Base del futuro cruce automático de Cuentes.
- */
-function actualizarEmailsDesdeQuartup() {
-  exigirUsuariIntern_();
-  const ui = SpreadsheetApp.getUi();
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const sheetQuartup = ss.getSheetByName("EmailsQuartup");
-  if (!sheetQuartup) {
-    ui.alert('Error ❌', 'Crea una pestanya anomenada "EmailsQuartup" i enganxa-hi les dades de Quartup.', ui.ButtonSet.OK);
-    return;
-  }
-
-  const dataQuartup = sheetQuartup.getDataRange().getValues();
-  const cabQ = dataQuartup[0].map(h => PacientModel.normalitzar(h));
-  const colCuenta = cabQ.indexOf('cuentacontable') !== -1 ? cabQ.indexOf('cuentacontable') : cabQ.indexOf('cuenta');
-  const colEmail = cabQ.indexOf('email');
-  if (colCuenta === -1 || colEmail === -1) {
-    ui.alert('Error ❌', 'La pestanya "EmailsQuartup" ha de tenir les columnes "Cuenta contable" (o "Cuenta") i "Email".', ui.ButtonSet.OK);
-    return;
-  }
-
-  const emailsPorCuenta = {};
-  dataQuartup.slice(1).forEach(f => {
-    const cuenta = String(f[colCuenta]).trim();
-    const email = String(f[colEmail]).trim();
-    if (cuenta && PacientModel.esEmail(email)) emailsPorCuenta[cuenta] = email;
-  });
-
-  const sheet = hojaPacientes();
-  const { idx, files } = leerPacientes(sheet);
-  if (idx.cuenta_quartup === undefined || idx.email === undefined) {
-    ui.alert('Error ❌', 'No trobo les columnes "Cuenta Quartup" i "Email" a la fulla de pacients.', ui.ButtonSet.OK);
-    return;
-  }
-
-  let actualizados = 0;
-  files.forEach(f => {
-    const email = emailsPorCuenta[String(f[idx.cuenta_quartup]).trim()];
-    if (email && String(f[idx.email]).trim() !== email) {
-      f[idx.email] = email;
-      if (idx.sense_email !== undefined) f[idx.sense_email] = false;
-      actualizados++;
-    }
-  });
-
-  if (actualizados > 0) {
-    sheet.getRange(2, idx.email + 1, files.length, 1).setValues(files.map(f => [f[idx.email]]));
-    if (idx.sense_email !== undefined) {
-      sheet.getRange(2, idx.sense_email + 1, files.length, 1).setValues(files.map(f => [PacientModel.esCert(f[idx.sense_email])]));
-    }
-    ui.alert('Creuament fet ✨', `S'han actualitzat ${actualizados} emails.`, ui.ButtonSet.OK);
-  } else {
-    ui.alert('Avís', "No s'ha trobat cap email nou per actualitzar.", ui.ButtonSet.OK);
-  }
 }
 
 // ==========================================

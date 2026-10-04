@@ -108,7 +108,7 @@ test('validarPacient: email y DNI obligatorios salvo con su casilla marcada', ()
   assert.equal(PM.validarPacient({ ...VALID, nombre: ' ' }).errors.length, 1);
 });
 
-// --- Migración ---
+// --- Datos de ejemplo con cabeceras antiguas ---
 
 function hojaMixta() {
   return [
@@ -128,115 +128,7 @@ function hojaMixta() {
   ];
 }
 
-test('planificarMigracio reordena al formato canónico y separa los DNIs', () => {
-  const plan = PM.planificarMigracio(ANTIGUES, hojaMixta());
-  assert.deepEqual(plan.capcaleres, PM.CAPCALERES);
-  assert.equal(plan.files.length, 7);
-
-  const { idx } = PM.indexarCapcaleres(plan.capcaleres);
-  const objs = plan.files.map(f => PM.filaAObjecte(f, idx));
-
-  const pere = objs.filter(o => o.codi_acces === 'AAA111');
-  assert.ok(pere.every(o => o.cuenta_quartup === '43000001' && o.dni === '' && o.sense_email === false));
-
-  const maria = objs.filter(o => o.codi_acces === 'BBB222');
-  assert.equal(maria.length, 3);
-  assert.ok(maria.every(o => o.cuenta_quartup === '' && o.dni === '12345678Z' && o.sense_email === true && o.sense_dni === false));
-
-  const ahmed = objs.find(o => o.codi_acces === 'CCC333');
-  assert.equal(ahmed.dni, 'X1234567L');
-
-  // El valor raro no se pierde: se queda visible en su sitio.
-  assert.equal(objs.find(o => o.codi_acces === 'DDD444').cuenta_quartup, 'pendent');
-
-  // Los datos de implante se conservan.
-  assert.equal(maria[0].marca, 'Straumann');
-  assert.ok(maria[0].fecha_colocacion instanceof Date);
-});
-
-test('planificarMigracio genera la revisión: una fila por paciente sin Cuenta o con valor raro', () => {
-  const plan = PM.planificarMigracio(ANTIGUES, hojaMixta());
-  assert.deepEqual(plan.revisio.map(r => r.codi_acces), ['BBB222', 'CCC333', 'DDD444']);
-  const maria = plan.revisio[0];
-  assert.equal(maria.nombre, 'Maria Roca');
-  assert.equal(maria.dni, '12345678Z');
-  assert.equal(maria.n_implants, 3);
-  assert.equal(maria.valor_antic, '12345678Z');
-  assert.match(plan.revisio[2].motiu, /estrany/);
-  assert.deepEqual(plan.recompte, {
-    files: 7, pacients: 4, mogutsADni: 4, senseCuenta: 2, senseEmail: 3, revisar: 1, columnesDesconegudes: []
-  });
-});
-
-test('planificarMigracio completa la Cuenta/DNI que falta en alguna fila del mismo paciente', () => {
-  const files = [
-    filaAntiga('EEE555', '43000009', 'Rosa', 'r@x.cat', '11'),
-    filaAntiga('EEE555', '12345678Z', 'Rosa', 'r@x.cat', '12')
-  ];
-  const plan = PM.planificarMigracio(ANTIGUES, files);
-  const { idx } = PM.indexarCapcaleres(plan.capcaleres);
-  const objs = plan.files.map(f => PM.filaAObjecte(f, idx));
-  assert.ok(objs.every(o => o.cuenta_quartup === '43000009' && o.dni === '12345678Z'));
-  assert.deepEqual(plan.revisio, []);
-});
-
-test('planificarMigracio marca a revisar un paciente con dos Cuentes distintas', () => {
-  const files = [
-    filaAntiga('FFF666', '43000001', 'Pau', 'p@x.cat', '11'),
-    filaAntiga('FFF666', '43000002', 'Pau', 'p@x.cat', '12')
-  ];
-  const plan = PM.planificarMigracio(ANTIGUES, files);
-  assert.equal(plan.revisio.length, 1);
-  assert.match(plan.revisio[0].motiu, /més d'una/);
-});
-
-test('planificarMigracio conserva al final las columnas desconocidas', () => {
-  const headers = ANTIGUES.concat(['Notes internes']);
-  const files = [filaAntiga('AAA111', '43000001', 'Pere', 'p@x.cat', '11').concat(['revisat'])];
-  const plan = PM.planificarMigracio(headers, files);
-  assert.equal(plan.capcaleres[plan.capcaleres.length - 1], 'Notes internes');
-  assert.equal(plan.files[0][plan.files[0].length - 1], 'revisat');
-  assert.deepEqual(plan.recompte.columnesDesconegudes, ['Notes internes']);
-});
-
-test('planificarMigracio es idempotente', () => {
-  const primera = PM.planificarMigracio(ANTIGUES, hojaMixta());
-  const segona = PM.planificarMigracio(primera.capcaleres, primera.files);
-  assert.deepEqual(segona.capcaleres, primera.capcaleres);
-  assert.deepEqual(segona.files, primera.files);
-  assert.deepEqual(segona.revisio, primera.revisio.map(r => ({ ...r, valor_antic: r.codi_acces === 'DDD444' ? 'pendent' : '' })));
-});
-
-test('planificarMigracio falla con un mensaje claro si no encuentra el identificador', () => {
-  assert.throws(() => PM.planificarMigracio(['Código', 'Nombre', 'Email'], []), /cuenta_quartup/);
-});
-
 // --- Aplicar la revisión ---
-
-test('aplicarRevisio escribe la Cuenta en todas las filas del paciente', () => {
-  const plan = PM.planificarMigracio(ANTIGUES, hojaMixta());
-  const r = PM.aplicarRevisio(plan.capcaleres, plan.files, [
-    { codi_acces: 'BBB222', cuenta_quartup: 43000077 },
-    { codi_acces: 'CCC333', cuenta_quartup: '' } // aún sin rellenar: se ignora
-  ]);
-  assert.deepEqual(r.errors, []);
-  assert.equal(r.filesTocades, 3);
-  const { idx } = PM.indexarCapcaleres(plan.capcaleres);
-  const maria = r.files.map(f => PM.filaAObjecte(f, idx)).filter(o => o.codi_acces === 'BBB222');
-  assert.ok(maria.every(o => o.cuenta_quartup === '43000077'));
-});
-
-test('aplicarRevisio rechaza DNIs, Cuentes repetidas y códigos que no existen', () => {
-  const plan = PM.planificarMigracio(ANTIGUES, hojaMixta());
-  const r = PM.aplicarRevisio(plan.capcaleres, plan.files, [
-    { codi_acces: 'BBB222', cuenta_quartup: '12345678Z' },
-    { codi_acces: 'CCC333', cuenta_quartup: '43000001' }, // ya es de Pere
-    { codi_acces: 'DDD444', cuenta_quartup: '43000050' },
-    { codi_acces: 'ZZZ999', cuenta_quartup: '43000051' }
-  ]);
-  assert.deepEqual(r.errors.map(e => e.codi_acces), ['BBB222', 'CCC333', 'ZZZ999']);
-  assert.deepEqual(r.aplicats, [{ codi_acces: 'DDD444', cuenta_quartup: '43000050', unitAmb: null }]);
-});
 
 test('pacientsUnics agrupa las filas-implante por Codi d\'accés', () => {
   const { idx } = PM.indexarCapcaleres(ANTIGUES);
@@ -288,21 +180,6 @@ test('planificarFusio se niega si las fichas tienen Cuentes o DNIs distintos', (
   assert.match(PM.planificarFusio(PM.CAPCALERES, files, 'BBB222', 'ZZZ999').errors.join(), /ZZZ999/);
 });
 
-test('aplicarRevisio une las fichas si la Cuenta es de otro paciente y la revisión dice unir', () => {
-  const files = hojaDuplicada();
-  const sinUnir = PM.aplicarRevisio(PM.CAPCALERES, files, [{ codi_acces: 'BBB222', cuenta_quartup: '43000001' }]);
-  assert.match(sinUnir.errors[0].motiu, /Pere Vila.*Unir/);
-  assert.equal(sinUnir.aplicats.length, 0);
-
-  const unint = PM.aplicarRevisio(PM.CAPCALERES, files, [{ codi_acces: 'BBB222', cuenta_quartup: '43000001', unir: true }]);
-  assert.deepEqual(unint.errors, []);
-  assert.deepEqual(unint.aplicats[0].unitAmb, { codi_acces: 'AAA111', nombre: 'Pere Vila' });
-  assert.equal(unint.filesTocades, 3);
-  const { idx } = PM.indexarCapcaleres(PM.CAPCALERES);
-  const objs = unint.files.map(f => PM.filaAObjecte(f, idx));
-  assert.equal(objs.filter(o => o.codi_acces === 'BBB222' && o.cuenta_quartup === '43000001').length, 3);
-});
-
 test('planificarCanviCuenta corrige o quita la Cuenta de una ficha y valida', () => {
   const files = hojaDuplicada();
   const { idx } = PM.indexarCapcaleres(PM.CAPCALERES);
@@ -314,18 +191,6 @@ test('planificarCanviCuenta corrige o quita la Cuenta de una ficha y valida', ()
   assert.match(PM.planificarCanviCuenta(PM.CAPCALERES, files, 'AAA111', '43000003').errors.join(), /Joan Mas/);
   assert.match(PM.planificarCanviCuenta(PM.CAPCALERES, files, 'AAA111', '12345678Z').errors.join(), /DNI/);
   assert.match(PM.planificarCanviCuenta(PM.CAPCALERES, files, 'ZZZ999', '43000099').errors.join(), /ZZZ999/);
-});
-
-test('marcarSenseDni marca solo a los pacientes sin DNI en ninguna fila', () => {
-  const files = hojaDuplicada();
-  const r = PM.marcarSenseDni(PM.CAPCALERES, files);
-  assert.equal(r.pacients, 2); // AAA111 y CCC333; BBB222 tiene DNI
-  assert.equal(r.filesTocades, 3);
-  const { idx } = PM.indexarCapcaleres(PM.CAPCALERES);
-  const objs = r.files.map(f => PM.filaAObjecte(f, idx));
-  assert.ok(objs.filter(o => o.codi_acces !== 'BBB222').every(o => o.sense_dni === true));
-  assert.ok(objs.filter(o => o.codi_acces === 'BBB222').every(o => o.sense_dni === false));
-  assert.equal(PM.marcarSenseDni(PM.CAPCALERES, r.files).pacients, 0, 'idempotente');
 });
 
 // --- S4: posición (fisura pterigoidea) ---
@@ -405,114 +270,6 @@ test('analitzarTextPilar no se inventa nada con un texto que no entiende', () =>
   assert.deepEqual(PM.analitzarTextPilar(null).posicions, []);
 });
 
-const filaPilar = (headers, pilar, detalls, extra) => {
-  const { idx } = PM.indexarCapcaleres(headers);
-  const f = headers.map(() => '');
-  f[idx.codi_acces] = 'AAA111';
-  f[idx.posicion] = '21';
-  f[idx.pilar] = pilar;
-  Object.entries(Object.assign({}, detalls, extra)).forEach(([k, v]) => { f[idx[k]] = v; });
-  return f;
-};
-const pilarDe = (headers, f) => {
-  const { idx } = PM.indexarCapcaleres(headers);
-  return PM.CAMPS_PILAR.reduce((o, k) => (f[idx[k]] ? Object.assign(o, { [k]: f[idx[k]] }) : o), {});
-};
-
-test('planificarMigracioPilars: "NO" -> "Sin pilar" y el texto antiguo se reparte entero en tipo + detalles; idempotente', () => {
-  const headers = PM.CAPCALERES.slice();
-  const files = [
-    filaPilar(headers, 'NO'), filaPilar(headers, 'No'),
-    filaPilar(headers, 'Multi-unit 3 mm'),
-    filaPilar(headers, 'Multi-unit 3 mm Avinent hexagon externo'),
-    filaPilar(headers, 'Multi-unit Ticare hexágono interno'),
-    filaPilar(headers, ''), filaPilar(headers, 'Locator'), filaPilar(headers, 'Sin pilar')
-  ];
-  const r = PM.planificarMigracioPilars(headers, files);
-  assert.deepEqual(r.files.map(f => pilarDe(headers, f)), [
-    { pilar: 'Sin pilar' }, { pilar: 'Sin pilar' },
-    { pilar: 'Multi-unit', pilar_altura: '3' },
-    { pilar: 'Multi-unit', pilar_altura: '3', pilar_marca: 'Avinent', pilar_conexion: 'Externa' },
-    { pilar: 'Multi-unit', pilar_marca: 'Ticare', pilar_conexion: 'Interna' },
-    {}, { pilar: 'Locator' }, { pilar: 'Sin pilar' }
-  ]);
-  assert.equal(r.filesTocades, 5);
-  assert.equal(r.sensePilar, 2);
-  assert.equal(r.reclassificats, 3);
-  assert.equal(r.canvis[1].despres, 'Multi-unit · 3 mm · Avinent · Externa');
-  assert.deepEqual(r.altres, ['Locator']);
-  assert.equal(PM.planificarMigracioPilars(headers, r.files).filesTocades, 0, 'idempotente');
-});
-
-test('planificarMigracioPilars entiende los multi-unit que quedaban en la hoja (2026-10-03)', () => {
-  const headers = PM.CAPCALERES.slice();
-  const files = [
-    filaPilar(headers, 'pilar multiunit recto inhex std alt.2mm'),
-    filaPilar(headers, 'avinent hexagon externo 2mm'),
-    filaPilar(headers, 'recto 2 mm')
-  ];
-  const r = PM.planificarMigracioPilars(headers, files);
-  assert.deepEqual(r.files.map(f => pilarDe(headers, f)), [
-    { pilar: 'Multi-unit', pilar_altura: '2', pilar_angulacion: '0', pilar_marca: 'Ticare', pilar_conexion: 'Interna' },
-    { pilar: 'Multi-unit', pilar_altura: '2', pilar_marca: 'Avinent', pilar_conexion: 'Externa' },
-    { pilar: 'Multi-unit', pilar_altura: '2', pilar_angulacion: '0' }
-  ]);
-  assert.deepEqual(r.altres, []);
-  assert.match(r.canvis[1].despres, /\(suposo Multi-unit\)$/);
-  assert.doesNotMatch(r.canvis[0].despres, /suposo/);
-});
-
-test('planificarMigracioPilars NO tira nada: lo que no entiende entero, o que pisaría un detalle, se queda tal cual', () => {
-  const headers = PM.CAPCALERES.slice();
-  const files = [
-    filaPilar(headers, 'Multi-unit 3 mm Avinent, pendiente de cambiar'),
-    filaPilar(headers, 'Multi-unit 1.5 mm', { pilar_altura: '2' }),
-    filaPilar(headers, '+PC 4 HE41404'),
-    filaPilar(headers, 'Multi-unit 2 mm : 2.00')
-  ];
-  const r = PM.planificarMigracioPilars(headers, files);
-  assert.equal(r.filesTocades, 0);
-  assert.deepEqual(r.files, files);
-  assert.equal(r.altres.length, 4);
-});
-
-test('planificarRecuperacioPilars devuelve el texto original que la primera migración recortó', () => {
-  const headers = PM.CAPCALERES.slice();
-  // Copia antigua (cabeceras de antes de S2, por alias), con el texto entero.
-  const antigues = ['Código', 'Nombre', 'Posición', 'Pilar', 'Código de implante', 'Lote'];
-  const copia = [
-    ['AAA111', 'Pere', 21, 'Multi-unit 3 mm Avinent hexagon externo', 'REF1', 'L1'],
-    ['AAA111', 'Pere', 22, 'NO', 'REF2', 'L2'],
-    ['BBB222', 'Maria', 36, 'Multi-unit 2 mm Ticare', 'REF3', 'L3'],
-    ['CCC333', 'Joan', 11, 'Multi-unit 1 mm externo', 'REF4', 'L4']
-  ];
-  const actual = [
-    filaPilar(headers, 'Multi-unit', { pilar_altura: '3' }, { posicion: '21', cod_implante: 'REF1', lote: 'L1', nombre: 'Pere' }),
-    filaPilar(headers, 'Sin pilar', {}, { posicion: '22', cod_implante: 'REF2', lote: 'L2', nombre: 'Pere' }),
-    // Ficha fusionada después: otro código, se empareja por REF + lote + posición.
-    filaPilar(headers, 'Multi-unit', { pilar_altura: '2' }, { codi_acces: 'ZZZ999', posicion: '36', cod_implante: 'REF3', lote: 'L3' }),
-    // Cambiada a mano después de migrar: no se toca.
-    filaPilar(headers, 'A cabeza de implante', {}, { codi_acces: 'CCC333', posicion: '11', cod_implante: 'REF4', lote: 'L4' }),
-    // Añadida después: no está en la copia.
-    filaPilar(headers, 'Multi-unit', { pilar_altura: '5' }, { posicion: '25', cod_implante: 'NOVA', lote: 'L9' })
-  ];
-  const r = PM.planificarRecuperacioPilars(headers, actual, antigues, copia);
-  assert.equal(r.restaurades, 2);
-  assert.equal(r.canviadesDespres, 1);
-  assert.equal(r.noTrobades, 1);
-  assert.deepEqual(r.files.map(f => pilarDe(headers, f)), [
-    { pilar: 'Multi-unit 3 mm Avinent hexagon externo' },
-    { pilar: 'Sin pilar' },
-    { pilar: 'Multi-unit 2 mm Ticare' },
-    { pilar: 'A cabeza de implante' },
-    { pilar: 'Multi-unit', pilar_altura: '5' }
-  ]);
-  // Y la migración nueva lo reparte sin perder nada.
-  const m = PM.planificarMigracioPilars(headers, r.files, ['Ticare']);
-  assert.deepEqual(pilarDe(headers, m.files[0]), { pilar: 'Multi-unit', pilar_altura: '3', pilar_marca: 'Avinent', pilar_conexion: 'Externa' });
-  assert.deepEqual(pilarDe(headers, m.files[2]), { pilar: 'Multi-unit', pilar_altura: '2', pilar_marca: 'Ticare' });
-});
-
 // Casos de la revisión adversarial (2026-10-03)
 test('normalitzarPosicio no saca el cuadrante de un diente, unos mm o una fecha', () => {
   assert.equal(PM.normalitzarPosicio('Z(pterigo) 16'), 'No especificado');
@@ -536,8 +293,4 @@ test('analitzarTextPilar: el PC no deja altura, las fechas no son REF ni posici�
 test('normalitzarTipusPilar no convierte una negación en Multi-unit', () => {
   assert.equal(PM.normalitzarTipusPilar('no multi unit'), 'no multi unit');
   assert.equal(PM.normalitzarTipusPilar('Sin multi-unit'), 'Sin multi-unit');
-});
-
-test('planificarMigracioPilars explica qué falta si no están las columnas', () => {
-  assert.throws(() => PM.planificarMigracioPilars(["Codi d'accés", 'Pilar'], []), /Pilar alçada \(mm\), Pilar angulació/);
 });

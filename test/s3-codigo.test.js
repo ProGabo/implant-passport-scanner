@@ -207,32 +207,10 @@ test('prepararHoja_ es idempotente y respeta las reglas de formato de la clínic
   assert.equal(ss.getSheets().filter(s => s.name === 'Pendents').length, 1);
 });
 
-test('Proposar / Aplicar pendents: propone los recientes con pilar vacío o +PC y marca los que se dejan marcados', () => {
-  const ss = libro();
-  const { ctx, alerts } = cargarCodigo(ss);
-  ctx.ahoraMs = () => new Date(2026, 9, 3).getTime();
-  // Ninguno marcado todavía, y uno nuevo sin pilar del mes pasado.
-  [2, 3, 5].forEach(n => pacientes(ss).set(n, H.indexOf('Pendent') + 1, false));
-  ctx.proposarPendentsMenu();
-  const prop = ss.getSheetByName('Proposta pendents');
-  assert.ok(prop, alerts.map(a => a.join(' ')).join('\n'));
-  const rows = prop.rows();
-  assert.deepEqual(rows.slice(1).map(r => r[0]), [2, 3, 5]); // la 36 (2021, Multi-unit) no
-  assert.ok(rows.slice(1).every(r => r[7] === true));
-  prop.set(3, 8, false); // la Auxiliar desmarca la fila 3
-  ctx.aplicarPendentsMenu();
-  assert.equal(celda(ss, 2, 'pendent'), true);
-  assert.equal(celda(ss, 3, 'pendent'), false);
-  assert.equal(celda(ss, 5, 'pendent'), true);
-  assert.deepEqual(prop.rows().slice(1).map(r => r[8]), ['Marcat pendent', 'No marcat', 'Marcat pendent']);
-  assert.match(alerts[alerts.length - 1][1], /Marcats com a pendents: 2/);
-});
-
 test('el panel y los menús de S3 son solo para el personal (ADR 0003)', () => {
   const ss = libro();
   const { ctx } = cargarCodigo(ss, { usuari: '' });
-  ['carregarPanell', 'desarPanell', 'completarIEnviarPanell', 'enviarPasaportPanell', 'obrirPanellPendents',
-    'proposarPendentsMenu', 'aplicarPendentsMenu'].forEach(fn => {
+  ['carregarPanell', 'desarPanell', 'completarIEnviarPanell', 'enviarPasaportPanell', 'obrirPanellPendents'].forEach(fn => {
     assert.throws(() => ctx[fn]({ codi_acces: 'K7XH3P', implantes: [] }), /full de càlcul de la clínica/, fn);
   });
 });

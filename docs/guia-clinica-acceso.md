@@ -69,7 +69,7 @@ a pulsar **💾 Desar-ho tot**.
 
 ### Cualquier otro error
 
-Menú **Pasaport Implantològic 🦷** → **🩺 Comprovar-ho tot**. Sale una lista con un ✅ o un ❌
+Menú **Pasaport Implantològic 🦷** → **⚙️ Manteniment** → **🩺 Comprovar-ho tot**. Sale una lista con un ✅ o un ❌
 por cada parte del sistema. Manda una captura de esa lista a Gabriel: con eso se sabe qué
 falla sin tener que adivinar.
 
@@ -97,7 +97,7 @@ Al marcar **Sense email** aparece la casilla **Avisar la secretària**, ya marca
 
 1. Mira la pestaña **Registre d'enviaments** de la hoja: cada envío sale con su fecha, el
    email y si fue **OK** o **ERROR**.
-2. Lanza **🩺 Comprovar-ho tot**: al final avisa de los emails que han **rebotado** en los
+2. Lanza **⚙️ Manteniment → 🩺 Comprovar-ho tot**: al final avisa de los emails que han **rebotado** en los
    últimos 30 días (direcciones mal escritas o que no existen) y de los códigos que hay que
    revisar.
 3. Si el email está bien y no llega, pídele que mire la carpeta de **correo no deseado**
@@ -109,9 +109,9 @@ Al marcar **Sense email** aparece la casilla **Avisar la secretària**, ya marca
 
 ### Marcar un implante como pendiente
 
-- **Al escanear la ficha:** cada implante tiene la casilla **⏳ Pendent**. Sale marcada sola
-  cuando el pilar es **A cabeza de implante** (el "+PC" provisional); desmárcala si ese
-  implante ya no espera nada. Si quieres, escribe en **Què falta** qué le falta ("canvi de
+- **Al escanear la ficha:** cada implante tiene la casilla **⏳ Pendent**. Sale desmarcada,
+  porque lo normal es que no quede nada pendiente; márcala si ese implante aún espera algo
+  (por ejemplo, el pilar definitivo tras un "+PC" provisional). Si quieres, escribe en **Què falta** qué le falta ("canvi de
   pilars en 4 mesos"). Si algo queda pendiente, la casilla de enviar el pasaporte se
   desmarca: se enviará al completarlo.
 - **Después, en la hoja:** marca o desmarca la casilla de la columna **Pendent** de la fila.
@@ -138,13 +138,6 @@ En el panel:
 - Si la fila ya se completó a mano en las celdas, el panel solo ofrece **📨 Enviar el
   pasaport**.
 - Si cambias de fila con el panel abierto, pulsa **↻ tornar a carregar**.
-
-### Revisar si se ha escapado alguno
-
-**🗂️ Migració de dades → 6. Proposar pendents** busca los implantes de los últimos 6 meses
-con el pilar vacío o **A cabeza de implante** que no estén marcados, y los pone en la
-pestaña **Proposta pendents**. Deja marcados los que aún esperan algo, desmarca los demás
-y pulsa **7. Aplicar pendents**.
 
 ### ¿Reenviar a un paciente que ya existe?
 

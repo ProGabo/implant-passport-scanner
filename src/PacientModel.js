@@ -210,176 +210,10 @@ function crearPacientModel() {
     return ordre.map(c => perCodi[c]);
   }
 
-  // --- Migración S2 ---
+  // --- Filas ---
 
   function filaBuida(fila) {
     return fila.every(v => v === '' || v === null || v === undefined || v === false);
-  }
-
-  /**
-   * Plan puro de la migración: no toca la hoja, devuelve lo que hay que escribir.
-   * Es idempotente: aplicada sobre una hoja ya migrada no cambia nada.
-   * @returns {{ capcaleres: string[], files: any[][], revisio: object[], recompte: object }}
-   */
-  function planificarMigracio(headers, files) {
-    const { idx, desconegudes } = indexarCapcaleres(headers);
-    const obligatories = ['codi_acces', 'cuenta_quartup', 'nombre', 'email'];
-    const falten = obligatories.filter(k => idx[k] === undefined);
-    if (falten.length) {
-      throw new Error('No trobo les columnes: ' + falten.join(', ') +
-        '. Capçaleres actuals: ' + headers.map(h => String(h)).join(' | '));
-    }
-
-    // Columnas desconocidas: se conservan al final, con su cabecera, sin perder datos.
-    const extres = desconegudes.map(i => ({ i, capcalera: headers[i] }));
-    const capcaleres = CAPCALERES.concat(extres.map(e => e.capcalera));
-
-    const objectes = [];
-    files.forEach(fila => {
-      if (filaBuida(fila)) return;
-      const o = filaAObjecte(fila, idx);
-      o._extres = extres.map(e => fila[e.i]);
-      o._valorAntic = String(o.cuenta_quartup).trim();
-      objectes.push(o);
-    });
-
-    const recompte = { files: objectes.length, pacients: 0, mogutsADni: 0, senseCuenta: 0, senseEmail: 0, revisar: 0, columnesDesconegudes: extres.map(e => String(e.capcalera)) };
-
-    // 1. Fila a fila: separar el DNI que estaba en la columna del identificador.
-    objectes.forEach(o => {
-      const tipus = classificarIdentificador(o.cuenta_quartup);
-      if (tipus === 'cuenta') {
-        o.cuenta_quartup = String(o.cuenta_quartup).trim();
-      } else if (tipus === 'dni') {
-        if (!String(o.dni).trim()) o.dni = netejarDocument(o.cuenta_quartup);
-        o.cuenta_quartup = '';
-        recompte.mogutsADni++;
-      }
-      // 'revisar': se deja tal cual (visible) y va a la pestaña de revisión.
-      if (idx.sense_email === undefined && !String(o.email).trim()) o.sense_email = true;
-      if (o.sense_email && !String(o.email).trim()) recompte.senseEmail++;
-    });
-
-    // 2. Por paciente: los datos de paciente se repiten en cada fila; si una fila tiene la
-    //    Cuenta o el DNI y otra no, se completa. Si hay dos Cuentes distintas, a revisar.
-    const perCodi = {};
-    objectes.forEach(o => {
-      const codi = String(o.codi_acces).trim().toUpperCase();
-      (perCodi[codi] = perCodi[codi] || []).push(o);
-    });
-
-    const revisio = [];
-    Object.keys(perCodi).forEach(codi => {
-      const filesPacient = perCodi[codi];
-      const cuentes = unics(filesPacient.map(o => o.cuenta_quartup).filter(v => classificarIdentificador(v) === 'cuenta'));
-      const dnis = unics(filesPacient.map(o => netejarDocument(o.dni)).filter(Boolean));
-      const raros = unics(filesPacient.map(o => o.cuenta_quartup).filter(v => classificarIdentificador(v) === 'revisar').map(String));
-
-      if (cuentes.length === 1 && raros.length === 0) filesPacient.forEach(o => { o.cuenta_quartup = cuentes[0]; });
-      if (dnis.length === 1) filesPacient.forEach(o => { o.dni = dnis[0]; });
-
-      let motiu = '';
-      if (cuentes.length > 1) motiu = 'Té més d\'una Cuenta Quartup: ' + cuentes.join(', ');
-      else if (raros.length) motiu = 'Valor estrany a la Cuenta: ' + raros.join(', ');
-      else if (cuentes.length === 0) motiu = 'Falta la Cuenta Quartup';
-
-      if (motiu) {
-        const p = filesPacient[0];
-        revisio.push({
-          codi_acces: codi,
-          nombre: String(p.nombre || '').trim(),
-          dni: dnis.join(', '),
-          n_implants: filesPacient.length,
-          valor_antic: unics(filesPacient.map(o => o._valorAntic).filter(Boolean)).join(', '),
-          motiu: motiu
-        });
-        if (cuentes.length === 0 && raros.length === 0) recompte.senseCuenta++;
-        else recompte.revisar++;
-      }
-    });
-    recompte.pacients = Object.keys(perCodi).length;
-
-    const novesFiles = objectes.map(o => objecteAFila(o, CAPCALERES).concat(o._extres));
-    return { capcaleres, files: novesFiles, revisio, recompte };
-  }
-
-  /**
-   * Escribe las Cuentes rellenadas en la pestaña "Revisió migració" en todas las filas
-   * de cada paciente. Valida formato y unicidad; lo que no pasa se devuelve como error.
-   * Si la Cuenta ya es de otro paciente y la revisión dice `unir`, son la misma persona:
-   * se fusionan las dos fichas y se queda el codi de la revisión (ver planificarFusio).
-   * @param {string[]} headers cabeceras de la hoja Pacientes
-   * @param {any[][]} files filas (sin cabecera)
-   * @param {{codi_acces: string, cuenta_quartup: any, unir?: boolean}[]} revisions
-   * @returns {{ files, aplicats, errors, filesTocades }} cada aplicat lleva `unitAmb`
-   *   ({codi_acces, nombre}) si hubo fusión.
-   */
-  function aplicarRevisio(headers, files, revisions) {
-    const { idx } = indexarCapcaleres(headers);
-    if (idx.codi_acces === undefined || idx.cuenta_quartup === undefined) {
-      throw new Error("No trobo les columnes \"Codi d'accés\" i \"Cuenta Quartup\". Has executat la migració?");
-    }
-    let actuals = files;
-    const pacientsActuals = () => pacientsUnics(actuals.map(f => filaAObjecte(f, idx)));
-
-    const errors = [];
-    const aplicats = [];
-    const assignades = {};
-    const tocats = {};
-    revisions.forEach(r => {
-      const codi = String(r.codi_acces || '').trim().toUpperCase();
-      const cuenta = String(r.cuenta_quartup === undefined || r.cuenta_quartup === null ? '' : r.cuenta_quartup).trim();
-      if (!codi || !cuenta) return; // fila aún sin rellenar: se ignora sin error
-      const tipus = classificarIdentificador(cuenta);
-      if (tipus !== 'cuenta') {
-        errors.push({ codi_acces: codi, motiu: tipus === 'dni' ? 'Hi has posat un DNI, no la Cuenta.' : 'La Cuenta només pot tenir xifres.' });
-        return;
-      }
-      const pacients = pacientsActuals();
-      if (!pacients.some(p => p.codi_acces === codi)) {
-        errors.push({ codi_acces: codi, motiu: "Aquest codi d'accés ja no és al full de Pacients." });
-        return;
-      }
-      if (assignades[cuenta] && assignades[cuenta] !== codi) {
-        errors.push({ codi_acces: codi, motiu: `La Cuenta ${cuenta} ja l'has posada a un altre pacient de la revisió (${assignades[cuenta]}).` });
-        return;
-      }
-      const altre = pacients.find(p => p.codi_acces !== codi && String(p.cuenta_quartup).trim() === cuenta);
-      let unitAmb = null;
-      if (altre) {
-        if (!r.unir) {
-          errors.push({ codi_acces: codi, motiu: `La Cuenta ${cuenta} ja és de ${altre.nombre} (codi ${altre.codi_acces}). Si és la mateixa persona, escriu SÍ a la columna "Unir" i torna a aplicar.` });
-          return;
-        }
-        const fusio = planificarFusio(headers, actuals, codi, altre.codi_acces);
-        if (fusio.errors.length) {
-          errors.push({ codi_acces: codi, motiu: 'No es poden unir: ' + fusio.errors.join(' ') });
-          return;
-        }
-        actuals = fusio.files;
-        tocats[codi] = true;
-        unitAmb = { codi_acces: altre.codi_acces, nombre: altre.nombre };
-      }
-      assignades[cuenta] = codi;
-      tocats[codi] = true;
-      aplicats.push({ codi_acces: codi, cuenta_quartup: cuenta, unitAmb });
-    });
-
-    const perCodi = {};
-    aplicats.forEach(a => { perCodi[a.codi_acces] = a.cuenta_quartup; });
-    const iCuenta = idx.cuenta_quartup;
-    const iCodi = idx.codi_acces;
-    let filesTocades = 0;
-    const novesFiles = actuals.map(f => {
-      const codi = String(f[iCodi] || '').trim().toUpperCase();
-      if (!tocats[codi]) return f;
-      const copia = f.slice();
-      copia[iCuenta] = perCodi[codi];
-      filesTocades++;
-      return copia;
-    });
-
-    return { files: novesFiles, aplicats, errors, filesTocades };
   }
 
   // --- Fusión de dos fichas de la misma persona ---
@@ -481,36 +315,6 @@ function crearPacientModel() {
       return copia;
     });
     return { files: novesFiles, errors, filesTocades };
-  }
-
-  /**
-   * Marca "Sense DNI" a todos los pacientes que no tienen DNI (no lo tenemos y no se va a
-   * pedir en el panel). Si más adelante llega el DNI, al ponerlo se desmarca.
-   * @returns {{ files: any[][], pacients: number, filesTocades: number }}
-   */
-  function marcarSenseDni(headers, files) {
-    const { idx } = indexarCapcaleres(headers);
-    if (idx.dni === undefined || idx.sense_dni === undefined || idx.codi_acces === undefined) {
-      throw new Error('No trobo les columnes "DNI" i "Sense DNI". Has executat la migració?');
-    }
-    const objectes = files.map(f => filaAObjecte(f, idx));
-    const ambDni = {};
-    objectes.forEach(o => {
-      if (String(o.dni).trim()) ambDni[String(o.codi_acces).trim().toUpperCase()] = true;
-    });
-    const pacients = {};
-    let filesTocades = 0;
-    const novesFiles = files.map((f, i) => {
-      const o = objectes[i];
-      const codi = String(o.codi_acces).trim().toUpperCase();
-      if (!codi || ambDni[codi] || o.sense_dni) return f;
-      const copia = f.slice();
-      copia[idx.sense_dni] = true;
-      pacients[codi] = true;
-      filesTocades++;
-      return copia;
-    });
-    return { files: novesFiles, pacients: Object.keys(pacients).length, filesTocades };
   }
 
   // --- Posición dental (S4) ---
@@ -689,133 +493,8 @@ function crearPacientModel() {
     return { camps, posicions, quantitat, reconegut: Object.keys(camps).length > 0, sobrant, complet };
   }
 
-  /** "Multi-unit · 30º · 5 mm · Avinent · Externa · REF HE48865", para los resúmenes. */
-  function descriurePilar(camps) {
-    const c = camps || {};
-    return [c.pilar, c.pilar_angulacion && c.pilar_angulacion + 'º', c.pilar_altura && c.pilar_altura + ' mm',
-      c.pilar_marca, c.pilar_conexion, c.pilar_ref && 'REF ' + c.pilar_ref].filter(Boolean).join(' · ');
-  }
-
   function textCela(v) {
     return String(v === undefined || v === null ? '' : v).trim();
-  }
-
-  /**
-   * Plan puro de la migración del pilar (S4). NUNCA tira información:
-   * - "NO" / "No" / "sin pilar" -> "Sin pilar".
-   * - Un texto antiguo ("Multi-unit 3 mm Avinent hexagon externo") se reparte en tipo +
-   *   detalles SOLO si se ha entendido entero (`analitzarTextPilar(...).complet`) y no pisa
-   *   un detalle ya escrito con otro valor. Si no, la fila se queda tal cual y el texto
-   *   sale en `altres` para revisarlo a mano.
-   * Vacío no se toca (puede ser que aún no se sepa). Idempotente.
-   * @param {string[]} [marques] marcas del catálogo
-   * @returns {{ files: any[][], filesTocades: number, sensePilar: number, reclassificats: number,
-   *   canvis: {abans: string, despres: string, files: number}[], altres: string[] }}
-   */
-  function planificarMigracioPilars(headers, files, marques) {
-    const { idx } = indexarCapcaleres(headers);
-    const falten = CAMPS_PILAR.filter(k => idx[k] === undefined);
-    if (falten.length) {
-      throw new Error('No trobo les columnes del pilar (' + falten.map(k => COLUMNES.find(c => c.clau === k).capcalera).join(', ') + ').');
-    }
-    let filesTocades = 0, sensePilar = 0, reclassificats = 0;
-    const altres = [];
-    const canvis = [];
-    const anotarCanvi = (abans, despres) => {
-      const c = canvis.find(x => x.abans === abans);
-      if (c) c.files++; else canvis.push({ abans, despres, files: 1 });
-    };
-    const novesFiles = files.map(f => {
-      if (filaBuida(f)) return f;
-      const actual = textCela(f[idx.pilar]);
-      if (!actual || TIPUS_PILAR.indexOf(actual) !== -1) return f;
-      if (normalitzarTipusPilar(actual) === 'Sin pilar') {
-        const copia = f.slice();
-        copia[idx.pilar] = 'Sin pilar';
-        filesTocades++;
-        sensePilar++;
-        return copia;
-      }
-      const a = analitzarTextPilar(actual, marques);
-      // En la hoja antigua, un pilar con detalles y sin tipo ("avinent hexagon externo 2mm",
-      // "recto 2 mm") era un multi-unit: se supone, y el diálogo lo dice.
-      const suposat = !a.camps.pilar && a.complet;
-      if (suposat) a.camps.pilar = 'Multi-unit';
-      const xoca = Object.keys(a.camps).some(k => k !== 'pilar' && textCela(f[idx[k]]) && textCela(f[idx[k]]) !== a.camps[k]);
-      if (!a.camps.pilar || !a.complet || xoca) {
-        if (altres.indexOf(actual) === -1) altres.push(actual);
-        return f;
-      }
-      const copia = f.slice();
-      Object.keys(a.camps).forEach(k => { copia[idx[k]] = a.camps[k]; });
-      filesTocades++;
-      reclassificats++;
-      anotarCanvi(actual, descriurePilar(a.camps) + (suposat ? ' (suposo Multi-unit)' : ''));
-      return copia;
-    });
-    return { files: novesFiles, filesTocades, sensePilar, reclassificats, canvis, altres };
-  }
-
-  /**
-   * Deshace la primera migración de pilares (2026-10-03), que dejaba "Multi-unit" + alçada y
-   * tiraba el resto del texto (marca, conexión...). Recupera el texto original de una
-   * copia anterior de la hoja (la pestaña "Còpia abans S2" o una copia del historial).
-   * Solo toca las filas cuyo pilar es justo lo que dejó aquella migración a partir del
-   * original: lo que se haya cambiado después a mano no se toca.
-   * Las filas se emparejan por Codi + REF + lote + posición, y si no, por REF + lote +
-   * posición o por nombre + posición (solo si el emparejamiento es único).
-   * @returns {{ files: any[][], restaurades: number, noTrobades: number, canviadesDespres: number }}
-   */
-  function planificarRecuperacioPilars(headers, files, headersCopia, filesCopia) {
-    const { idx } = indexarCapcaleres(headers);
-    const { idx: idxC } = indexarCapcaleres(headersCopia);
-    if (idxC.pilar === undefined) throw new Error('La còpia no té la columna "Pilar".');
-    if (idx.pilar === undefined || idx.pilar_altura === undefined) {
-      throw new Error('No trobo les columnes "Pilar" i "Pilar alçada (mm)".');
-    }
-    const t = (o, k) => textCela(o[k]).toUpperCase();
-    const claus = [
-      o => [t(o, 'codi_acces'), t(o, 'cod_implante'), t(o, 'lote'), t(o, 'posicion')].join('|'),
-      o => (t(o, 'cod_implante') || t(o, 'lote')) ? [t(o, 'cod_implante'), t(o, 'lote'), t(o, 'posicion')].join('|') : '',
-      o => t(o, 'nombre') ? [t(o, 'nombre'), t(o, 'posicion')].join('|') : ''
-    ];
-    const objsC = filesCopia.filter(f => !filaBuida(f)).map(f => filaAObjecte(f, idxC));
-    const mapes = claus.map(clau => {
-      const m = {};
-      objsC.forEach(o => { const k = clau(o); if (k) (m[k] = m[k] || []).push(o); });
-      return m;
-    });
-    const buscar = o => {
-      for (let i = 0; i < claus.length; i++) {
-        const k = claus[i](o);
-        const trobats = k ? mapes[i][k] || [] : [];
-        if (trobats.length === 1) return trobats[0];
-        // Mismo implante repetido igual en la copia: vale si todos dicen el mismo pilar.
-        if (trobats.length > 1 && trobats.every(x => textCela(x.pilar) === textCela(trobats[0].pilar))) return trobats[0];
-      }
-      return null;
-    };
-    let restaurades = 0, noTrobades = 0, canviadesDespres = 0;
-    const novesFiles = files.map(f => {
-      if (filaBuida(f)) return f;
-      const actual = textCela(f[idx.pilar]);
-      if (!actual) return f;
-      const o = filaAObjecte(f, idx);
-      const c = buscar(o);
-      if (!c) { noTrobades++; return f; }
-      const original = textCela(c.pilar);
-      if (!original || original === actual || normalitzarTipusPilar(original) === 'Sin pilar') return f;
-      if (normalitzarTipusPilar(original) !== actual) { canviadesDespres++; return f; }
-      const copia = f.slice();
-      copia[idx.pilar] = original;
-      // La alçada la escribió aquella migración (si la copia ya la tenía, se respeta).
-      const m = original.match(/(\d+(?:[.,]\d+)?)\s*mm/i);
-      const alturaCopia = idxC.pilar_altura !== undefined ? textCela(c.pilar_altura) : '';
-      if (m && textCela(f[idx.pilar_altura]) === numero(m[1])) copia[idx.pilar_altura] = alturaCopia;
-      restaurades++;
-      return copia;
-    });
-    return { files: novesFiles, restaurades, noTrobades, canviadesDespres };
   }
 
   // --- Ciclo de vida de la ficha (S3) ---
@@ -833,36 +512,6 @@ function crearPacientModel() {
   /** Pendiente y todavía sin pilar: el pasaporte dice "Pilar: pendiente de colocar". */
   function pilarPendent(fila) {
     return !!fila && esCert(fila.pendent) && textCela(fila.pilar) === '';
-  }
-
-  /**
-   * ¿Proponer "Pendent" para este implante? Sin pilar todavía, o "A cabeza de implante",
-   * que es como se guarda el "+PC" (pilar de cicatrización, provisional) de la ficha.
-   */
-  function suggereixPendent(imp) {
-    const pilar = textCela(imp && imp.pilar);
-    return pilar === '' || normalitzarTipusPilar(pilar) === 'A cabeza de implante';
-  }
-
-  /**
-   * Fecha de la hoja: Date, "aaaa-mm-dd" (sidebar) o "d/m/aaaa" (día primero, como escribe
-   * la clínica). Lo que no se entiende -> null.
-   */
-  function parseData(v) {
-    if (v instanceof Date || Object.prototype.toString.call(v) === '[object Date]') {
-      return isNaN(v.getTime()) ? null : v;
-    }
-    const s = textCela(v);
-    let y, m, d;
-    let r = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:$|[T\s])/);
-    if (r) { y = +r[1]; m = +r[2]; d = +r[3]; }
-    else {
-      r = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2}|\d{4})$/);
-      if (!r) return null;
-      d = +r[1]; m = +r[2]; y = +r[3] < 100 ? 2000 + +r[3] : +r[3];
-    }
-    const data = new Date(y, m - 1, d);
-    return data.getFullYear() === y && data.getMonth() === m - 1 && data.getDate() === d ? data : null;
   }
 
   /** Datos de paciente del formulario, normalizados como se guardan. */
@@ -1032,68 +681,6 @@ function crearPacientModel() {
       files_hoja: filesHoja, claus_tocades: CLAUS_IMPLANT.filter(k => tocades[k]), claus_per_fila: clausPerFila });
   }
 
-  /**
-   * Propuesta de "Pendent" para la revisión que lanza la Auxiliar (menú 🗂️): implantes de
-   * los últimos 6 meses que aún no lo están y cuyo pilar está vacío o es "A cabeza de
-   * implante" (el +PC). Las fechas que no se entienden también salen, sin proponer.
-   * @param {number} araMs ahora (ms), para poder probarlo
-   * @returns {{fila, codi_acces, nombre, posicion, fecha, pilar, motiu, proposat}[]}
-   */
-  function proposarPendents(headers, files, araMs) {
-    const { idx } = indexarCapcaleres(headers);
-    const limit = new Date(araMs);
-    limit.setMonth(limit.getMonth() - 6);
-    const out = [];
-    files.forEach((f, i) => {
-      if (filaBuida(f)) return;
-      const o = filaAObjecte(f, idx);
-      if (!textCela(o.codi_acces) || o.pendent || !suggereixPendent(o)) return;
-      const data = parseData(o.fecha_colocacion);
-      if (data && data < limit) return;
-      const motiu = textCela(o.pilar) === '' ? 'Pilar buit' : 'A cabeza de implante (+PC?)';
-      out.push({
-        fila: i + 2,
-        codi_acces: textCela(o.codi_acces).toUpperCase(),
-        nombre: textCela(o.nombre),
-        posicion: textCela(o.posicion),
-        fecha: data || textCela(o.fecha_colocacion),
-        pilar: textCela(o.pilar),
-        motiu: data ? motiu : motiu + ' · data no entesa',
-        proposat: !!data
-      });
-    });
-    return out;
-  }
-
-  /**
-   * Aplica la revisión de pendientes: marca "Pendent" en las filas confirmadas. Cada
-   * decisión lleva su fila, codi y posición, y si la fila ha cambiado no se toca.
-   * @param {{fila, codi_acces, posicion, pendent}[]} decisions
-   * @returns {{ files: any[][], marcades: number, resultats: string[] }} un resultado por decisión
-   */
-  function aplicarPendents(headers, files, decisions) {
-    const { idx } = indexarCapcaleres(headers);
-    if (idx.pendent === undefined) throw new Error('No trobo la columna "Pendent".');
-    const novesFiles = files.slice();
-    let marcades = 0;
-    const resultats = decisions.map(d => {
-      if (!esCert(d.pendent)) return 'No marcat';
-      const n = parseInt(d.fila, 10);
-      const f = n >= 2 ? novesFiles[n - 2] : undefined;
-      if (!f) return 'ERROR: la fila ja no existeix';
-      const o = filaAObjecte(f, idx);
-      if (textCela(o.codi_acces).toUpperCase() !== textCela(d.codi_acces).toUpperCase() ||
-          textCela(o.posicion) !== textCela(d.posicion)) return 'ERROR: la fila ha canviat; torna a proposar';
-      if (o.pendent) return 'Ja era pendent';
-      const copia = f.slice();
-      copia[idx.pendent] = true;
-      novesFiles[n - 2] = copia;
-      marcades++;
-      return 'Marcat pendent';
-    });
-    return { files: novesFiles, marcades, resultats };
-  }
-
   function unics(llista) {
     return llista.filter((v, i) => llista.indexOf(v) === i);
   }
@@ -1114,11 +701,8 @@ function crearPacientModel() {
     classificarIdentificador,
     validarPacient,
     pacientsUnics,
-    planificarMigracio,
-    aplicarRevisio,
     planificarFusio,
     planificarCanviCuenta,
-    marcarSenseDni,
     POSICIONS_PTERIGOIDEES,
     SENSE_POSICIO,
     normalitzarPosicio,
@@ -1128,16 +712,9 @@ function crearPacientModel() {
     CAMPS_PILAR,
     normalitzarTipusPilar,
     analitzarTextPilar,
-    descriurePilar,
-    planificarMigracioPilars,
-    planificarRecuperacioPilars,
     CLAUS_IMPLANT,
     pilarPendent,
-    suggereixPendent,
-    parseData,
-    planificarDesat,
-    proposarPendents,
-    aplicarPendents
+    planificarDesat
   };
 }
 
