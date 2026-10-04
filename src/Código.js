@@ -37,6 +37,7 @@ function onOpen() {
   ui.createMenu(NOM_MENU)
       .addItem('➕ Afegir implant / pacient', 'showSidebar')
       .addItem('✏️ Completar i enviar (fila seleccionada)', 'obrirPanellPendents')
+      .addItem('🔔 Recordatoris', 'obrirRecordatoris')
       .addSeparator()
       .addItem('🔑 Autoritzar el meu compte', 'autorizarCuenta')
       .addSubMenu(ui.createMenu('⚙️ Manteniment')
@@ -45,6 +46,9 @@ function onOpen() {
   // Sin menú a propósito (solo para quien mantiene la herramienta, desde el editor de
   // Apps Script): arreglarCodigosUndefined, eliminarDuplicados, provarAvisSecretaria,
   // retallarFilesBuides.
+
+  // Recordatoris (S6): un aviso si hoy toca alguno. Solo lee la hoja; nunca rompe el menú.
+  try { avisarRecordatorisEnObrir_(); } catch (e) { /* el menú ya está */ }
 }
 
 /**

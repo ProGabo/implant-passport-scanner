@@ -221,7 +221,7 @@ test('menú: solo lo que usa la clínica, y Comprovar-ho tot dentro de Mantenime
   ctx.SpreadsheetApp.getUi = () => Object.assign(getUi(), { createMenu: menu });
   ctx.onOpen();
   assert.deepEqual(items.map(i => i[1]).map(f => (Array.isArray(f) ? f.map(x => x[1]) : f)),
-    ['showSidebar', 'obrirPanellPendents', 'autorizarCuenta', ['comprobarTodo']]);
+    ['showSidebar', 'obrirPanellPendents', 'obrirRecordatoris', 'autorizarCuenta', ['comprobarTodo']]);
 });
 
 test('mantenimiento desde el editor (sin interfaz de Sheets): funciona y el resultado va al registro', () => {
