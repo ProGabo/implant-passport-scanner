@@ -34,17 +34,17 @@ function main() {
   let passed = 0;
   let failed = 0;
 
-  samples.forEach(({ name: sampleName, pdfPath: filePath, goldenPath }) => {
-    if (!fs.existsSync(filePath) || !fs.existsSync(goldenPath)) {
+  samples.forEach(({ name: sampleName, pdfPaths, goldenPath }) => {
+    if (!pdfPaths.every(p => fs.existsSync(p)) || !fs.existsSync(goldenPath)) {
       console.log(`[${sampleName}] SKIP - missing PDF or golden file`);
       return;
     }
 
-    const base64Data = fs.readFileSync(filePath).toString('base64');
+    const docs = pdfPaths.map(p => ({ base64Data: fs.readFileSync(p).toString('base64'), mimeType: 'application/pdf' }));
     const expected = JSON.parse(fs.readFileSync(goldenPath, 'utf8'));
 
     try {
-      const result = ScanEngine.scanPassport(base64Data, 'application/pdf', {
+      const result = ScanEngine.scanDocuments(docs, {
         httpFetch: poisonedHttpFetch,
         geminiApiKey: 'unused-gemini-is-forced-down',
         openRouterApiKey

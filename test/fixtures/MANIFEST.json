@@ -3,5 +3,6 @@
   "sample-2": "synthetic-2.pdf",
   "sample-3": "synthetic-3.pdf",
   "sample-4": "synthetic-4.pdf",
-  "sample-5": "synthetic-5.pdf"
+  "sample-5": "synthetic-5.pdf",
+  "sample-6": ["multi/synthetic-6a.pdf", "multi/synthetic-6b.pdf"]
 }

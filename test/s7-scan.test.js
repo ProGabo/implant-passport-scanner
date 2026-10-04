@@ -30,10 +30,14 @@ test('buildPrompt: con varios documentos pide unirlos sin repetir pegatinas; sie
   const uno = ScanEngine.buildPrompt();
   const tres = ScanEngine.buildPrompt(3);
   assert.equal(uno.indexOf('VARIOS DOCUMENTOS'), -1);
+  // Un documento: la cabecera y la fecha, como antes del cambio (mismos resultados).
+  assert.ok(uno.includes('Analiza la imagen del pasaporte de implantes.'));
+  assert.ok(uno.includes('superior izquierda de la página (ej:'));
+  assert.match(tres, /superior izquierda de la página donde está la pegatina/);
   assert.match(tres, /Recibes 3 documentos/);
   assert.match(tres, /UNA sola vez/);
   [uno, tres].forEach(p => {
-    assert.match(p, /SEGUIMIENTO/);
+    assert.match(p, /APARTE DE LAS PEGATINAS/);
     assert.match(p, /"seguiment"/);
     assert.match(p, /NO un cuadrante/);
     assert.match(p, /\{"implantes":\[/);

@@ -25,16 +25,16 @@ function main() {
   let passed = 0;
   let failed = 0;
 
-  samples.forEach(({ name: sampleName, pdfPath: filePath }) => {
-    if (!fs.existsSync(filePath)) {
+  samples.forEach(({ name: sampleName, pdfPaths }) => {
+    if (!pdfPaths.every(p => fs.existsSync(p))) {
       console.log(`[${sampleName}] SKIP - missing PDF`);
       return;
     }
 
-    const base64Data = fs.readFileSync(filePath).toString('base64');
+    const docs = pdfPaths.map(p => ({ base64Data: fs.readFileSync(p).toString('base64'), mimeType: 'application/pdf' }));
 
     try {
-      const result = ScanEngine.scanPassport(base64Data, 'application/pdf', {
+      const result = ScanEngine.scanDocuments(docs, {
         httpFetch: bothDownHttpFetch,
         geminiApiKey: 'unused-both-down',
         openRouterApiKey: 'unused-both-down'

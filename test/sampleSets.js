@@ -2,7 +2,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 /**
- * Loads every available sample as { name, pdfPath, fixturePath, goldenPath }.
+ * Loads every available sample as { name, pdfPath, pdfPaths, fixturePath, goldenPath,
+ * seguimentPath }. A MANIFEST value is one PDF or (S7) an array of PDFs of the SAME
+ * patient, scanned together in one request; pdfPath is then the first one.
+ * seguimentPath (optional file): the follow-up proposal expected from the scan (P10d).
  *
  * Two sets share one layout (<root>/fixtures/MANIFEST.json, <root>/golden/,
  * PDFs at <root>/<filename>):
@@ -22,11 +25,14 @@ function loadSamples() {
     if (!fs.existsSync(manifestPath)) return;
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     Object.keys(manifest).sort().forEach((sampleName) => {
+      const pdfPaths = [].concat(manifest[sampleName]).map(f => path.join(root, f));
       samples.push({
         name: label + sampleName,
-        pdfPath: path.join(root, manifest[sampleName]),
+        pdfPath: pdfPaths[0],
+        pdfPaths: pdfPaths,
         fixturePath: path.join(root, 'fixtures', `${sampleName}.json`),
-        goldenPath: path.join(root, 'golden', `${sampleName}.json`)
+        goldenPath: path.join(root, 'golden', `${sampleName}.json`),
+        seguimentPath: path.join(root, 'golden', `${sampleName}.seguiment.json`)
       });
     });
   });
