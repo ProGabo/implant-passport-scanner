@@ -182,11 +182,22 @@
         [btnDesar, btnCompletar, btnEnviar].forEach(b => { b.disabled = !actius; });
     }
 
-    /** Textos de los botones: con email se envía el pasaporte; sin email, el avís. */
+    /** El email del paciente: el guardado o el que se acaba de escribir en "Email (falta)". */
+    function emailEfectiu() {
+        const nou = document.querySelector('[data-pacient="email"]');
+        return String((dades && dades.pacient.email) || (nou && nou.value) || '').trim();
+    }
+
+    /**
+     * Botones según haya email: con email se envía el pasaporte (y el avís si se quiere);
+     * sin email, solo el avís. Se recalcula al escribir el email que faltaba.
+     */
     function textosBotons() {
-        const senseEmail = !dades || !String(dades.pacient.email || '').trim();
+        const senseEmail = !emailEfectiu();
         btnCompletar.textContent = senseEmail ? '✅ Completar i avisar la secretària' : '✅ Completar i enviar';
         btnEnviar.textContent = senseEmail ? '📨 Avisar la secretària' : '📨 Enviar el pasaport';
+        avisGrup.classList.toggle('hidden', senseEmail);
+        if (senseEmail) avisTambe.checked = false;
     }
 
     /** Tras un error: todo lo escrito sigue en pantalla y se puede reintentar. */
@@ -231,8 +242,6 @@
         document.getElementById('ajudaCompletar').classList.toggle('hidden', nomesEnviar);
         btnEnviar.classList.toggle('hidden', !nomesEnviar);
 
-        // Con email: el email del pasaporte, y el avís si se quiere. Sin email: solo el avís.
-        avisGrup.classList.toggle('hidden', senseEmail);
         avisTambe.checked = false;
         restaurarBotons();
         mostrarEstat('');
@@ -255,6 +264,8 @@
         const div = document.getElementById('pFaltes');
         div.innerHTML = faltes.map(([k, nom]) => `<div class="form-group"><label>${nom} (falta, opcional):</label><input type="text" class="falta" data-pacient="${k}"></div>`).join('');
         div.classList.toggle('hidden', !faltes.length);
+        const email = div.querySelector('[data-pacient="email"]');
+        if (email) email.addEventListener('input', textosBotons);
     }
 
     // --- Una tarjeta por implante pendiente --------------------------------------------

@@ -172,6 +172,17 @@ test('desarPanell: rellena el email que faltaba en todas las filas del paciente,
   assert.equal(celda(ss, 2, 'email'), 'maria@x.cat');
 });
 
+test('completarIEnviarPanell: un Sense email al que se le escribe el email en el panel recibe el pasaporte por email', () => {
+  const ss = libro();
+  const { ctx, sent } = cargarCodigo(ss);
+  const r = ctx.completarIEnviarPanell({ codi_acces: 'J0AN22', email: 'joan@x.cat',
+    implantes: [{ fila: 5, posicion_esperada: '11', pilar: 'Multi-unit' }] }, {});
+  assert.equal(r.ok, true, r.message);
+  assert.equal(r.emailSent, true);
+  assert.equal(r.avisSecretaria, null, 'ya tiene email: no hace falta el avís');
+  assert.deepEqual(sent.map(s => s.to), ['joan@x.cat']);
+});
+
 test('enviarPasaportPanell: envía sin cambiar nada; codi inexistente -> error sin enviar', () => {
   const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
