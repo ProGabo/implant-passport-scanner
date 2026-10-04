@@ -176,6 +176,9 @@
         .pilar-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; margin-bottom: 6px; }
         .pilar-grid label, .pilar-detalls label { font-size: 12px; }
         .pilar-enganxa { margin-top: 8px; }
+        /* Plegado: es útil pero casi nunca hace falta, y con varios implantes ocupaba mucho. */
+        .pilar-enganxa .obrir-enganxa { background: none; border: none; color: #0369a1; font-size: 12px; font-weight: 600; padding: 2px 0; width: auto; cursor: pointer; text-align: left; }
+        .pilar-enganxa .obrir-enganxa:hover { text-decoration: underline; }
         .pilar-enganxa textarea { width: 100%; box-sizing: border-box; font-family: 'Inter', sans-serif; font-size: 12px; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; resize: vertical; }
         .pilar-enganxa button { margin-top: 4px; padding: 6px 8px; font-size: 12px; }
         /* Pendent (S3): al implante aún le falta algo; la fila sale en naranja en la hoja */
@@ -356,9 +359,11 @@
             <!-- Fuera de los detalles: tiene que poder usarse también cuando el escáner ha
                  dejado "Sin pilar" (los detalles están desactivados) para corregirlo. -->
             <div class="pilar-enganxa">
-                <label>📋 Enganxa els detalls del pilar de Quartup:</label>
-                <textarea class="pilar-text-quartup" rows="2" placeholder="Ex: 0196, mult-unit 3mm avinent hexagon externo : 2.00, 25,26"></textarea>
-                <button type="button" class="btn-add pilar-omplir">Omplir els camps</button>
+                <button type="button" class="obrir-enganxa">📋 Enganxa els detalls del pilar de Quartup ▸</button>
+                <div class="pilar-enganxa-cos hidden">
+                    <textarea class="pilar-text-quartup" rows="2" placeholder="Ex: 0196, mult-unit 3mm avinent hexagon externo : 2.00, 25,26"></textarea>
+                    <button type="button" class="btn-add pilar-omplir">Omplir els camps</button>
+                </div>
             </div>
 
             <details class="pilar-detalls">
@@ -594,6 +599,18 @@
             }
         });
         section.querySelector('.pilar-omplir').addEventListener('click', () => enganxarPilarQuartup(section));
+        prepararEnganxa(section);
+    }
+
+    /** "📋 Enganxa els detalls del pilar de Quartup": plegado; al pulsarlo se abre la caja. */
+    function prepararEnganxa(arrel) {
+        const obrir = arrel.querySelector('.obrir-enganxa');
+        const cos = arrel.querySelector('.pilar-enganxa-cos');
+        obrir.addEventListener('click', () => {
+            const tancat = cos.classList.toggle('hidden');
+            obrir.textContent = obrir.textContent.replace(/[▸▾]$/, tancat ? '▸' : '▾');
+            if (!tancat) cos.querySelector('textarea').focus();
+        });
     }
 
     /** Copia el tipo elegido al campo que se guarda y activa o desactiva los detalles. */

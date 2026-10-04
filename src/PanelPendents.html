@@ -44,6 +44,9 @@
         .estat { padding: 8px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; }
         .estat-info { color: #0284c7; background: #e0f2fe; }
         .estat-error { color: #991b1b; background: #fee2e2; }
+        .obrir-enganxa { background: none; border: none; color: #0369a1; font-size: 12px; font-weight: 600; padding: 2px 0; width: auto; cursor: pointer; text-align: left; }
+        .obrir-enganxa:hover { text-decoration: underline; }
+        .enllac-discret { background: none; border: none; color: #64748b; font-size: 11px; padding: 4px 0; margin-top: 6px; width: auto; cursor: pointer; text-decoration: underline; }
         .estat-ok { color: #166534; background: #dcfce7; }
         /* Resultado del último envío: se queda aunque el panel se recargue. */
         #enviamentEstat { margin-bottom: 10px; line-height: 1.4; }
@@ -83,7 +86,7 @@
             <button type="button" class="btn-ok" id="btnCompletar">✅ Completar i enviar</button>
             <button type="button" class="btn-ok hidden" id="btnEnviar">📨 Enviar el pasaport</button>
             <div class="ajuda" id="ajudaCompletar">Desa els canvis, treu la marca de pendent (i el taronja) i envia el pasaport.</div>
-            <button type="button" class="btn-sec btn-petit" id="btnRecarregar">↻ He canviat de fila: tornar a carregar</button>
+            <button type="button" class="enllac-discret" id="btnRecarregar">↻ He canviat de fila: tornar a carregar</button>
         </div>
     </div>
 
@@ -109,9 +112,11 @@
                 </select>
                 <input type="text" class="f-pilar-altre hidden" placeholder="Escriu el tipus de pilar" style="margin-top: 6px;">
                 <div style="margin-top: 8px;">
-                    <label>📋 Enganxa els detalls del pilar de Quartup:</label>
-                    <textarea class="f-pilar-text" rows="2" placeholder="Ex: 0196, mult-unit 3mm avinent hexagon externo : 2.00"></textarea>
-                    <button type="button" class="btn-sec btn-petit f-pilar-omplir" style="margin-top: 4px;">Omplir els camps</button>
+                    <button type="button" class="obrir-enganxa">📋 Enganxa els detalls del pilar de Quartup ▸</button>
+                    <div class="pilar-enganxa-cos hidden">
+                        <textarea class="f-pilar-text" rows="2" placeholder="Ex: 0196, mult-unit 3mm avinent hexagon externo : 2.00"></textarea>
+                        <button type="button" class="btn-sec btn-petit f-pilar-omplir" style="margin-top: 4px;">Omplir els camps</button>
+                    </div>
                 </div>
                 <details class="f-pilar-detalls">
                     <summary>Detalls del pilar (opcional)</summary>
@@ -302,6 +307,13 @@
         fixarTipusPilar(card, f.pilar);
         select.addEventListener('change', () => sincronitzarPilar(card));
         card.querySelector('.f-pilar-omplir').addEventListener('click', () => enganxarPilar(card));
+        const obrir = card.querySelector('.obrir-enganxa');
+        const cos = card.querySelector('.pilar-enganxa-cos');
+        obrir.addEventListener('click', () => {
+            const tancat = cos.classList.toggle('hidden');
+            obrir.textContent = obrir.textContent.replace(/[▸▾]$/, tancat ? '▸' : '▾');
+            if (!tancat) cos.querySelector('textarea').focus();
+        });
         altre.addEventListener('input', () => sincronitzarPilar(card));
         pintarPendent(card);
         return node;
