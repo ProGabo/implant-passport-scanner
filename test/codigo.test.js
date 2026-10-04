@@ -319,14 +319,25 @@ test('Sense email con el avís desmarcado: no se envía nada', () => {
   assert.equal(sent.length, 0);
 });
 
-test('con email, el avís a la secretaria no se envía aunque llegue marcado', () => {
+test('con email, el avís a la secretaria también se puede pedir: para imprimirlo', () => {
   const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
   desarIEnviar(ctx, {
     codi_acces: 'AAA111', cuenta_quartup: '43000001', nombre: 'Pere Vila', email: 'pere@x.cat', sense_email: false,
-    dni: '', sense_dni: true, sendEmail: 'false', avisSecretaria: 'true', implantes: [IMPLANT]
+    dni: '', sense_dni: true, sendEmail: 'true', avisSecretaria: 'true', implantes: [IMPLANT]
   });
-  assert.equal(sent.length, 0);
+  assert.deepEqual(sent.map(m => m.to).sort(), ['consulta@doctorpiurgell.com', 'pere@x.cat']);
+  const avis = sent.find(m => m.to === 'consulta@doctorpiurgell.com');
+  assert.match(avis.subject, /^Pasaport per imprimir: Pere Vila/);
+  assert.match(avis.body, /Ja el rep per email \(pere@x\.cat\)/);
+  assert.doesNotMatch(avis.body, /sense email/);
+  // Sin marcarlo, solo el del paciente.
+  sent.length = 0;
+  desarIEnviar(ctx, {
+    codi_acces: 'AAA111', cuenta_quartup: '43000001', nombre: 'Pere Vila', email: 'pere@x.cat', sense_email: false,
+    dni: '', sense_dni: true, sendEmail: 'true', avisSecretaria: 'false', implantes: [IMPLANT]
+  });
+  assert.deepEqual(sent.map(m => m.to), ['pere@x.cat']);
 });
 
 test('comprobarTodo lista los códigos rotos y los rebotes', () => {
@@ -404,7 +415,7 @@ test('avís de prova: envía a la dirección indicada lo mismo que a la consulta
 test('las funciones internas no se pueden llamar desde el portal (terminan en "_")', () => {
   const { ctx } = cargarCodigo(libro());
   ['getPatientDataVerbose', 'sendPassportEmail', 'enviarAvisSecretaria', 'generarPasaportePDF', 'enviarEmail',
-    'registrarEnviament', 'gasHttpFetch', 'actualitzarCataleg', 'contarIntentoFallido', 'formaFull', 'iniciDiag', 'desarDiag', 'avisarLimitPortal']
+    'registrarEnviament', 'gasHttpFetch', 'actualitzarCataleg', 'contarIntentoFallido', 'iniciDiag', 'desarDiag', 'avisarLimitPortal']
     .forEach(n => {
       assert.equal(typeof ctx[n], 'undefined', n + ' debe ser privada');
       assert.equal(typeof ctx[n + '_'], 'function', n + '_');

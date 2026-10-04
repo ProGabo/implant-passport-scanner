@@ -363,3 +363,97 @@ test('guardar y enviar dejan sus tiempos (sin datos) para medirlos desde fuera',
   assert.ok(desats[1].passos.some(p => /^llegir \d+$/.test(p[0])));
   assert.doesNotMatch(cache.get('DIAG_INTERN'), /Anna|anna@x\.cat|43005555/);
 });
+
+// --- Índice de códigos del portal --------------------------------------------------------
+
+// Cuenta las lecturas de la columna Codi d'accés entera.
+function espiarColumna(sheet) {
+  const n = { columna: 0 };
+  const getRange = sheet.getRange.bind(sheet);
+  sheet.getRange = (r, c, nr, nc) => {
+    if (r === 2 && c === col('codi_acces') && nc === 1 && nr === sheet.getLastRow() - 1) n.columna++;
+    return getRange(r, c, nr, nc);
+  };
+  return n;
+}
+const posicions = d => [...d.implantes.map(i => i.posicion)].sort();
+
+test('índice: el segundo login ya no lee la columna entera', () => {
+  const ss = libro();
+  const { ctx, cache } = cargarCodigo(ss, { usuari: '' });
+  const n = espiarColumna(pacientes(ss));
+  assert.deepEqual(posicions(ctx.getPatientDataVerbose_('K7XH3P')), ['25', '36']);
+  assert.equal(n.columna, 1);
+  assert.ok(cache.has('IDX_CODIS'));
+  assert.deepEqual(posicions(ctx.getPatientDataVerbose_('k7xh3p')), ['25', '36']);
+  assert.deepEqual(posicions(ctx.getPatientDataVerbose_('J2AN22')), ['11', '21']);
+  assert.equal(n.columna, 1);
+});
+
+test('índice: filas ordenadas o borradas a mano y pacientes nuevos a mano siguen bien', () => {
+  const ss = libro();
+  const { ctx } = cargarCodigo(ss, { usuari: '' });
+  ctx.getPatientDataVerbose_('K7XH3P'); // crea el índice
+  const p = pacientes(ss);
+  // Intercambiar las filas 2 y 3 (como al ordenar la hoja).
+  const f2 = p.getRange(2, 1, 1, H.length).getValues()[0];
+  const f3 = p.getRange(3, 1, 1, H.length).getValues()[0];
+  p.getRange(2, 1, 1, H.length).setValues([f3]);
+  p.getRange(3, 1, 1, H.length).setValues([f2]);
+  assert.deepEqual(posicions(ctx.getPatientDataVerbose_('K7XH3P')), ['25', '36']);
+  assert.deepEqual(posicions(ctx.getPatientDataVerbose_('J2AN22')), ['11', '21']);
+  // Paciente escrito a mano al final: no está en el índice, se lee la columna.
+  p.getRange(7, 1, 1, H.length).setValues([fila(Object.assign({}, IMP, { codi_acces: 'NEW777', nombre: 'Nou', posicion: '47' }))]);
+  assert.deepEqual(posicions(ctx.getPatientDataVerbose_('NEW777')), ['47']);
+  // Borrar filas: las del índice se quedan fuera de la hoja.
+  p.deleteRows(2, 6);
+  assert.equal(ctx.getPatientDataVerbose_('K7XH3P').found, false);
+});
+
+test('índice: el alta lo rehace con el paciente nuevo, y el mantenimiento lo olvida', () => {
+  const ss = libro();
+  const { ctx, cache } = cargarCodigo(ss);
+  const r = ctx.saveNewImplant(NOU);
+  assert.equal(r.ok, true, r.message);
+  const n = espiarColumna(pacientes(ss));
+  assert.deepEqual(posicions(ctx.getPatientDataVerbose_(r.newCode)), ['14']);
+  assert.equal(n.columna, 0, 'sin leer la columna');
+  ctx.retallarFilesBuides(); // las herramientas que mueven filas lo olvidan
+  assert.equal(cache.has('IDX_CODIS'), false);
+  assert.deepEqual(posicions(ctx.getPatientDataVerbose_(r.newCode)), ['14']);
+});
+
+test('índice: dos códigos que chocan al normalizar siguen sin enseñar ninguno', () => {
+  const ss = libro();
+  pacientes(ss).getRange(5, col('codi_acces')).setValue('AB0C12');
+  pacientes(ss).getRange(3, col('codi_acces')).setValue('ABOC12');
+  const { ctx } = cargarCodigo(ss, { usuari: '' });
+  ctx.getPatientDataVerbose_('K7XH3P');
+  const d = ctx.getPatientDataVerbose_('ab0ci2');
+  assert.equal(d.found, false);
+  assert.equal(d.ambigu, true);
+  assert.equal(ctx.getPatientDataVerbose_('AB0C12').found, true, 'el exacto sí');
+});
+
+test('índice: con miles de filas se guarda en varios trozos y se lee igual', () => {
+  const rows = [H];
+  for (let i = 0; i < 9000; i++) rows.push(fila(Object.assign({}, IMP, { codi_acces: 'C' + String(i).padStart(5, '0'), posicion: '11' })));
+  const ss = new FakeSpreadsheet([new FakeSheet('Pacientes', rows)]);
+  const { ctx, cache } = cargarCodigo(ss, { usuari: '' });
+  ctx.getPatientDataVerbose_('C00000');
+  assert.ok(Number(cache.get('IDX_CODIS')) > 1, 'trozos: ' + cache.get('IDX_CODIS'));
+  const n = espiarColumna(pacientes(ss));
+  assert.equal(ctx.getPatientDataVerbose_('C08999').found, true);
+  assert.equal(n.columna, 0);
+});
+
+test('guardar con recordatorio: el color lila no se rehace si ya está', () => {
+  const ss = libro();
+  const { ctx } = cargarCodigo(ss);
+  const amb = (c, d) => Object.assign({}, NOU, { cuenta_quartup: c, dni: d, email: c + '@x.cat', recordatori: { data: '2027-01-01', motiu: '' } });
+  assert.equal(ctx.saveNewImplant(amb('43007001', '44444444A')).ok, true);
+  const n = espiar(pacientes(ss));
+  assert.equal(ctx.saveNewImplant(amb('43007002', '55555555K')).ok, true);
+  assert.equal(n.regles, 0);
+  assert.equal(pacientes(ss).getConditionalFormatRules().filter(r => /Recordatoris/.test(r.formula)).length, 1);
+});

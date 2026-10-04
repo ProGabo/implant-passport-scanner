@@ -199,10 +199,15 @@ function crearPortalModel() {
 
   /**
    * Email interno (en catalán) para que la Secretària haga llegar el pasaporte a un
-   * paciente sin email. Lleva el DNI completo: es para encontrarlo en sus contactos.
-   * @param {{nombre, cuenta_quartup, dni, codi}} p
+   * paciente sin email, o se lo imprima si lo tiene (`email`: ya se le ha enviado). Lleva
+   * el DNI completo: es para encontrarlo en sus contactos.
+   * @param {{nombre, cuenta_quartup, dni, codi, email?}} p
    */
   function avisSecretaria(p) {
+    const email = String(p.email || '').trim();
+    const entrada = email
+      ? "S'ha desat el pasaport implantològic d'un pacient. Ja el rep per email (" + email + '): us el passem per si el voleu imprimir o enviar-li també per WhatsApp.'
+      : "S'ha desat el pasaport implantològic d'un pacient sense email. Feu-li arribar el codi d'accés.";
     const missatge = missatgePacient(p);
     const wa = enllacWhatsApp(missatge);
     const fila = (etiqueta, valor) => valor
@@ -211,7 +216,9 @@ function crearPortalModel() {
     const html = `
       <div style="font-family:Arial,sans-serif;color:#1f2937;max-width:560px;">
         <p>Hola,</p>
-        <p>S'ha desat el pasaport implantològic d'un pacient <b>sense email</b>. Si us plau, feu-li arribar el codi d'accés.</p>
+        ${email
+          ? `<p>S'ha desat el pasaport implantològic d'un pacient. El pacient <b>ja el rep per email</b> (${escapar(email)}): us el passem per si el voleu imprimir o enviar-li també per WhatsApp.</p>`
+          : "<p>S'ha desat el pasaport implantològic d'un pacient <b>sense email</b>. Si us plau, feu-li arribar el codi d'accés.</p>"}
         <table style="border-collapse:collapse;margin:12px 0;">
           ${fila('Pacient', p.nombre)}
           ${fila('Cuenta Quartup', p.cuenta_quartup)}
@@ -225,14 +232,14 @@ function crearPortalModel() {
         </p>
         <p style="font-size:13px;color:#555;">El botó obre WhatsApp amb el missatge escrit: tria el contacte del pacient i envia'l. El pasaport en PDF va adjunt per si el voleu imprimir.</p>
       </div>`;
-    const text = "S'ha desat el pasaport implantològic d'un pacient sense email. Feu-li arribar el codi d'accés.\n\n" +
+    const text = entrada + '\n\n' +
       'Pacient: ' + (p.nombre || '') + '\n' +
       'Cuenta Quartup: ' + (p.cuenta_quartup || '-') + '\n' +
       'DNI: ' + (p.dni || '-') + '\n' +
       "Codi d'accés: " + p.codi + '\n\n' +
       '--- Missatge per al pacient ---\n' + missatge + '\n\n' +
       'Enviar per WhatsApp: ' + wa;
-    return { assumpte: 'Pasaport sense email: ' + String(p.nombre || '').trim() + ' (' + p.codi + ')', html, text };
+    return { assumpte: (email ? 'Pasaport per imprimir: ' : 'Pasaport sense email: ') + String(p.nombre || '').trim() + ' (' + p.codi + ')', html, text };
   }
 
   // --- Pasaporte (renderer único: portal, vista previa y PDF) ---

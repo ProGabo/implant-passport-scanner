@@ -288,9 +288,9 @@
             </div>
             <div id="enviarAjuda" class="field-help hidden" style="margin-bottom: 15px;"></div>
 
-            <div class="checkbox-group form-group hidden" id="avisSecretariaGrup" style="margin-bottom: 15px;">
+            <div class="checkbox-group form-group" id="avisSecretariaGrup" style="margin-bottom: 15px;">
                 <input type="checkbox" id="avisSecretaria" value="true">
-                <label for="avisSecretaria">Avisar la secretària (li arriba un email amb el codi, el missatge per WhatsApp i el PDF)</label>
+                <label for="avisSecretaria" id="avisSecretariaText">Avisar també la secretària, per si el vol imprimir (li arriba el codi, el missatge per WhatsApp i el PDF)</label>
             </div>
 
             <?!= include_('VistaPrevia') ?>
@@ -433,6 +433,22 @@
     const sendEmailCheckbox = document.getElementById('sendEmail');
     const avisSecretariaCheckbox = document.getElementById('avisSecretaria');
     const avisSecretariaGrup = document.getElementById('avisSecretariaGrup');
+    const avisSecretariaText = document.getElementById('avisSecretariaText');
+
+    /**
+     * "Avisar la secretària": sin email es el único envío y va marcado; con email es un
+     * extra (para imprimirlo) y va desmarcado. Solo se cambia cuando cambia "Sense email",
+     * para no deshacer lo que haya marcado la Auxiliar.
+     */
+    function pintarAvisSecretaria(forcar) {
+        const sense = senseEmailCheckbox.checked;
+        if (!forcar && avisSecretariaGrup.dataset.sense === String(sense)) return;
+        avisSecretariaGrup.dataset.sense = String(sense);
+        avisSecretariaCheckbox.checked = sense;
+        avisSecretariaText.textContent = sense
+            ? 'Avisar la secretària (li arriba un email amb el codi, el missatge per WhatsApp i el PDF)'
+            : 'Avisar també la secretària, per si el vol imprimir (li arriba el codi, el missatge per WhatsApp i el PDF)';
+    }
     const enviarAjuda = document.getElementById('enviarAjuda');
     const implantContainer = document.getElementById('implantContainer');
 
@@ -970,7 +986,7 @@
         patientSection.classList.remove('hidden');
 
         // Paciente nuevo en pantalla: "Avisar la secretària" y "Enviar" vuelven a su valor por defecto.
-        avisSecretariaGrup.classList.add('hidden');
+        delete avisSecretariaGrup.dataset.sense;
         delete sendEmailCheckbox.dataset.manual;
         mostrarUltimEnviament(res.found ? res.data : null);
 
@@ -1049,9 +1065,7 @@
         // Sin email no hay a quién enviar el pasaporte: se avisa a la secretària (por defecto).
         sendEmailCheckbox.disabled = senseEmailCheckbox.checked;
         if (senseEmailCheckbox.checked) sendEmailCheckbox.checked = false;
-        const eraVisible = !avisSecretariaGrup.classList.contains('hidden');
-        avisSecretariaGrup.classList.toggle('hidden', !senseEmailCheckbox.checked);
-        if (senseEmailCheckbox.checked && !eraVisible) avisSecretariaCheckbox.checked = true;
+        pintarAvisSecretaria();
 
         marcarFaltas();
         actualizarEnviar();
@@ -1383,7 +1397,7 @@
         const avisos = lectura.avisos;
         const formData = Object.assign({}, lectura.formData, {
             sendEmail: sendEmailCheckbox.checked ? 'true' : 'false',
-            avisSecretaria: senseEmailCheckbox.checked && avisSecretariaCheckbox.checked ? 'true' : 'false'
+            avisSecretaria: avisSecretariaCheckbox.checked ? 'true' : 'false'
         });
         pendentsDesats = formData.implantes.filter(i => i.pendent).length;
         const enviar = () => llamarServidor('saveNewImplant', [formData], handleSaveResponse, handleError);
@@ -1451,8 +1465,7 @@
         sendEmailCheckbox.checked = true;
         delete sendEmailCheckbox.dataset.manual;
         enviarAjuda.classList.add('hidden');
-        avisSecretariaGrup.classList.add('hidden');
-        avisSecretariaCheckbox.checked = false;
+        pintarAvisSecretaria(true);
         cuentaAviso.classList.add('hidden');
         ocultarConflicte();
         pacienteActual = null;

@@ -187,7 +187,7 @@ function cargarCodigo(ss, opts) {
           whenFormulaSatisfied(fm) { r.formula = fm; return this; },
           setBackground(c) { r.background = c; return this; },
           setRanges(rs) { r.ranges = rs; return this; },
-          build() { return Object.assign({ getBooleanCondition: () => ({ getCriteriaValues: () => [r.formula] }) }, r); }
+          build() { return Object.assign({ getBooleanCondition: () => ({ getCriteriaValues: () => [r.formula] }), getRanges: () => r.ranges }, r); }
         };
       }
     },
@@ -223,7 +223,9 @@ function cargarCodigo(ss, opts) {
     CacheService: { getScriptCache: () => ({
       put: (k, v) => { cache.set(k, String(v)); },
       get: k => (cache.has(k) ? cache.get(k) : null),
-      remove: k => { cache.delete(k); }
+      remove: k => { cache.delete(k); },
+      putAll: vals => { Object.keys(vals).forEach(k => cache.set(k, String(vals[k]))); },
+      getAll: ks => { const o = {}; ks.forEach(k => { if (cache.has(k)) o[k] = cache.get(k); }); return o; }
     }) }
   };
   vm.createContext(ctx);

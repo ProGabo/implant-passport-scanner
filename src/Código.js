@@ -182,28 +182,132 @@ function llegirPacientPerCodi_(code) {
   marca_('capcaleres');
   const { idx } = PacientModel.indexarCapcaleres(headers);
   if (idx.codi_acces === undefined) throw new Error("No trobo la columna \"Codi d'accés\".");
+
+  // Primero el índice en memoria: solo se leen las filas del paciente.
+  const index = llegirIndexCodis_();
+  if (index) {
+    let r = null;
+    try {
+      r = consultarIndex_(sheet, idx, nCols, code, index);
+    } catch (e) {
+      // Una fila del índice que ya no existe en la hoja (se han borrado filas).
+      Logger.log('Índex de codis desfasat: ' + e);
+    }
+    marca_(r ? 'index' : 'indexCaducat');
+    if (r) return r;
+  }
+
+  // Sin índice, código que no está en él o índice desfasado: la columna entera, y se
+  // rehace el índice con lo leído.
   const nFiles = sheet.getLastRow() - 1;
   marca_('lastRow=' + (nFiles + 1));
   if (nFiles < 1) return { codi: '', ambigu: false, objetos: [] };
-
   const codis = sheet.getRange(2, idx.codi_acces + 1, nFiles, 1).getValues().map(f => f[0]);
   marca_('columnaCodi');
+  desarIndexCodis_(codis);
   const r = PortalModel.resoldreCodi(code, codis);
   if (!r.codi) return { codi: '', ambigu: r.ambigu, objetos: [] };
 
   const posicions = [];
-  codis.forEach((c, i) => { if (mismoCodigo(c, r.codi)) posicions.push(i); });
-  const objetos = [];
-  // Las filas de un paciente suelen ir seguidas, pero la 2ª visita las añade al final.
-  for (let a = 0; a < posicions.length;) {
-    let b = a;
-    while (b + 1 < posicions.length && posicions[b + 1] === posicions[b] + 1) b++;
-    sheet.getRange(posicions[a] + 2, 1, b - a + 1, nCols).getValues()
-        .forEach(f => objetos.push(PacientModel.filaAObjecte(f, idx)));
-    a = b + 1;
-  }
+  codis.forEach((c, i) => { if (mismoCodigo(c, r.codi)) posicions.push(i + 2); });
+  const objetos = llegirFiles_(sheet, posicions, nCols).map(f => PacientModel.filaAObjecte(f, idx));
   marca_('filesPacient');
   return { codi: String(r.codi).trim().toUpperCase(), ambigu: false, objetos };
+}
+
+/** Lee unas filas de la hoja (números de fila ordenados), por tramos seguidos. */
+function llegirFiles_(sheet, files, nCols) {
+  const out = [];
+  // Las filas de un paciente suelen ir seguidas, pero la 2ª visita las añade al final.
+  for (let a = 0; a < files.length;) {
+    let b = a;
+    while (b + 1 < files.length && files[b + 1] === files[b] + 1) b++;
+    sheet.getRange(files[a], 1, b - a + 1, nCols).getValues().forEach(f => out.push(f));
+    a = b + 1;
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------------------------
+// Índice de códigos (S8): en qué filas está cada Codi d'accés, en la memoria del script
+// (CacheService, 1 hora). Con 10.000 filas, leer la columna entera cuesta unos 2,5 s y
+// leer solo las filas del paciente, una décima. Se rehace con cada alta (que ya lee la
+// hoja entera) y cuando el portal lo encuentra desfasado. Lo único que no detecta es una
+// fila añadida a mano a un paciente que ya existía: la verá al cabo de una hora como mucho.
+// Las claves son la forma canónica (O=0, I=L=1), igual que resoldreCodi.
+const CLAU_INDEX_CODIS = 'IDX_CODIS';
+const SEGONS_INDEX_CODIS = 3600;
+const MIDA_TROS_INDEX = 90000; // CacheService: como mucho 100 KB por valor
+
+/** @param {any[]} codis la columna Codi d'accés desde la fila 2 */
+function desarIndexCodis_(codis) {
+  try {
+    const perCanon = {};
+    codis.forEach((c, i) => {
+      const k = PortalModel.codiCanonic(c);
+      if (k) (perCanon[k] = perCanon[k] || []).push(i + 2);
+    });
+    const text = Object.keys(perCanon).map(k => k + ':' + perCanon[k].join(',')).join('|');
+    const valors = {};
+    let n = 0;
+    for (let i = 0; i < text.length || n === 0; i += MIDA_TROS_INDEX) valors[CLAU_INDEX_CODIS + '_' + n++] = text.slice(i, i + MIDA_TROS_INDEX);
+    valors[CLAU_INDEX_CODIS] = String(n);
+    CacheService.getScriptCache().putAll(valors, SEGONS_INDEX_CODIS);
+  } catch (e) {
+    Logger.log("No es pot desar l'índex de codis: " + e);
+  }
+}
+
+/** @returns {Object<string, number[]>|null} forma canónica -> filas de la hoja */
+function llegirIndexCodis_() {
+  try {
+    const cache = CacheService.getScriptCache();
+    const n = Number(cache.get(CLAU_INDEX_CODIS));
+    if (!n) return null;
+    const claus = [];
+    for (let i = 0; i < n; i++) claus.push(CLAU_INDEX_CODIS + '_' + i);
+    const trossos = cache.getAll(claus);
+    if (claus.some(k => typeof trossos[k] !== 'string')) return null;
+    const index = {};
+    claus.map(k => trossos[k]).join('').split('|').forEach(e => {
+      const [k, files] = e.split(':');
+      if (k && files) index[k] = files.split(',').map(Number);
+    });
+    return index;
+  } catch (e) {
+    Logger.log("Índex de codis il·legible: " + e);
+    return null;
+  }
+}
+
+function oblidarIndexCodis_() {
+  try {
+    CacheService.getScriptCache().remove(CLAU_INDEX_CODIS);
+  } catch (e) {
+    Logger.log("No es pot esborrar l'índex de codis: " + e);
+  }
+}
+
+/**
+ * Resuelve un código con el índice. Devuelve null si no se puede fiar (código que no está,
+ * o alguna fila que ya no tiene ese código: filas movidas, vaciadas u ordenadas a mano) y
+ * entonces se lee la columna entera. Mismo resultado que resoldreCodi sobre toda la hoja:
+ * todos los códigos que se le pueden parecer comparten forma canónica, y están aquí.
+ */
+function consultarIndex_(sheet, idx, nCols, code, index) {
+  const canon = PortalModel.codiCanonic(code);
+  const files = canon && index[canon];
+  if (!files || !files.length) return null;
+  const valors = llegirFiles_(sheet, files, nCols);
+  const codis = valors.map(f => f[idx.codi_acces]);
+  if (codis.some(c => PortalModel.codiCanonic(c) !== canon)) return null;
+  const r = PortalModel.resoldreCodi(code, codis);
+  if (!r.codi) return { codi: '', ambigu: r.ambigu, objetos: [] };
+  return {
+    codi: String(r.codi).trim().toUpperCase(),
+    ambigu: false,
+    objetos: valors.filter((f, i) => mismoCodigo(codis[i], r.codi)).map(f => PacientModel.filaAObjecte(f, idx))
+  };
 }
 
 // Caché del login (60 s), solo para que el PDF que el portal pide justo después no vuelva a
@@ -413,6 +517,7 @@ function fusionarPacients(codiQueQueda, codiQueMarxa) {
     escribirColumnasPaciente(sheet, headers, fusio.files);
     oblidarLogin_(codiQueQueda);
     oblidarLogin_(codiQueMarxa);
+    oblidarIndexCodis_();
     moureRecordatori_(codiQueMarxa, codiQueQueda);
     return { ok: true, pacient: fusio.pacient, filesMogudes: fusio.filesMogudes, avisos: fusio.avisos };
   } catch (e) {
@@ -521,6 +626,9 @@ function saveNewImplant(formData) {
     sheet.getRange(primera, 1, filas.length, headers.length).setValues(filas);
     ponerCasillas(sheet, headers, primera, filas.length);
     marca_('escriure');
+    // Ya tenemos la hoja entera leída: el índice del portal sale gratis.
+    const { idx } = PacientModel.indexarCapcaleres(headers);
+    if (idx.codi_acces !== undefined) desarIndexCodis_(files.map(f => f[idx.codi_acces]).concat(plan.filas.map(f => f.codi_acces)));
 
     actualitzarCataleg_(plan.filas);
     marca_('cataleg');
@@ -551,7 +659,8 @@ function saveNewImplant(formData) {
     implantsCount: filas.length,
     enviar: {
       email: formData.sendEmail === 'true',
-      avisSecretaria: !!paciente.sense_email && formData.avisSecretaria === 'true',
+      // Sin email es la manera de hacerle llegar el codi; con email, para imprimirlo.
+      avisSecretaria: formData.avisSecretaria === 'true',
       // Un recordatorio que se acaba de poner o cambiar no se da por hecho con este envío.
       noTancarRecordatori: !!(recordatori && recordatori.accio && recordatori.accio !== 'cap')
     },
@@ -1036,12 +1145,18 @@ function prepararColorRecordatoris_() {
       const c = r.getBooleanCondition();
       return !!c && RE_REGLA_RECORDATORI.test(String((c.getCriteriaValues() || [])[0]));
     };
-    const regles = sheet.getConditionalFormatRules().filter(r => !esPropia(r));
+    const totes = sheet.getConditionalFormatRules();
+    const regles = totes.filter(r => !esPropia(r));
     if (idx.codi_acces !== undefined && ['codi_acces', 'estat', 'data'].every(k => rIdx[k] !== undefined)) {
       const col = k => { const l = columnaLletra_(rIdx[k] + 1); return 'INDIRECT("' + HOJA_RECORDATORIS + '!' + l + ':' + l + '")'; };
       const formula = '=COUNTIFS(' + col('codi_acces') + ',$' + columnaLletra_(idx.codi_acces + 1) + '2,' +
         col('estat') + ',"' + RecordatoriModel.ACTIU + '",' + col('data') + ',"<="&TODAY())>0';
       const nFiles = Math.max(sheet.getMaxRows(), 2) - 1;
+      // Ya está igual y llega hasta abajo: reescribir las reglas de 10.000 filas cuesta
+      // segundos en cada guardado con recordatorio.
+      const propies = totes.filter(esPropia);
+      if (propies.length === 1 && String(propies[0].getBooleanCondition().getCriteriaValues()[0]) === formula &&
+          propies[0].getRanges()[0].getNumRows() === nFiles) return;
       regles.push(SpreadsheetApp.newConditionalFormatRule()
           .whenFormulaSatisfied(formula)
           .setBackground(COLOR_RECORDATORI)
@@ -1320,6 +1435,7 @@ function enviarAvisSecretaria_(paciente, destiProva) {
     nombre: paciente.nombre,
     cuenta_quartup: paciente.cuenta_quartup,
     dni: paciente.dni,
+    email: paciente.email,
     codi: paciente.codi_acces
   });
   let adjunts = [];
@@ -1979,6 +2095,7 @@ function arreglarCodigosUndefined() {
     avisar_('❌ Error intern', e.message);
   } finally {
     lock.releaseLock();
+    oblidarIndexCodis_();
   }
 }
 
@@ -2007,6 +2124,7 @@ function eliminarDuplicados() {
     eliminadas = repetides.length;
   } finally {
     lock.releaseLock();
+    oblidarIndexCodis_();
   }
   avisar_('Neteja feta', `S'han eliminat ${eliminadas} files duplicades.`);
 }
@@ -2041,6 +2159,7 @@ function retallarFilesBuides() {
     }
   } finally {
     lock.releaseLock();
+    oblidarIndexCodis_();
   }
   avisar_('Retallar files buides', missatge);
   return missatge;
@@ -2188,47 +2307,6 @@ function pdfPortal_(code) {
   return { ok: true, nom: b.getName(), base64: Utilities.base64Encode(b.getBytes()) };
 }
 
-/**
- * TEMPORAL (S8): la forma de la hoja Pacientes, solo números y nombres de columna, nunca
- * valores: cuántas filas, cuántas vacías entre medio y qué columnas tienen algo en las
- * últimas filas con datos. En memoria 10 minutos (leer la hoja entera es caro).
- */
-function formaFull_() {
-  const cache = CacheService.getScriptCache();
-  const desat = cache.get('DIAG_FORMA');
-  if (desat) return JSON.parse(desat);
-  const sheet = hojaPacientes();
-  const t0 = Date.now();
-  const data = sheet.getDataRange().getValues();
-  const llegir_ms = Date.now() - t0;
-  const headers = data[0] || [];
-  const { idx } = PacientModel.indexarCapcaleres(headers);
-  const files = data.slice(1);
-  const n = PacientModel.filesAmbDades(files);
-  const buida = f => PacientModel.filaBuida(f);
-  let buides = 0, ambCodi = 0, darreraAmbCodi = 0;
-  const trams = []; // tramos de filas vacías de más de 20 seguidas dentro de los datos
-  let inici = -1;
-  for (let i = 0; i < n; i++) {
-    const b = buida(files[i]);
-    if (b) { buides++; if (inici === -1) inici = i; }
-    if (!b && inici !== -1) { if (i - inici > 20) trams.push([inici + 2, i + 1]); inici = -1; }
-    if (idx.codi_acces !== undefined && String(files[i][idx.codi_acces]).trim()) { ambCodi++; darreraAmbCodi = i + 2; }
-  }
-  const darreres = [];
-  for (let i = n - 1; i >= 0 && darreres.length < 5; i--) {
-    if (buida(files[i])) continue;
-    darreres.push({ fila: i + 2, columnes: headers.filter((h, j) => {
-      const v = files[i][j];
-      return v !== '' && v !== null && v !== false;
-    }).map(String) });
-  }
-  const r = { maxRows: sheet.getMaxRows(), lastRow: sheet.getLastRow(), lastCol: sheet.getLastColumn(), llegir_ms,
-    filesAmbDades: n, buidesEntremig: buides, ambCodi, darreraAmbCodi, tramsBuits: trams.slice(0, 20), darreres };
-  cache.put('DIAG_FORMA', JSON.stringify(r), 600);
-  return r;
-}
-
 // =================================================================
 // NUEVA API PARA CONECTAR EL PASAPORTE CON NETLIFY
 // =================================================================
@@ -2252,7 +2330,7 @@ function doPost(e) {
 
     } else if (action === 'diagIntern') {
       // Solo tiempos de los últimos guardados y envíos, nunca datos (ver desarDiag_).
-      result = { ok: true, desats: JSON.parse(CacheService.getScriptCache().get(CLAU_DIAG_INTERN) || '[]'), forma: formaFull_() };
+      result = { ok: true, desats: JSON.parse(CacheService.getScriptCache().get(CLAU_DIAG_INTERN) || '[]') };
 
     } else {
       result = { ok: false, message: 'Acción no reconocida por el servidor.' };
