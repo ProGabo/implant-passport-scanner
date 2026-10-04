@@ -5,6 +5,8 @@
   "description": "Local test harness for the ScanEngine shared with the live Apps Script app.",
   "scripts": {
     "test": "node --test \"test/**/*.test.js\"",
+    "web": "node scripts/generar-web.js",
+    "medir": "node scripts/medir-portal.js",
     "test:accuracy": "node --env-file=.env test/accuracy.js",
     "test:accuracy:fallback": "node --env-file=.env test/accuracy-fallback.js",
     "test:accuracy:bothdown": "node test/accuracy-bothdown.js",
