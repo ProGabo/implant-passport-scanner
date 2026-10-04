@@ -481,7 +481,7 @@ function saveNewImplant(formData) {
     });
     // La primera vez que se guarda algo pendiente: color, desplegable y pestaña "Pendents".
     if (plan.filas.some(f => f.pendent)) prepararHoja_(sheet, headers);
-    recordatori = desarRecordatori_(rec.recordatori, paciente);
+    recordatori = desarRecordatoriSegur_(rec.recordatori, paciente);
   } catch (e) {
     Logger.log('Error en saveNewImplant: ' + e.message);
     return { ok: false, message: 'Error en desar: ' + e.message };
@@ -499,7 +499,9 @@ function saveNewImplant(formData) {
     implantsCount: filas.length,
     enviar: {
       email: formData.sendEmail === 'true',
-      avisSecretaria: !!paciente.sense_email && formData.avisSecretaria === 'true'
+      avisSecretaria: !!paciente.sense_email && formData.avisSecretaria === 'true',
+      // Un recordatorio que se acaba de poner o cambiar no se da por hecho con este envío.
+      noTancarRecordatori: !!(recordatori && recordatori.accio && recordatori.accio !== 'cap')
     },
     avisos: plan.avisos,
     recordatori: recordatori
@@ -757,7 +759,7 @@ function desarPanell_(formData, completar) {
       plan.filas.forEach(imp => updateCatalog_({ marca: imp.marca, modelo: imp.modelo, conexion: imp.conexion }));
     }
     oblidarLogin_(plan.codi);
-    const recordatori = desarRecordatori_(rec.recordatori, plan.paciente);
+    const recordatori = desarRecordatoriSegur_(rec.recordatori, plan.paciente);
     return { ok: true, codi: plan.codi, filesDesades: plan.files_hoja.length, avisos: plan.avisos, recordatori: recordatori };
   } catch (e) {
     Logger.log('Error en desarPanell_: ' + e);
@@ -797,12 +799,19 @@ function fullRecordatoris_(crear) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(HOJA_RECORDATORIS);
   if (!sheet && crear) {
+    // insertSheet deja activa la pestaña nueva: el panel lee la selección (filaSeleccionada_)
+    // y la Auxiliar estaría mirando otra pestaña. Se vuelve a donde estaba.
+    const abans = ss.getActiveSheet();
+    const rang = ss.getActiveRange();
     sheet = ss.insertSheet(HOJA_RECORDATORIS);
     const n = RecordatoriModel.CAPCALERES.length;
     sheet.getRange(1, 1, 1, n).setValues([RecordatoriModel.CAPCALERES]).setFontWeight('bold');
     sheet.setFrozenRows(1);
     sheet.getRange(1, 1).setNote("Recordatoris de la Auxiliar. Es posen i es canvien des del panell (🔔 Recordatori). " +
       "Per veure els actius: " + NOM_MENU + " → 🔔 Recordatoris.");
+    try {
+      if (rang) ss.setActiveRange(rang); else if (abans) ss.setActiveSheet(abans);
+    } catch (e) { /* sin interfaz (tests, editor): no hay selección que devolver */ }
   }
   return sheet;
 }
@@ -859,6 +868,19 @@ function desarRecordatori_(nou, pacient) {
   }
   if (pla.accio !== 'cap') prepararColorRecordatoris_();
   return { accio: pla.accio, data: nou.data };
+}
+
+/**
+ * desarRecordatori_ sin hacer fallar el guardado: los implantes ya están escritos, y un
+ * "Error en desar" haría reintentar y duplicar el paciente. El fallo sale solo en el 🔔.
+ */
+function desarRecordatoriSegur_(nou, pacient) {
+  try {
+    return desarRecordatori_(nou, pacient);
+  } catch (e) {
+    Logger.log('No es pot desar el recordatori de ' + pacient.codi_acces + ': ' + e);
+    return { accio: 'error', message: String(e && e.message || e) };
+  }
 }
 
 /** El recordatorio Actiu de un paciente para el sidebar y el panel, o null. */

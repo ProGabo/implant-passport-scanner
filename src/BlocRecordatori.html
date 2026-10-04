@@ -135,6 +135,7 @@
         const r = res && res.recordatori, t = res && res.recordatoriTancat;
         if (r && (r.accio === 'crear' || r.accio === 'actualitzar')) return `🔔 Recordatori per al <b>${esc(RecordatoriModel.format(r.data))}</b>: aquell dia t'avisarà en obrir la fulla.`;
         if (r && r.accio === 'cancellar') return '🔔 Recordatori tret.';
+        if (r && r.accio === 'error') return `⚠️ Els implants s'han desat, però el 🔔 recordatori no: ${esc(r.message)}. Torna-ho a provar des de «Completar i enviar».`;
         if (t && t.tancat) return `🔔 Recordatori del ${esc(t.data)} fet: ja no sortirà a la llista.`;
         if (t) return `🔔 El recordatori del ${esc(t.data)} segueix actiu (encara no toca). Si ja està fet, treu-lo amb la ✕ del bloc 🔔.`;
         return '';

@@ -60,7 +60,11 @@ function main() {
     console.log(JSON.stringify(fields, null, 2) + '\n');
   });
 
-  fs.writeFileSync(path.join(FIXTURES_DIR, 'MANIFEST.json'), JSON.stringify(manifest, null, 2));
+  // Samples of several PDFs (S7, e.g. test/multi/) are not regenerated here: keep them.
+  const manifestPath = path.join(FIXTURES_DIR, 'MANIFEST.json');
+  const previ = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, 'utf8')) : {};
+  Object.keys(previ).filter(k => Array.isArray(previ[k])).forEach(k => { manifest[k] = previ[k]; });
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
   console.log('Done. REVIEW the golden output above (or test/golden/*.json) for clinical correctness');
   console.log('before treating these as regression baselines.');

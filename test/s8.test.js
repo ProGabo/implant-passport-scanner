@@ -103,7 +103,7 @@ test('guardar no envía: devuelve qué enviar y enviarPasaport lo envía en la 2
   const r = ctx.saveNewImplant(NOU);
   assert.equal(r.ok, true, r.message);
   assert.equal(sent.length, 0, 'guardar no envía');
-  assert.deepEqual(JSON.parse(JSON.stringify(r.enviar)), { email: true, avisSecretaria: false });
+  assert.deepEqual(JSON.parse(JSON.stringify(r.enviar)), { email: true, avisSecretaria: false, noTancarRecordatori: false });
 
   const env = ctx.enviarPasaport(r.newCode, r.enviar);
   assert.equal(env.ok, true);

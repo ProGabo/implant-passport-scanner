@@ -86,6 +86,14 @@ Nota opcional y breve, interna, de lo que espera un implante Pendent ("canvi de 
 Rellenar en la 2ª visita lo que le faltaba a un implante Pendent, directamente en su fila o con el panel "Completar i enviar", sin volver a escanear la ficha. Al completar, deja de ser Pendent.
 _Avoid_: editar la ficha, reescanear
 
+**Recordatori**:
+Aviso que la Auxiliar se pone a sí misma para un paciente, "avisa'm el dia X", típicamente para revisar y enviar el pasaporte tras la 2ª cirugía. Es suyo e interno: no llega a la Secretària ni al paciente, y solo se ve dentro de la hoja (aviso al abrirla, lista "Recordatoris" y fila en lila cuando ya toca). Un paciente tiene como mucho uno activo; ponerle otro lo sustituye. Se da por hecho al reenviarle el pasaporte cuando ya toca, o a mano con la ✕.
+_Avoid_: alarma, aviso (a secas), tarea, recordatorio de la secretaria
+
+**Indicació de seguiment**:
+Lo que la ficha de la cirugía dice a mano sobre cuándo tiene que volver el paciente ("2ªC: 4 meses", "canvi de pilars en 4 mesos", "Control: 15 dies"). El escáner las lee y propone como Recordatori la de plazo más largo, si es de un mes o más, contada desde la fecha de colocación. El control de puntos (días) no se propone.
+_Avoid_: cita, próxima visita
+
 ## Envíos
 
 **Avís a la secretària**:

@@ -213,3 +213,37 @@ test('las funciones de los recordatorios son solo para el personal (ADR 0003)', 
   });
   assert.equal(rec(ss)[0].estat, 'Actiu');
 });
+
+test('revisión: el alta con 🔔 no se cierra con su propio envío (el sidebar envía después con enviar)', () => {
+  const ss = libro();
+  const { ctx } = cargarCodigo(ss);
+  const r = ctx.saveNewImplant(Object.assign({}, NOU, { sendEmail: 'true', recordatori: { data: '2001-09-12' } }));
+  assert.equal(r.ok, true, r.message);
+  assert.equal(r.enviar.noTancarRecordatori, true);
+  const e = ctx.enviarPasaport(r.newCode, r.enviar);
+  assert.equal(e.emailSent, true);
+  assert.equal(e.recordatoriTancat, null);
+  assert.deepEqual(rec(ss).map(o => o.estat), ['Actiu']);
+  // Sin tocar el 🔔, el envío sí lo da por hecho (ya toca).
+  assert.equal(ctx.saveNewImplant(Object.assign({}, NOU, { codi_acces: r.newCode, implantes: [Object.assign({}, NOU.implantes[0], { posicion: '15' })] })).enviar.noTancarRecordatori, false);
+});
+
+test('revisión: crear la pestaña Recordatoris no cambia la pestaña ni la fila seleccionadas', () => {
+  const ss = libro();
+  const { ctx } = cargarCodigo(ss);
+  ss.seleccionar(ss.getSheetByName('Pacientes'), 3);
+  const r = ctx.desarPanell({ codi_acces: 'K7XH3P', implantes: [{ fila: 3, posicion_esperada: '26' }], recordatori: { data: '2002-01-01' } });
+  assert.equal(r.ok, true, r.message);
+  assert.equal(ss.getActiveSheet().getName(), 'Pacientes');
+  assert.equal(ctx.carregarPanell().filaSeleccionada, 3);
+});
+
+test('revisión: si el 🔔 falla, el guardado sigue siendo ok y lo dice', () => {
+  const ss = libro();
+  const { ctx } = cargarCodigo(ss);
+  ss.insertSheet = () => { throw new Error('quota'); };
+  const r = ctx.saveNewImplant(Object.assign({}, NOU, { recordatori: { data: '2002-01-01' } }));
+  assert.equal(r.ok, true, r.message);
+  assert.equal(r.recordatori.accio, 'error');
+  assert.match(r.recordatori.message, /quota/);
+});

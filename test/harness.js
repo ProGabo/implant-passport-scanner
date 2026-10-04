@@ -121,13 +121,15 @@ class FakeSpreadsheet {
   getName() { return 'fake'; }
   getSheetByName(n) { return this.sheets.find(s => s.name === n) || null; }
   getSheets() { return this.sheets.slice(); }
-  insertSheet(n) { const s = new FakeSheet(n); this.sheets.push(s); return s; }
+  // Como Sheets: la pestaña nueva queda activa.
+  insertSheet(n) { const s = new FakeSheet(n); this.sheets.push(s); this.activa = { sheet: s, fila: 1 }; return s; }
   deleteSheet(s) { this.sheets = this.sheets.filter(x => x !== s); }
   // Selección de la Auxiliar (panel "Completar i enviar"): seleccionar(sheet, fila).
   seleccionar(sheet, fila) { this.activa = { sheet, fila }; }
   getActiveSheet() { return this.activa ? this.activa.sheet : this.sheets[0]; }
   getActiveRange() { return this.activa ? this.activa.sheet.getRange(this.activa.fila, 1) : null; }
   setActiveRange(r) { this.activa = { sheet: r.sheet, fila: r.r }; return r; }
+  setActiveSheet(s) { this.activa = { sheet: s, fila: 1 }; return s; }
   toast(msg, titol, s) { (this.toasts = this.toasts || []).push({ msg, titol, s }); }
 }
 
