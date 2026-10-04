@@ -271,104 +271,138 @@ function crearPortalModel() {
   }
 
   const LOGO_URL = 'https://i.postimg.cc/tTX6JQ42/DR-PI-ESTELLER.png';
-  const BLAU = '#02234f';
-  const SERIF = "Georgia,'Times New Roman',serif";
+  const FONTS = 'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Inter:wght@400;500;600;700&display=swap';
 
-  // El conversor de PDF de Apps Script (medido, S5): NO pinta ningún `background` y
-  // oscurece a #ababab todo texto claro. Los rellenos van con box-shadow inset (el
-  // navegador y el conversor los pintan igual) y el texto siempre oscuro sobre fondo
-  // suave. Así la vista previa, la impresión y el PDF son el mismo diseño.
-  const relleno = c => `box-shadow:inset 0 0 0 2000px ${c};`;
-  const ETIQUETA = 'font-size:7.5px;letter-spacing:1.4px;text-transform:uppercase;color:#5f6f86;font-weight:bold;';
+  // El conversor de PDF de Apps Script es un Chrome que imprime con los fondos apagados:
+  // sin `print-color-adjust:exact` pierde los rellenos y aclara el texto blanco. Con él
+  // (en .psp) pinta fondos, texto blanco y las fuentes de Google igual que el navegador,
+  // y la impresión desde la vista previa también. Así los tres son el mismo diseño.
+  const ESTILS = `
+    <link href="${FONTS}" rel="stylesheet">
+    <style>
+      .psp { font-family:'Inter',Helvetica,Arial,sans-serif; color:#1e293b; font-size:11px;
+             -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+      .psp-cap { width:100%; border-collapse:collapse; border-bottom:2px solid #02234f; margin-bottom:25px; }
+      .psp-cap td { vertical-align:bottom; padding-bottom:18px; }
+      .psp-titol-et { font-size:11px; letter-spacing:2px; text-transform:uppercase; color:#475569; font-weight:700; margin-bottom:5px; }
+      .psp-titol { font-family:'Playfair Display',Georgia,serif; font-size:26px; color:#02234f; font-weight:600; }
+      .psp-pacient { width:100%; border-collapse:separate; border-spacing:0; background:#f8fafc; border:1px solid #e2e8f0;
+                     border-left:4px solid #02234f; border-radius:6px; margin-bottom:32px; }
+      .psp-pacient td { padding:14px 18px; vertical-align:top; }
+      .psp-et { font-size:10px; text-transform:uppercase; color:#64748b; font-weight:700; letter-spacing:1px; white-space:nowrap; }
+      .psp-val { font-size:15px; color:#0f172a; font-weight:600; padding-top:4px; }
+      .psp-seccio { font-family:'Playfair Display',Georgia,serif; font-size:18px; color:#02234f; font-weight:600; margin-bottom:14px; }
+      .psp-taula { width:100%; border-collapse:separate; border-spacing:0; table-layout:fixed; }
+      .psp-taula th { text-align:left; padding:0 10px 10px 10px; font-size:10.5px; font-weight:600; color:#64748b;
+                      text-transform:uppercase; letter-spacing:1px; border-bottom:2px solid #e2e8f0; }
+      .psp-espai td { height:14px; padding:0; border:none; }
+      .psp-imp td { background:#fff; padding:12px 10px; font-size:13px; color:#1e293b; vertical-align:top;
+                    border-top:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1; }
+      .psp-imp td:first-child { border-left:5px solid #02234f; border-radius:8px 0 0 8px; text-align:center; padding-left:6px; padding-right:6px; }
+      .psp-imp td:last-child { border-right:1px solid #cbd5e1; border-radius:0 8px 8px 0; }
+      .psp-imp.amb-pilar td { border-bottom:none; }
+      .psp-imp.amb-pilar td:first-child { border-bottom-left-radius:0; }
+      .psp-imp.amb-pilar td:last-child { border-bottom-right-radius:0; }
+      .psp-pilar td { background:#f1f5f9; padding:9px 10px; font-size:12px; color:#334155;
+                      border-top:1px dashed #cbd5e1; border-bottom:1px solid #cbd5e1; }
+      .psp-pilar td:first-child { border-left:5px solid #02234f; border-bottom-left-radius:8px; }
+      .psp-pilar td:last-child { border-right:1px solid #cbd5e1; border-bottom-right-radius:8px; }
+      .psp-cercle { display:inline-block; background:#02234f; color:#fff; width:30px; height:30px; border-radius:50%;
+                    text-align:center; line-height:30px; font-weight:600; font-size:14px; }
+      .psp-pastilla { display:inline-block; background:#02234f; color:#fff; border-radius:8px; padding:5px 6px;
+                      font-weight:600; font-size:9.5px; line-height:1.3; }
+      .psp-marca { font-weight:600; color:#0f172a; font-size:14px; }
+      .psp-model { color:#475569; font-size:11.5px; margin-top:2px; }
+      .psp-mini { font-size:9px; color:#64748b; text-transform:uppercase; font-weight:700; letter-spacing:.5px; }
+      .psp-nw { white-space:nowrap; }
+      .psp-peu { margin-top:44px; text-align:center; border-top:1px solid #cbd5e1; padding-top:18px; }
+      .psp-peu-text { font-size:10.5px; color:#64748b; line-height:1.6; }
+      .psp-peu-c { margin-top:10px; font-size:11px; font-weight:600; color:#02234f; }
+    </style>`;
+
   const e = v => escapar(net(v) || '-');
 
   function capcalera(pacient, codi, dataEmissio, logo) {
-    const dada = (etiqueta, valor, estil) => `
-          <td style="padding:9px 14px;vertical-align:top;${estil || ''}">
-            <div style="${ETIQUETA}padding-bottom:3px;">${etiqueta}</div>
-            <div style="font-size:11.5px;color:${BLAU};">${valor}</div></td>`;
-    const sep = 'border-left:1px solid #d5dce7;';
+    const dada = (etiqueta, valor, amplada) =>
+      `<td style="width:${amplada};"><div class="psp-et">${etiqueta}</div><div class="psp-val">${valor}</div></td>`;
     return `
-        <table style="width:100%;border-collapse:collapse;"><tr>
-          <td style="vertical-align:bottom;padding-bottom:12px;"><img src="${escapar(logo || LOGO_URL)}" style="height:52px;"></td>
-          <td style="text-align:right;vertical-align:bottom;padding-bottom:12px;">
-            <div style="${ETIQUETA}letter-spacing:2.4px;padding-bottom:5px;">Certificado de autenticidad y garantía</div>
-            <div style="font-family:${SERIF};font-size:25px;color:${BLAU};">Pasaporte Implantológico</div>
-          </td></tr></table>
-        <div style="border-top:1px solid ${BLAU};border-bottom:1px solid ${BLAU};height:2px;margin-bottom:20px;"></div>
-        <table style="width:100%;border-collapse:collapse;${relleno('#f3f6fa')}"><tr>
-          ${dada('Paciente', e(pacient.nombre), 'width:34%;')}
-          ${dada('DNI', e(pacient.dni_parcial), 'width:20%;' + sep)}
-          ${dada('Fecha de emisión', e(dataEmissio), 'width:22%;' + sep)}
-          ${dada('Código de acceso', e(codi), 'width:24%;' + sep)}
-        </tr></table>
-        <div style="font-family:${SERIF};font-size:16px;color:${BLAU};margin-top:30px;">Registro de Implantes Colocados</div>
-        <div style="height:7px;"></div>`;
+      <table class="psp-cap"><tr>
+        <td><img src="${escapar(logo || LOGO_URL)}" alt="Drs. Pi y Esteller" style="height:55px;"></td>
+        <td style="text-align:right;">
+          <div class="psp-titol-et">Certificado de autenticidad</div>
+          <div class="psp-titol">Pasaporte Implantológico</div>
+        </td></tr></table>
+      <table class="psp-pacient"><tr>
+        ${dada('Paciente', e(pacient.nombre), '36%')}
+        ${dada('DNI', e(pacient.dni_parcial), '18%')}
+        ${dada('Fecha de emisión', e(dataEmissio), '22%')}
+        ${dada('Código de acceso', e(codi), '24%')}
+      </tr></table>
+      <div class="psp-seccio">Registro de Implantes Colocados</div>`;
   }
 
-  /**
-   * Una fila por implante y, debajo, el pilar en una banda de color suave unida a él
-   * (sin banda si textPilar está vacío). Cada implante es un <tbody> que no se parte
-   * entre páginas; el <thead> se repite.
-   */
+  // Un diente cabe en el círculo; la pterigoidea va entera en una pastilla.
+  const posicio = v => net(v).length <= 3
+    ? `<span class="psp-cercle">${e(v)}</span>`
+    : `<span class="psp-pastilla">${e(v)}</span>`;
+
+  // Cada implante es una tarjeta (raya azul a la izquierda, esquinas redondeadas) y, si
+  // tiene pilar, la tarjeta sigue con su banda gris debajo.
   function cosPasaporte(implants) {
-    const th = amplada => `width:${amplada};padding:7px 6px 7px 10px;text-align:left;${ETIQUETA}border-top:1px solid ${BLAU};border-bottom:1px solid ${BLAU};`;
-    const cella = 'vertical-align:top;font-size:10.5px;color:#26354a;line-height:1.5;';
-    const mini = t => `<span style="${ETIQUETA}font-size:7px;letter-spacing:1.2px;padding-right:5px;">${t}</span>`;
     const files = implants.map(i => {
       const pilar = textPilar(i);
-      const td = `padding:11px 6px ${pilar ? 6 : 11}px 10px;${cella}` + (pilar ? '' : 'border-bottom:1px solid #d5dce7;');
       const conexion = textConexion(i);
+      const cx = conexion ? conexion.split(' · ').map(t => escapar(t).replace(/ /g, '&nbsp;')).join('<br>') : '-';
       return `
-          <tbody style="page-break-inside:avoid;">
-            <tr>
-              <td style="${td}font-weight:bold;font-size:11.5px;color:${BLAU};">${e(i.posicion)}</td>
-              <td style="${td}"><span style="font-weight:bold;color:${BLAU};">${e(i.marca)}</span>${net(i.modelo) ? '<br><span style="color:#5f6f86;">' + escapar(net(i.modelo)) + '</span>' : ''}</td>
-              <td style="${td}">${e(i.dimensiones)}</td>
-              <td style="${td}">${conexion ? conexion.split(' · ').map(t => escapar(t).replace(/ /g, '&nbsp;')).join('<br>') : '-'}</td>
-              <td style="${td}">${mini('Ref')}${e(i.cod_implante)}<br>${mini('Lote')}${e(i.lote)}</td>
-              <td style="${td}">${e(i.fecha_colocacion)}</td>
-            </tr>` + (pilar ? `
-            <tr><td colspan="6" style="padding:0;border-bottom:1px solid #d5dce7;">
-              <table style="width:100%;border-collapse:collapse;margin-bottom:10px;"><tr>
-                <td style="width:10px;"></td>
-                <td style="padding:8px 12px;border-left:4px solid #5b7fa8;${relleno('#e1eaf5')}font-size:10px;color:#1f3b5c;">
-                  <span style="${ETIQUETA}color:#3f5c82;padding-right:8px;">Pilar</span>${escapar(pilar)}</td>
-              </tr></table></td></tr>` : '') + `
-          </tbody>`;
+        <tbody style="page-break-inside:avoid;">
+          <tr class="psp-imp${pilar ? ' amb-pilar' : ''}">
+            <td>${posicio(i.posicion)}</td>
+            <td><div class="psp-marca">${e(i.marca)}</div>${net(i.modelo) ? `<div class="psp-model">${escapar(net(i.modelo))}</div>` : ''}</td>
+            <td class="psp-nw">${e(i.dimensiones)}</td>
+            <td>${cx}</td>
+            <td><div class="psp-nw"><span class="psp-mini">Ref</span> ${e(i.cod_implante)}</div>
+                <div class="psp-nw" style="margin-top:2px;"><span class="psp-mini">Lote</span> ${e(i.lote)}</div></td>
+            <td class="psp-nw" style="font-weight:500;">${e(i.fecha_colocacion)}</td>
+          </tr>` + (pilar ? `
+          <tr class="psp-pilar"><td></td><td colspan="5">
+            <span class="psp-mini" style="color:#02234f;font-size:10px;margin-right:8px;">Pilar asociado:</span>
+            <span style="font-weight:600;color:#0f172a;font-size:12.5px;">${escapar(pilar)}</span></td></tr>` : '') + `
+          <tr class="psp-espai"><td colspan="6"></td></tr>
+        </tbody>`;
     }).join('');
     return `
-        <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
-          <thead><tr><th style="${th('18%')}">Posición</th><th style="${th('19%')}">Implante</th><th style="${th('11%')}">Medidas</th>
-            <th style="${th('20%')}">Conexión</th><th style="${th('16%')}">Ref / Lote</th><th style="${th('16%')}">Fecha</th></tr></thead>
-          ${files}
-        </table>`;
+      <table class="psp-taula">
+        <thead>
+          <tr><th style="width:13%;text-align:center;">Pos.</th><th style="width:21%;">Implante</th><th style="width:13%;">Medidas</th>
+              <th style="width:19%;">Conexión</th><th style="width:19%;">Ref / Lote</th><th style="width:15%;">Fecha</th></tr>
+          <tr class="psp-espai"><td colspan="6"></td></tr>
+        </thead>
+        ${files}
+      </table>`;
   }
 
   const PEU = `
-        <div style="margin-top:38px;text-align:center;">
-          <div style="border-top:1px solid ${BLAU};width:60px;margin:0 auto 12px auto;"></div>
-          <div style="font-family:${SERIF};font-size:9.5px;color:#4a5b73;line-height:1.5;">Este documento certifica los componentes médicos implantados.<br>Se recomienda conservarlo para futuras referencias clínicas.</div>
-          <div style="${ETIQUETA}padding-top:7px;">© Clínica Dental Drs. Pi y Esteller</div>
-        </div>`;
+      <div class="psp-peu">
+        <div class="psp-peu-text">Este documento certifica los componentes médicos implantados.<br>Se recomienda conservarlo para futuras referencias clínicas.</div>
+        <div class="psp-peu-c">© Clínica Dental Drs. Pi y Esteller</div>
+      </div>`;
 
   /**
-   * HTML del pasaporte: el mismo para el portal, la vista previa, la impresión y el PDF
-   * (que convierte el servidor). Solo tablas y estilos en línea (ver `relleno`). Recibe
-   * datos ya filtrados por perAlPortal y ya ordenados.
+   * HTML del pasaporte: el mismo para la vista previa, la impresión y el PDF (que convierte
+   * el servidor). Recibe datos ya filtrados por perAlPortal y ya ordenados.
    * @param {{logo?: string, nomesCos?: boolean}} [opcions] logo: URL o data URI;
-   *   nomesCos: sin <html>/<body>, para meterlo dentro de otra página
+   *   nomesCos: sin <html>/<body>, para meterlo dentro de la ventana de la vista previa
    */
   function htmlPasaporte(pacient, implants, codi, dataEmissio, opcions) {
     const o = opcions || {};
-    const contingut = `
-      <div style="font-family:Helvetica,Arial,sans-serif;color:#26354a;font-size:11px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+    const contingut = `${ESTILS}
+      <div class="psp">
         ${capcalera(pacient || {}, codi, dataEmissio, o.logo)}
         ${cosPasaporte(implants || [])}
         ${PEU}
       </div>`;
     if (o.nomesCos) return contingut;
-    return `<html><head><meta charset="utf-8"></head><body>${contingut}</body></html>`;
+    return `<html><head><meta charset="utf-8"></head><body style="margin:0;">${contingut}</body></html>`;
   }
 
   return {

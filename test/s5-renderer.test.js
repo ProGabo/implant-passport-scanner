@@ -55,14 +55,23 @@ test('pasaporte: Ref/Lote antes que el pilar, que va en su banda debajo del impl
   const h = P.htmlPasaporte(PAC, IMPS, 'ABC234', '03/10/2026');
   assert.ok(h.indexOf('HE41418') < h.indexOf('A cabeza de implante'));
   // Pilar vacío y sin pendiente: no hay banda de pilar para el 26.
-  assert.equal((h.match(/>Pilar<\/span>/g) || []).length, 1);
+  assert.equal((h.match(/Pilar asociado:<\/span>/g) || []).length, 1);
 });
 
-test('pasaporte: nada que el conversor de PDF no pinte (fondos o texto claro)', () => {
+test('pasaporte: el PDF y la impresión pintan los fondos (print-color-adjust:exact en la raíz)', () => {
+  for (const h of [P.htmlPasaporte(PAC, IMPS, 'ABC234', '03/10/2026'),
+    P.htmlPasaporte(PAC, IMPS, 'ABC234', '03/10/2026', { nomesCos: true })]) {
+    // Sin esto, el conversor (un Chrome imprimiendo) pierde los fondos y aclara el blanco.
+    assert.match(h, /\.psp \{[^}]*-webkit-print-color-adjust:exact;\s*print-color-adjust:exact;/);
+    assert.match(h, /<div class="psp">/);
+    assert.match(h, /fonts\.googleapis\.com/, 'las mismas fuentes en la vista previa y en el PDF');
+  }
+});
+
+test('pasaporte: un diente va en el círculo y la pterigoidea, entera, en la pastilla', () => {
   const h = P.htmlPasaporte(PAC, IMPS, 'ABC234', '03/10/2026');
-  assert.doesNotMatch(h, /background|bgcolor/i, 'los rellenos van con box-shadow inset');
-  assert.doesNotMatch(h, /color:\s*(#fff|#ffffff|white)/i, 'el conversor oscurece el texto claro');
-  assert.match(h, /print-color-adjust:exact/, 'al imprimir se conservan los rellenos');
+  assert.match(h, /<span class="psp-cercle">26<\/span>/);
+  assert.match(h, /<span class="psp-pastilla">Fisura pterigoidea \(cuadrante 1\)<\/span>/);
 });
 
 test('nomesCos: solo el contenido, para meterlo en la ventana de la vista previa', () => {
