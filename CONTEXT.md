@@ -65,10 +65,18 @@ _Avoid_: healing cap (en la interfaz)
 El implante no lleva pilar. Sustituye al antiguo "NO". No es lo mismo que el pilar vacío, que quiere decir que aún no se sabe.
 _Avoid_: NO, No
 
+**Vista prèvia**:
+El pasaporte exactamente como lo recibirá el paciente, que la Auxiliar abre desde el panel antes de guardar, en una ventana aparte en la que puede seguir escribiendo. Desde ahí se imprime o se descarga. Es el mismo documento que el PDF del portal y el adjunto del Avís a la secretària.
+_Avoid_: informe, borrador
+
+**Comprovació**:
+Los avisos que salen en la Vista prèvia antes de guardar: algo que se parece a un valor habitual pero está escrito distinto, medidas o fechas raras, una posición repetida, falta Ref o Lote... No bloquean el guardado; solo piden mirarlo.
+_Avoid_: validación, error
+
 ## Ciclo de vida de la ficha
 
 **Pendent**:
-Un implante al que aún le falta algún dato o una modificación, típicamente el pilar definitivo que se pone en la 2ª visita. Lo marca la Auxiliar; no se deduce de los datos: un pilar vacío no implica pendent (a veces no se pone), y el sistema como mucho lo propone. Mientras está marcado, su fila se ve en naranja. Es interno: el paciente nunca lo ve, salvo como "pilar pendiente de colocar" cuando además el pilar está vacío.
+Un implante al que aún le falta algún dato o una modificación, típicamente el pilar definitivo que se pone en la 2ª visita. Lo marca la Auxiliar; no se deduce de los datos: un pilar vacío no implica pendent (a veces no se pone). Al escanear sale desmarcado, porque lo normal es que no quede nada pendiente; el sistema solo lo propone cuando la Auxiliar se lo pide desde el menú. Mientras está marcado, su fila se ve en naranja. Es interno: el paciente nunca lo ve, salvo como "pilar pendiente de colocar" cuando además el pilar está vacío.
 _Avoid_: pendiente (en la interfaz interna), incompleto, borrador
 
 **Què falta**:
