@@ -259,12 +259,16 @@
 
         <div class="card" style="background: #f0f9ff; border: 2px dashed #7dd3fc; text-align: center;">
             <h4 style="margin-top:0; color:#0369a1; font-weight: 700;">📷 Escàner IA de la cirurgia</h4>
-            <p style="font-size:12px; margin-bottom:12px; color:#475569;">Puja una foto del full amb totes les etiquetes. Detectarem tots els implants automàticament.</p>
+            <p style="font-size:12px; margin-bottom:12px; color:#475569;">Puja la fitxa amb totes les etiquetes. Si la tens en <b>diversos fitxers</b> (fotos o PDF), tria'ls tots alhora: es llegeixen junts.</p>
 
-            <input type="file" id="masterFileInput" accept="image/*,application/pdf" style="display:none" onchange="handleMasterScan(this)">
+            <input type="file" id="masterFileInput" accept="image/*,application/pdf" multiple style="display:none" onchange="handleMasterScan(this)">
 
-            <button type="button" class="btn-scan" onclick="document.getElementById('masterFileInput').click()">
-                ✨ Escanejar el full sencer
+            <button type="button" class="btn-scan" onclick="obrirEscaner(false)">
+                ✨ Escanejar la fitxa (pots triar diversos documents)
+            </button>
+            <!-- S7: afegir un altre document sense esborrar el que ja hi ha. Surt quan ja hi ha implants. -->
+            <button type="button" id="btnAfegirDocument" class="btn-add hidden" style="margin-top: 8px;" onclick="obrirEscaner(true)">
+                ➕ Afegir un altre document (no esborra res)
             </button>
             <div id="masterScanStatus" style="font-size:12px; margin-top:10px; font-weight:600;"></div>
         </div>
@@ -1425,11 +1429,8 @@
         } else if (senseEmailCheckbox.checked) {
             msg += `<p style="color: #b45309; margin-top: 10px;">ℹ️ El pacient no té email: fes-li arribar el codi d'accés d'una altra manera.</p>`;
         }
-        if (res.recordatori && (res.recordatori.accio === 'crear' || res.recordatori.accio === 'actualitzar')) {
-            msg += `<p style="color: #6d28d9; margin-top: 10px;">🔔 Recordatori per al <b>${escapeHtml(RecordatoriModel.format(res.recordatori.data))}</b>: aquell dia t'avisarà en obrir la fulla.</p>`;
-        } else if (res.recordatori && res.recordatori.accio === 'cancellar') {
-            msg += `<p style="color: #64748b; margin-top: 10px;">🔔 Recordatori tret.</p>`;
-        }
+        const recordatori = textRecordatori(res);
+        if (recordatori) msg += `<p style="color: #6d28d9; margin-top: 10px;">${recordatori}</p>`;
         if (pendentsDesats) {
             msg += `<p style="color: #c2410c; margin-top: 10px;">⏳ ${pendentsDesats} implant(s) queden pendents: surten en taronja a la fulla i a la pestanya «Pendents». Quan els completis, selecciona la fila i prem <b>✏️ Completar i enviar</b>.</p>`;
         }
@@ -1461,6 +1462,7 @@
         patientSection.classList.add('hidden');
         implantContainer.innerHTML = '';
         addImplantSection();
+        document.getElementById('btnAfegirDocument').classList.add('hidden');
     }
 
     /**
@@ -1560,55 +1562,177 @@
     //  LÓGICA DE ESCANEO MASIVO (NUEVO)
     // ==========================================
     
-    function handleMasterScan(input) {
-        const file = input.files[0];
-        if(!file) return;
+    // S7: varios documentos del MISMO paciente. Por defecto van en UNA petición a la IA (una
+    // sola de la cuota gratuita); si pesan demasiado, son muchos o esa lectura falla, se leen
+    // uno a uno y se juntan aquí. "Afegir" nunca borra lo que ya hay.
+    const MAX_BYTES_UNA_PETICIO = 9 * 1024 * 1024; // ~12 MB en base64: margen ante los ~20 MB de Gemini
+    const MAX_DOCS_UNA_PETICIO = 6;
+    let escanejant = false;
+    let afegirAlEscanejar = false;
 
-        const statusDiv = document.getElementById('masterScanStatus');
-        statusDiv.innerHTML = '⏳ Analitzant amb IA... (no triga més de 30 s)';
-        statusDiv.style.color = '#0284c7';
-
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const content = e.target.result;
-            
-            llamarServidor('processImplantFile', [content, file.name],
-                function(response) {
-                    if (response.ok) {
-                        statusDiv.innerHTML = ''; // Limpiar mensaje de espera
-                        buildFormFromScan(response.data);
-                    } else {
-                        statusDiv.innerHTML = `❌ ${response.message}`;
-                        statusDiv.style.color = '#dc2626';
-                        Swal.fire({ icon: 'error', title: 'Error de lectura', text: response.message });
-                    }
-                    input.value = ''; // Reset input
-                },
-                function(err) {
-                    input.value = '';
-                    if (esErrorDeAutorizacion(err)) {
-                        statusDiv.innerHTML = '';
-                        avisarSesionRota(false);
-                        return;
-                    }
-                    statusDiv.innerHTML = `❌ Error tècnic: ${escapeHtml(err.message)}`;
-                    statusDiv.style.color = '#dc2626';
-                });
-        };
-        reader.readAsDataURL(file);
+    function obrirEscaner(afegir) {
+        if (escanejant) return;
+        afegirAlEscanejar = !!afegir;
+        document.getElementById('masterFileInput').click();
     }
 
-    function buildFormFromScan(implantesArray) {
+    function hiHaImplantsOmplerts() {
+        return Array.from(implantContainer.querySelectorAll('.implant-section')).some(seccioAmbDades);
+    }
+
+    function seccioAmbDades(section) {
+        return ['cod_implante', 'lote', 'marca', 'modelo', 'posicion'].some(n =>
+            Array.from(section.querySelectorAll(`[name="${n}"]`)).some(i => String(i.value || '').trim()));
+    }
+
+    function llegirFitxer(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => resolve(e.target.result);
+            reader.onerror = () => reject(new Error("No s'ha pogut llegir el fitxer " + file.name));
+            reader.readAsDataURL(file);
+        });
+    }
+
+    function cridarServidor(fn, args) {
+        return new Promise((resolve, reject) => llamarServidor(fn, args, resolve, reject));
+    }
+
+    /** Implantes repetidos entre documentos (la misma hoja escaneada dos veces): misma REF,
+     *  lote y posición. Dos pegatinas iguales con posiciones distintas son dos implantes. */
+    function clauImplant(imp) {
+        const ref = String(imp.cod_implante || '').trim().toUpperCase();
+        const lot = String(imp.lote || '').trim().toUpperCase();
+        const pos = String(imp.posicion || '').trim();
+        return ref && lot && pos && pos !== 'No especificado' ? ref + '|' + lot + '|' + pos : null;
+    }
+
+    async function handleMasterScan(input) {
+        const files = Array.from(input.files || []);
+        input.value = '';
+        if (!files.length || escanejant) return;
+        const statusDiv = document.getElementById('masterScanStatus');
+
+        let afegir = afegirAlEscanejar;
+        afegirAlEscanejar = false;
+        if (!afegir && hiHaImplantsOmplerts()) {
+            const tria = await Swal.fire({
+                icon: 'question',
+                title: 'Ja hi ha implants al formulari',
+                html: '<p style="font-size:14px;">Vols <b>afegir</b> els d\'aquest document als que ja hi ha, o <b>substituir-los</b>?</p>',
+                showDenyButton: true,
+                showCancelButton: true,
+                confirmButtonText: '➕ Afegir',
+                denyButtonText: 'Substituir',
+                cancelButtonText: 'Cancel·lar',
+                confirmButtonColor: '#0ea5e9',
+                denyButtonColor: '#64748b'
+            });
+            if (tria.isDismissed) return;
+            afegir = tria.isConfirmed;
+        }
+
+        escanejant = true;
+        statusDiv.style.color = '#0284c7';
+        statusDiv.innerHTML = files.length === 1 ? '⏳ Analitzant amb IA... (pot trigar fins a un minut)'
+            : `⏳ Analitzant ${files.length} documents junts amb IA... (pot trigar fins a un minut)`;
+        try {
+            const dataUrls = await Promise.all(files.map(llegirFitxer));
+            const r = await llegirDocuments(files, dataUrls, statusDiv);
+            if (!r) return; // sesión rota: ya avisado
+            if (!r.implants.length) {
+                statusDiv.innerHTML = `❌ ${escapeHtml(r.fallits.map(f => f.missatge).join(' · ') || "No s'ha trobat cap implant.")}`;
+                statusDiv.style.color = '#dc2626';
+                Swal.fire({ icon: 'error', title: 'Error de lectura', html: llistaFallits(r.fallits) || "<p>No s'ha trobat cap implant.</p>" });
+                return;
+            }
+            statusDiv.innerHTML = '';
+            buildFormFromScan(r.implants, { afegir: afegir, fallits: r.fallits, nDocs: files.length, seguiment: r.seguiment });
+        } catch (err) {
+            statusDiv.innerHTML = `❌ Error tècnic: ${escapeHtml(err && err.message || String(err))}`;
+            statusDiv.style.color = '#dc2626';
+        } finally {
+            escanejant = false;
+        }
+    }
+
+    /**
+     * Una petición con todo si cabe; si no, o si falla por algo que no sea la cuota, uno a uno.
+     * @returns {{implants, seguiment, fallits: [{nom, missatge}]}} o null si la sesión está rota
+     */
+    async function llegirDocuments(files, dataUrls, statusDiv) {
+        const pes = files.reduce((s, f) => s + f.size, 0);
+        if (files.length > 1 && files.length <= MAX_DOCS_UNA_PETICIO && pes <= MAX_BYTES_UNA_PETICIO) {
+            try {
+                const r = await cridarServidor('processImplantFiles', [dataUrls]);
+                if (r.ok) return { implants: r.data, seguiment: r.seguiment || [], fallits: [] };
+                if (r.limit) return { implants: [], seguiment: [], fallits: [{ nom: '', missatge: r.message }] };
+            } catch (err) {
+                if (esErrorDeAutorizacion(err)) { statusDiv.innerHTML = ''; avisarSesionRota(false); return null; }
+            }
+            // Ha fallado la lectura conjunta: uno a uno (gasta una petición por documento).
+        }
+        const implants = [], seguiment = [], fallits = [], vistos = new Set();
+        for (let i = 0; i < files.length; i++) {
+            if (files.length > 1) statusDiv.innerHTML = `⏳ Llegint els documents d'un en un: ${i + 1} de ${files.length}...`;
+            let r;
+            try {
+                r = await cridarServidor('processImplantFile', [dataUrls[i], files[i].name]);
+            } catch (err) {
+                if (esErrorDeAutorizacion(err)) { statusDiv.innerHTML = ''; avisarSesionRota(false); return null; }
+                r = { ok: false, message: 'Error tècnic: ' + (err && err.message || String(err)) };
+            }
+            (r.seguiment || []).forEach(s => seguiment.push(s));
+            if (!r.ok) {
+                fallits.push({ nom: files[i].name, missatge: r.message });
+                // Sin cuota: los siguientes fallarían igual (y no hay que gastar más).
+                if (r.limit) { files.slice(i + 1).forEach(f => fallits.push({ nom: f.name, missatge: r.message })); break; }
+                continue;
+            }
+            // Solo se descartan los repetidos de documentos ANTERIORES: dentro de un mismo
+            // documento, dos filas iguales son lo que la IA ha visto.
+            const claus = [];
+            r.data.forEach(imp => {
+                const k = clauImplant(imp);
+                if (k && vistos.has(k)) return;
+                implants.push(imp);
+                if (k) claus.push(k);
+            });
+            claus.forEach(k => vistos.add(k));
+        }
+        return { implants: implants, seguiment: seguiment, fallits: fallits };
+    }
+
+    function llistaFallits(fallits) {
+        if (!fallits || !fallits.length) return '';
+        return '<ul style="text-align:left; font-size:13px; color:#991b1b;">' + fallits.map(f =>
+            `<li>${f.nom ? '<b>' + escapeHtml(f.nom) + '</b>: ' : ''}${escapeHtml(f.missatge)}</li>`).join('') + '</ul>';
+    }
+
+    /**
+     * @param opts.afegir no borra los implantes que ya hay (solo una sección vacía).
+     * @param opts.seguiment indicaciones de la ficha: propone el 🔔 (P10d).
+     */
+    function buildFormFromScan(implantesArray, opts) {
+        const o = opts || {};
         const container = document.getElementById('implantContainer');
-        container.innerHTML = ''; // Limpiamos implantes actuales para evitar mezclas
-        
+        if (o.afegir) {
+            // La sección vacía del arranque (o la que quedó al guardar) no cuenta como implante.
+            container.querySelectorAll('.implant-section').forEach(s => { if (!seccioAmbDades(s)) s.remove(); });
+        } else {
+            container.innerHTML = ''; // Limpiamos implantes actuales para evitar mezclas
+        }
+
         implantesArray.forEach((data, index) => {
             addImplantSection();
             const sections = container.querySelectorAll('.implant-section');
             const currentSection = sections[sections.length - 1];
             populateThisSection(currentSection, data);
         });
+        updateImplantNumbers();
         actualizarEnviar();
+        const total = container.querySelectorAll('.implant-section').length;
+        document.getElementById('btnAfegirDocument').classList.toggle('hidden', total === 0);
 
         // Contador de dudas (fire-and-forget): datos reales para decidir si algún día
         // merece la pena que la IA proponga posiciones candidatas.
@@ -1617,13 +1741,29 @@
             google.script.run.registrarDuda(doubts);
         }
 
+        // P10d: si la ficha dice cuándo tiene que volver (1 mes o más), se propone el 🔔.
+        const dataCol = (implantesArray.find(i => i.fecha_colocacion) || {}).fecha_colocacion || '';
+        const proposta = blocRecordatori.proposar(o.seguiment, dataCol);
+
+        const quants = o.afegir
+            ? `✅ S'han afegit <b>${implantesArray.length}</b> implants (ara n'hi ha <b>${total}</b>).`
+            : `✅ S'han generat <b>${implantesArray.length}</b> implants${o.nDocs > 1 ? ` a partir de <b>${o.nDocs}</b> documents` : ''}.`;
+        const fallits = o.fallits && o.fallits.length
+            ? `<p style="color:#991b1b; font-weight:600; margin-top:10px;">⚠️ No s'ha pogut llegir:</p>${llistaFallits(o.fallits)}<p style="font-size:13px;">Torna-ho a provar amb <b>➕ Afegir un altre document</b>: no esborrarà el que ja hi ha.</p>`
+            : '';
+        const recordatori = proposta
+            ? `<p style="color:#6d28d9; margin-top:10px;">🔔 La fitxa diu «${escapeHtml(proposta.text)}»: t'he proposat un recordatori per al <b>${escapeHtml(RecordatoriModel.format(proposta.data))}</b>. Revisa'l a dalt.</p>`
+            : '';
+
         // Aviso de revisión tras el escaneo
         Swal.fire({
             title: '✨ Anàlisi completada',
-            icon: 'success',
+            icon: o.fallits && o.fallits.length ? 'warning' : 'success',
             html: `
                 <div style="text-align: left; font-size: 14px; color: #334155;">
-                    <p>✅ S'han generat <b>${implantesArray.length}</b> implants.</p>
+                    <p>${quants}</p>
+                    ${fallits}
+                    ${recordatori}
                     <hr style="margin: 15px 0;">
                     <p style="color: #b91c1c; font-weight: 600;">⚠️ IMPORTANT - REVISA-HO ARA:</p>
                     <ul style="margin-top: 8px;">

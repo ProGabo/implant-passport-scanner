@@ -65,12 +65,13 @@
                 const col = o.dataColocacio ? RM().aIso(o.dataColocacio()) : '';
                 colocacio.textContent = col ? 'Col·locació: ' + RM().format(col) : '';
                 colocacio.classList.toggle('hidden', !col);
-                if (iso !== dataProposta) { origen = 'manual'; proposta.classList.add('hidden'); }
+                // Si cambia la fecha que había propuesto el escáner, ya es de la Auxiliar.
+                if (dataProposta && iso !== dataProposta) { origen = 'manual'; dataProposta = ''; proposta.classList.add('hidden'); }
             }
 
             bloc.addEventListener('toggle', pintar);
             data.addEventListener('change', pintar);
-            q('.rec-treure').addEventListener('click', () => { data.value = ''; pintar(); });
+            q('.rec-treure').addEventListener('click', () => { data.value = ''; motiu.value = ''; pintar(); });
             contenidor.querySelectorAll('[data-mesos]').forEach(b => b.addEventListener('click', () => {
                 data.value = RM().sumar(avuiIso(), Number(b.dataset.mesos), 'mesos');
                 pintar();
@@ -85,10 +86,10 @@
                     data.value = rec && rec.data ? rec.data : '';
                     motiu.value = rec && rec.motiu && rec.motiu !== RM().MOTIU_PER_DEFECTE ? rec.motiu : '';
                     dataProposta = '';
-                    origen = rec && rec.origen === 'escàner' ? 'escàner' : 'manual';
                     proposta.classList.add('hidden');
                     bloc.open = false;
                     pintar();
+                    origen = rec && rec.origen === 'escàner' ? 'escàner' : 'manual';
                 },
                 /**
                  * P10d: lo que el escáner ha leído en la ficha. Solo propone si no hay ya una
@@ -102,7 +103,8 @@
                     if (!motiu.value.trim()) motiu.value = p.text;
                     pintar();
                     origen = 'escàner';
-                    proposta.textContent = `✨ Proposat per l'escàner: la fitxa diu «${p.text}». Revisa-ho; el pots canviar o treure.`;
+                    const passada = p.data < avuiIso() ? " Aquesta data ja ha passat: t'avisarà el pròxim cop que obris la fulla." : '';
+                    proposta.textContent = `✨ Proposat per l'escàner: la fitxa diu «${p.text}». Revisa-ho; el pots canviar o treure.${passada}`;
                     proposta.classList.remove('hidden');
                     bloc.open = true;
                     return p;
@@ -122,4 +124,19 @@
 
         return { muntar: muntar };
     })();
+
+    /**
+     * Lo que ha pasado con el 🔔 al desar o enviar, como HTML ya escapado ('' si nada):
+     * res.recordatori (lo guardado) y res.recordatoriTancat (cerrado al reenviar). Lo usan
+     * el panel y el sidebar, también en la segunda llamada (enviarPasaport, S8).
+     */
+    window.textRecordatori = function (res) {
+        const esc = s => String(s === undefined || s === null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const r = res && res.recordatori, t = res && res.recordatoriTancat;
+        if (r && (r.accio === 'crear' || r.accio === 'actualitzar')) return `🔔 Recordatori per al <b>${esc(RecordatoriModel.format(r.data))}</b>: aquell dia t'avisarà en obrir la fulla.`;
+        if (r && r.accio === 'cancellar') return '🔔 Recordatori tret.';
+        if (t && t.tancat) return `🔔 Recordatori del ${esc(t.data)} fet: ja no sortirà a la llista.`;
+        if (t) return `🔔 El recordatori del ${esc(t.data)} segueix actiu (encara no toca). Si ja està fet, treu-lo amb la ✕ del bloc 🔔.`;
+        return '';
+    };
 </script>

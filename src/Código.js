@@ -1611,6 +1611,36 @@ function processImplantFile(data, filename) {
   }
 }
 
+/**
+ * S7: varios documentos del MISMO paciente (la ficha escaneada en archivos separados) en
+ * una sola petición a la IA: una sola de la cuota gratuita. Si no cabe o falla, el sidebar
+ * los manda uno a uno con processImplantFile y los junta él.
+ * @param {string[]} dataUrls
+ * @returns {{ok, data?, seguiment?, count?, provider?, nDocs?, message?, limit?}}
+ */
+function processImplantFiles(dataUrls) {
+  exigirUsuariIntern_();
+  try {
+    const llista = Array.isArray(dataUrls) ? dataUrls.filter(Boolean) : [];
+    if (!llista.length) return { ok: false, message: "No hi ha cap document per llegir." };
+    if (llista.length > MAX_DOCS_PER_PETICIO) {
+      return { ok: false, message: "Massa documents per a una sola lectura (" + llista.length + "; màxim " + MAX_DOCS_PER_PETICIO + ")." };
+    }
+    return ScanEngine.scanDocuments(llista.map(d => ScanEngine.parseDataUrl(d)), {
+      httpFetch: gasHttpFetch_,
+      geminiApiKey: GEMINI_API_KEY,
+      openRouterApiKey: OPENROUTER_API_KEY
+    });
+  } catch (e) {
+    if (ScanEngine.isAuthError(e)) {
+      return { ok: false, message: MENSAJE_REAUTORIZAR };
+    }
+    return { ok: false, message: "Error en interpretar els documents: " + e.message };
+  }
+}
+
+const MAX_DOCS_PER_PETICIO = 6;
+
 const MENSAJE_REAUTORIZAR = "Aquest compte de Google encara no té autoritzats els permisos necessaris. Obre el menú 'Pasaport Implantològic 🦷', prem '🔑 Autoritzar el meu compte' i accepta els permisos que et demani Google. Després torna aquí i prova-ho de nou.";
 
 /**

@@ -515,7 +515,7 @@
                 Swal.fire({ icon: 'error', title: "No s'ha pogut desar", html: `<ul style="text-align:left;">${errorsHtml(res)}</ul>` });
                 return;
             }
-            Swal.fire({ icon: 'success', title: 'Desat', html: ['Els canvis són a la fulla. El que segueixi marcat com a pendent continua en taronja.'].concat(textRecordatori(res)).map(l => `<p style="text-align:left;">${l}</p>`).join(''), confirmButtonColor: '#0ea5e9' })
+            Swal.fire({ icon: 'success', title: 'Desat', html: ['Els canvis són a la fulla. El que segueixi marcat com a pendent continua en taronja.'].concat(textRecordatori(res) || []).map(l => `<p style="text-align:left;">${l}</p>`).join(''), confirmButtonColor: '#0ea5e9' })
                 .then(carregar);
         });
     });
