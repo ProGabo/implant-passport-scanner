@@ -214,7 +214,7 @@
             <button class="btn-primary" id="search-btn" style="margin-top: 8px;" onclick="buscarPaciente()">🔍 Cercar pacient</button>
         </div>
         <div id="status"></div>
-        <div id="enviamentEstat" class="enviament hidden" role="status"></div>
+        <div id="enviamentEstat" class="hidden" role="status"></div>
     </div>
 
     <div id="patientSection" class="hidden">
@@ -1446,24 +1446,37 @@
 
     /**
      * Segunda llamada tras guardar: envía el pasaporte (o el avís) y deja el resultado en
-     * #enviamentEstat. Si algo falla, "Tornar a enviar" repite solo lo que ha fallado.
+     * #enviamentEstat, una línea por paciente: si se guardan varios seguidos, la respuesta
+     * de uno no tapa el error de otro. "Tornar a enviar" repite solo lo que ha fallado.
      */
     function enviarDesat(codi, enviar, nom) {
-        const estat = document.getElementById('enviamentEstat');
+        const caixa = document.getElementById('enviamentEstat');
+        let linia = caixa.querySelector(`[data-codi="${codi}"]`);
+        if (!linia) {
+            linia = document.createElement('div');
+            linia.dataset.codi = codi;
+            caixa.prepend(linia);
+        }
+        caixa.classList.remove('hidden');
+        // Las líneas que acabaron bien se van retirando; las de error se quedan.
+        caixa.querySelectorAll('.status-success').forEach((l, i) => { if (i >= 2) l.remove(); });
         const pinta = (tipus, html) => {
-            estat.className = 'enviament status-' + tipus;
-            estat.innerHTML = html;
+            linia.className = 'enviament status-' + tipus;
+            linia.innerHTML = html;
         };
         const qui = nom ? ` de <b>${escapeHtml(nom)}</b>` : '';
         pinta('info', `<p>📨 Enviant el pasaport${qui} (${escapeHtml(codi)})...</p>`);
         const tornar = (repetir, motiu) => {
             pinta('error', `<p>${motiu}</p><p>Si torna a fallar, el pots reenviar des de <b>✏️ Completar i enviar</b>.</p>` +
-                '<button type="button" class="btn-primary" id="tornarEnviar">🔁 Tornar a enviar</button>');
-            document.getElementById('tornarEnviar').onclick = () => enviarDesat(codi, repetir, nom);
+                '<button type="button" class="btn-primary">🔁 Tornar a enviar</button>');
+            linia.querySelector('button').onclick = () => enviarDesat(codi, repetir, nom);
         };
+        // Sin respuesta del servidor no se sabe si el email ha salido: que lo mire antes.
+        const dubte = motiu => `❌ No s'ha pogut confirmar l'enviament${qui}: ${escapeHtml(motiu)}. ` +
+            "Potser ja ha sortit: mira la pestanya «Registre d'enviaments» abans de tornar-ho a enviar.";
         llamarServidor('enviarPasaport', [codi, enviar], res => {
             if (!res || !res.ok) {
-                tornar(enviar, `❌ No s'ha pogut enviar el pasaport${qui}: ${escapeHtml(res ? res.message : '')}`);
+                tornar(enviar, dubte(res ? res.message : 'sense resposta'));
                 return;
             }
             const fets = [], errors = [], repetir = {};
@@ -1480,7 +1493,7 @@
             if (!fets.length) fets.push(`ℹ️ No hi havia res a enviar${qui}.`);
             pinta('success', fets.map(l => `<p>${l}</p>`).join('') + (rec ? `<p>${rec}</p>` : ''));
         }, err => {
-            tornar(enviar, `❌ No s'ha pogut enviar el pasaport${qui}: ${escapeHtml((err && (err.message || String(err))) || 'error desconegut')}`);
+            tornar(enviar, dubte((err && (err.message || String(err))) || 'error desconegut'));
         });
     }
 

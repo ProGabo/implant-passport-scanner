@@ -49,7 +49,7 @@
         .enllac-discret { background: none; border: none; color: #64748b; font-size: 11px; padding: 4px 0; margin-top: 6px; width: auto; cursor: pointer; text-decoration: underline; }
         .estat-ok { color: #166534; background: #dcfce7; }
         /* Resultado del último envío: se queda aunque el panel se recargue. */
-        #enviamentEstat { margin-bottom: 10px; line-height: 1.4; }
+        #enviamentEstat > div { margin-bottom: 8px; line-height: 1.4; }
         #enviamentEstat p { margin: 2px 0; text-align: left; }
         #enviamentEstat button { margin-top: 6px; }
         .pacient-linia { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
@@ -57,7 +57,7 @@
     </style>
 </head>
 <body>
-    <div id="enviamentEstat" class="estat hidden" role="status"></div>
+    <div id="enviamentEstat" class="hidden" role="status"></div>
     <div id="estat" class="estat estat-info">Carregant la fila seleccionada...</div>
 
     <div id="contingut" class="hidden">
@@ -446,20 +446,32 @@
      * no se borra al recargar el panel. Si algo falla, "Tornar a enviar" repite solo eso.
      */
     function enviarPasaport(codi, opcionsEnviar, nom) {
+        // Una línea por paciente: si se completan dos seguidos, un resultado no tapa el otro.
         const caixa = document.getElementById('enviamentEstat');
+        let linia = caixa.querySelector(`[data-codi="${codi}"]`);
+        if (!linia) {
+            linia = document.createElement('div');
+            linia.dataset.codi = codi;
+            caixa.prepend(linia);
+        }
+        caixa.classList.remove('hidden');
+        caixa.querySelectorAll('.estat-ok').forEach((l, i) => { if (i >= 2) l.remove(); });
         const pinta = (tipus, html) => {
-            caixa.className = 'estat estat-' + tipus;
-            caixa.innerHTML = html;
+            linia.className = 'estat estat-' + tipus;
+            linia.innerHTML = html;
         };
         const qui = nom ? ` (${escapeHtml(nom)})` : '';
         pinta('info', `<p>📨 Enviant el pasaport${qui}...</p>`);
         const tornar = (repetir, html) => {
-            pinta('error', html + '<button type="button" class="btn-sec btn-petit" id="tornarEnviar">🔁 Tornar a enviar</button>');
-            document.getElementById('tornarEnviar').onclick = () => enviarPasaport(codi, repetir, nom);
+            pinta('error', html + '<button type="button" class="btn-sec btn-petit">🔁 Tornar a enviar</button>');
+            linia.querySelector('button').onclick = () => enviarPasaport(codi, repetir, nom);
         };
+        // Sin respuesta del servidor no se sabe si el email ha salido: que lo mire antes.
+        const dubte = motiu => `<p>❌ No s'ha pogut confirmar l'enviament${qui}: ${escapeHtml(motiu)}. ` +
+            "Potser ja ha sortit: mira la pestanya «Registre d'enviaments» abans de tornar-ho a enviar.</p>";
         google.script.run
             .withSuccessHandler(res => {
-                if (!res || !res.ok) { tornar(opcionsEnviar, `<p>❌ No s'ha pogut enviar${qui}: ${escapeHtml(res ? res.message : '')}</p>`); return; }
+                if (!res || !res.ok) { tornar(opcionsEnviar, dubte(res ? res.message : 'sense resposta')); return; }
                 const html = resultatEnviament(res) || `<p>ℹ️ No hi havia res a enviar${qui}.</p>`;
                 const repetir = Object.assign({}, opcionsEnviar, {
                     email: !!res.emailError,
@@ -469,7 +481,7 @@
                 if (repetir.email || repetir.avisSecretaria) tornar(repetir, html);
                 else pinta('ok', html);
             })
-            .withFailureHandler(err => tornar(opcionsEnviar, `<p>❌ No s'ha pogut enviar${qui}: ${escapeHtml((err && (err.message || String(err))) || '')}</p>`))
+            .withFailureHandler(err => tornar(opcionsEnviar, dubte((err && (err.message || String(err))) || 'error desconegut')))
             .enviarPasaport(codi, opcionsEnviar);
     }
 

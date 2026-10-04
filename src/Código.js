@@ -174,8 +174,10 @@ function llegirPacientPerCodi_(code) {
 // leer la hoja. Se borra al guardar o completar ese paciente.
 const SEGONS_CACHE_LOGIN = 60;
 
+// Forma canónica (O=0, I=L=1): todas las maneras de escribir un código comparten la clave,
+// y oblidarLogin_ con el código de la hoja las borra todas.
 function clauLogin_(codi) {
-  return 'LOGIN_' + PortalModel.netejarCodi(codi);
+  return 'LOGIN_' + PortalModel.codiCanonic(codi);
 }
 
 function oblidarLogin_(codi) {
@@ -772,11 +774,15 @@ function enviarPasaport(codi, opcions) {
   const o = opcions || {};
   try {
     const env = enviarPasaport_(codi, { email: !!o.email, avisSecretaria: !!o.avisSecretaria, avisSiSenseEmail: !!o.avisSiSenseEmail });
-    return Object.assign({ ok: true, codi: String(codi || '').trim().toUpperCase() }, env, {
-      // Recordatorios (S6): reenviar el pasaporte cierra el que ya toca.
-      recordatoriTancat: (typeof tancarRecordatoriSiToca_ === 'function' && !o.noTancarRecordatori)
-        ? tancarRecordatoriSiToca_(codi, env) : null
-    });
+    // Recordatorios (S6): reenviar el pasaporte cierra el que ya toca. Si eso falla, el
+    // envío ya ha salido: no se da por fallido (el panel lo volvería a enviar).
+    let recordatoriTancat = null;
+    try {
+      if (typeof tancarRecordatoriSiToca_ === 'function' && !o.noTancarRecordatori) recordatoriTancat = tancarRecordatoriSiToca_(codi, env);
+    } catch (e) {
+      Logger.log('Error en tancar el recordatori de ' + codi + ': ' + e);
+    }
+    return Object.assign({ ok: true, codi: String(codi || '').trim().toUpperCase() }, env, { recordatoriTancat });
   } catch (e) {
     Logger.log('Error en enviarPasaport: ' + e);
     return { ok: false, message: 'Error en enviar: ' + e.message };
@@ -1396,7 +1402,7 @@ function comprobarTodo() {
   lineas.push(diagnosticCodis_());
   lineas.push(diagnosticRebots_());
 
-  SpreadsheetApp.getUi().alert("Diagnòstic", lineas.join("\n\n"), SpreadsheetApp.getUi().ButtonSet.OK);
+  avisar_("Diagnòstic", lineas.join("\n\n"));
 }
 
 /** Codis d'accés que el paciente no podría usar bien: convertidos a número, mal de largo o que chocan. */

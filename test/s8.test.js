@@ -271,3 +271,25 @@ test('nombre de la clínica: remitente "Doctores Pi y Esteller" y en los textos 
   const html = PortalModel.htmlPasaporte({ nombre: 'Maria' }, [], 'K7XH3P', '04/10/2026');
   assert.match(html, /© Clínica Dental Doctores Pi y Esteller/);
 });
+
+test('memoria del login: escribir el código con O/0 o I/1 usa la misma clave, y guardar la borra', () => {
+  const ss = libro();
+  pacientes(ss).getRange(2, col('codi_acces')).setValue('AB0L2C');
+  pacientes(ss).getRange(6, col('codi_acces')).setValue('AB0L2C');
+  const { ctx, cache } = cargarCodigo(ss);
+  assert.equal(ctx.initiateLogin('abo12c').ok, true);
+  assert.equal([...cache.keys()].filter(k => k.startsWith('LOGIN_')).length, 1);
+  ctx.saveNewImplant(Object.assign({}, NOU, MARIA, { codi_acces: 'AB0L2C', sendEmail: 'false' }));
+  assert.equal([...cache.keys()].filter(k => k.startsWith('LOGIN_')).length, 0);
+});
+
+test('enviarPasaport: si cerrar el recordatorio falla, el envío ya hecho no se da por fallido', () => {
+  const ss = libro();
+  const { ctx, sent } = cargarCodigo(ss);
+  ctx.tancarRecordatoriSiToca_ = () => { throw new Error('boom'); };
+  const r = ctx.enviarPasaport('K7XH3P', { email: true });
+  assert.equal(r.ok, true);
+  assert.equal(r.emailSent, true);
+  assert.equal(r.recordatoriTancat, null);
+  assert.equal(sent.length, 1);
+});
