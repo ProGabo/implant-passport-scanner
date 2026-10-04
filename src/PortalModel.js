@@ -296,7 +296,7 @@ function crearPortalModel() {
       .psp-taula th { text-align:left; padding:0 10px 10px 10px; font-size:10.5px; font-weight:600; color:#64748b;
                       text-transform:uppercase; letter-spacing:1px; border-bottom:2px solid #e2e8f0; }
       .psp-espai td { height:14px; padding:0; border:none; }
-      .psp-imp td { background:#fff; padding:12px 10px; font-size:13px; color:#1e293b; vertical-align:top;
+      .psp-imp td { overflow-wrap:break-word; background:#fff; padding:12px 10px; font-size:13px; color:#1e293b; vertical-align:top;
                     border-top:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1; }
       .psp-imp td:first-child { border-left:5px solid #02234f; border-radius:8px 0 0 8px; text-align:center; padding-left:6px; padding-right:6px; }
       .psp-imp td:last-child { border-right:1px solid #cbd5e1; border-radius:0 8px 8px 0; }
@@ -352,7 +352,7 @@ function crearPortalModel() {
     const files = implants.map(i => {
       const pilar = textPilar(i);
       const conexion = textConexion(i);
-      const cx = conexion ? conexion.split(' · ').map(t => escapar(t).replace(/ /g, '&nbsp;')).join('<br>') : '-';
+      const cx = conexion ? conexion.split(' · ').map(t => escapar(t).replace(/^plataforma /, 'plataforma&nbsp;')).join('<br>') : '-';
       return `
         <tbody style="page-break-inside:avoid;">
           <tr class="psp-imp${pilar ? ' amb-pilar' : ''}">

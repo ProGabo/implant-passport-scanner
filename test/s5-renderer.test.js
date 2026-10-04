@@ -84,3 +84,8 @@ test('el logo puede ir incrustado', () => {
   const h = P.htmlPasaporte(PAC, IMPS, 'ABC234', '03/10/2026', { logo: 'data:image/png;base64,AAAA' });
   assert.match(h, /src="data:image\/png;base64,AAAA"/);
 });
+
+test('pasaporte: una plataforma larga puede saltar de línea (no invade Ref / Lote)', () => {
+  const h = P.htmlPasaporte(PAC, [{ posicion: '36', conexion: 'Cónico Interno', plataforma: 'RP (Regular)' }], 'ABC234', '04/10/2026');
+  assert.match(h, /Cónico Interno<br>plataforma&nbsp;RP \(Regular\)/);
+});
