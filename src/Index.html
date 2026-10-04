@@ -260,7 +260,7 @@
             '<p style="font-size: 13px; color: #92400e; text-align: center;">Está tardando un poco más de lo normal. Seguimos buscando, no cierre la página.</p>');
         }, 8000);
 
-        llamarApi({ action: 'initiateLogin', code: code, ambPdf: true }, 2)
+        llamarApi({ action: 'initiateLogin', code: code, ambHtml: true }, 2)
         .then(res => {
             clearTimeout(avisoLento);
             btnCode.disabled = false;
@@ -282,8 +282,9 @@
                   '<em>Demo mode: fictitious patient, synthetic data.</em></div>');
               }
               downloadAction.style.display = 'block';
-              // El PDF llega con el login; si no ha llegado, se pide aparte.
-              if (!(res.pdf && usarPdf(res.pdf))) prepararPdf(currentPatientCode);
+              // El pasaporte llega con el login y el PDF se hace aquí; si no, se pide aparte.
+              if (res.pasaporte && res.pasaporte.html) prepararPdfLocal(res.pasaporte, currentPatientCode);
+              else prepararPdf(currentPatientCode);
             } else if (res.ok) {
               status.innerHTML = '<span class="error">No se encontraron implantes para este código.</span>';
             } else {
@@ -299,27 +300,48 @@
       });
 
       /**
-       * POST al servidor con reintentos. Lo normal son 4-6 s, pero a veces Google se queda
-       * colgado un minuto y acaba devolviendo una página de error en vez de JSON. Por eso se
-       * corta a los 20 s y se reintenta tras una pausa, en vez de enseñar "Error de
-       * conexión" al cabo de un minuto.
+       * POST al servidor (solo consultas: entrar y el PDF). Lo normal son 2-3 s, pero a
+       * veces Google se queda colgado 10-40 s y acaba devolviendo una página de error en vez
+       * de JSON. Por eso las peticiones van escalonadas: si a los 6 s no ha llegado nada,
+       * sale otra en paralelo (y otra a los 12 s), y vale la primera que llega bien. Si una
+       * falla, sale la siguiente enseguida. Como mucho 1 + `reintentos` peticiones.
        */
       function llamarApi(payload, reintentos) {
-        const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-        const corte = ctrl ? setTimeout(() => ctrl.abort(), 20000) : null;
-        return fetch(API_URL, {
-            method: 'POST',
-            body: JSON.stringify(payload),
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            signal: ctrl ? ctrl.signal : undefined
-        })
-        .then(res => res.json())
-        .finally(() => { if (corte) clearTimeout(corte); })
-        .catch(err => {
-            if (reintentos > 0) {
-              return new Promise(r => setTimeout(r, 1500)).then(() => llamarApi(payload, reintentos - 1));
-            }
-            throw err;
+        const maxim = 1 + (reintentos || 0);
+        return new Promise((resolve, reject) => {
+          let enviades = 0, enCurs = 0, acabat = false, seguent = null;
+          const ctrls = [];
+          const acabar = (ok, valor) => {
+            if (acabat) return;
+            acabat = true;
+            clearTimeout(seguent);
+            ctrls.forEach(c => { try { c.abort(); } catch (e) {} });
+            if (ok) resolve(valor); else reject(valor);
+          };
+          const enviar = () => {
+            if (acabat || enviades >= maxim) return;
+            enviades++;
+            enCurs++;
+            const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            if (ctrl) ctrls.push(ctrl);
+            const corte = ctrl ? setTimeout(() => ctrl.abort(), 30000) : null;
+            fetch(API_URL, {
+                method: 'POST',
+                body: JSON.stringify(payload),
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                signal: ctrl ? ctrl.signal : undefined
+            })
+            .then(res => res.json())
+            .then(valor => acabar(true, valor), err => {
+                enCurs--;
+                if (enviades < maxim) enviar();
+                else if (!enCurs) acabar(false, err);
+            })
+            .finally(() => { if (corte) clearTimeout(corte); });
+            clearTimeout(seguent);
+            seguent = setTimeout(enviar, 6000);
+          };
+          enviar();
         });
       }
 
@@ -433,28 +455,79 @@
         setTimeout(() => container.style.opacity = '1', 100);
       };
 
-      // --- PDF DEL PASAPORTE (lo genera el servidor: el mismo que ve la clínica) ---
-      // Llega con el login, así que está listo al entrar. Si no (fallo al generarlo), se
-      // pide aparte en segundo plano.
+      // --- PDF DEL PASAPORTE ---
+      // El login trae el pasaporte en HTML (el mismo que el PDF de la clínica) y el PDF se
+      // hace en el navegador, en segundo plano. Pedir el PDF hecho a Google (~200 KB) fallaba
+      // a menudo; si el navegador no puede, se pide igualmente como respaldo.
       let pdfUrl = null, pdfNom = 'Pasaporte.pdf';
       const btnVerPdf = document.getElementById('btnVerPdf');
       const btnDescargarPdf = document.getElementById('btnDescargarPdf');
       const pdfEstado = document.getElementById('pdfEstado');
 
-      /** Deja el PDF ({nom, base64}) listo en los botones. @returns {boolean} */
-      function usarPdf(pdf) {
-        if (!pdf || !pdf.base64) return false;
-        try {
-          const bytes = Uint8Array.from(atob(pdf.base64), c => c.charCodeAt(0));
-          pdfUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-        } catch (e) {
-          return false;
-        }
-        pdfNom = pdf.nom || pdfNom;
+      /** Deja el PDF listo en los botones. */
+      function usarBlob(blob, nom) {
+        pdfUrl = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+        pdfNom = nom || pdfNom;
         btnVerPdf.disabled = false;
         btnDescargarPdf.disabled = false;
         pdfEstado.textContent = '';
-        return true;
+      }
+
+      /** El PDF que manda el servidor ({nom, base64}). @returns {boolean} */
+      function usarPdf(pdf) {
+        if (!pdf || !pdf.base64) return false;
+        try {
+          usarBlob(Uint8Array.from(atob(pdf.base64), c => c.charCodeAt(0)), pdf.nom);
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      // html2pdf se carga dentro de un marco invisible con solo el pasaporte: ni los estilos
+      // de esta página tocan el pasaporte ni la librería toca esta página.
+      const HTML2PDF = '<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" ' +
+        'integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" ' +
+        'crossorigin="anonymous" referrerpolicy="no-referrer"><' + '/script>';
+
+      function generarPdfLocal(html) {
+        return new Promise((resolve, reject) => {
+          const marc = document.createElement('iframe');
+          marc.setAttribute('aria-hidden', 'true');
+          marc.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;';
+          const tancar = () => marc.remove();
+          const limit = setTimeout(() => { tancar(); reject(new Error('tiempo')); }, 25000);
+          marc.onload = () => {
+            const w = marc.contentWindow;
+            if (!w || !w.html2pdf) { clearTimeout(limit); tancar(); reject(new Error('sin html2pdf')); return; }
+            const fonts = w.document.fonts ? w.document.fonts.ready : Promise.resolve();
+            // Las opciones se crean dentro del marco: html2pdf comprueba "instanceof Array"
+            // y un array de esta página no lo es allí.
+            const opcions = w.JSON.parse(JSON.stringify({
+              margin: [10, 10, 10, 10],
+              image: { type: 'jpeg', quality: 0.95 },
+              html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false },
+              jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+              pagebreak: { mode: ['css', 'legacy'], avoid: 'tr' }
+            }));
+            const acabar = (err, blob) => { clearTimeout(limit); tancar(); if (err) reject(err); else resolve(blob); };
+            // El "worker" de html2pdf no se devuelve dentro de otra promesa (se queda colgado):
+            // se espera con su propio then.
+            fonts.then(() => {
+              w.html2pdf().set(opcions).from(w.document.body).outputPdf('blob')
+                .then(blob => acabar(null, blob), err => acabar(err || new Error('html2pdf')));
+            }, err => acabar(err));
+          };
+          marc.srcdoc = html.indexOf('</head>') !== -1 ? html.replace('</head>', HTML2PDF + '</head>') : HTML2PDF + html;
+          document.body.appendChild(marc);
+        });
+      }
+
+      function prepararPdfLocal(pasaporte, code) {
+        pdfEstado.textContent = 'Preparando su pasaporte en PDF…';
+        generarPdfLocal(pasaporte.html)
+          .then(blob => usarBlob(blob, pasaporte.nom))
+          .catch(e => { console.warn('PDF en el navegador:', e && e.message || e); prepararPdf(code); });
       }
 
       function prepararPdf(code) {

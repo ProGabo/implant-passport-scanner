@@ -1,5 +1,6 @@
 // Mide el portal en producción: N logins y M PDFs seguidos con un código de prueba.
-// Uso: node scripts/medir-portal.js [N=20] [M=5] [codi=DEMO2026]
+// Uso: node scripts/medir-portal.js [N=20] [M=5] [codi=DEMO2026]. El login pide el PDF a la
+// vez, como el portal (ambPdf); los M PDFs aparte son el respaldo (pdfPasaporte).
 // Cuenta como error cualquier respuesta que no sea JSON (la página HTML de Google del
 // "Error de conexión") y las que tardan más del corte.
 const API_URL = 'https://script.google.com/macros/s/AKfycbymkCc2Bf0pW82p6wUbpCIzIigaeYX9g7P-wTQxgTMpbAsqjF9JyB-W7LyCatuepz3O/exec';
@@ -52,7 +53,7 @@ function resum(nom, rs) {
 (async () => {
   const logins = [];
   for (let i = 0; i < N; i++) {
-    const r = await peticio({ action: 'initiateLogin', code: CODI });
+    const r = await peticio({ action: 'initiateLogin', code: CODI, ambPdf: true });
     logins.push(r);
     console.log(`login ${i + 1}/${N}: ${(r.ms / 1000).toFixed(2)} s${r.ok ? '' : ' ERROR ' + r.error}${detall(r)}`);
   }

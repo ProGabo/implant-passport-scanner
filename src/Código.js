@@ -2227,12 +2227,17 @@ function logoPasaport_() {
 
 function htmlPasaport_(implants, codi, opcions) {
   const avui = Utilities.formatDate(new Date(ahoraMs()), Session.getScriptTimeZone(), 'dd/MM/yyyy');
-  return PortalModel.htmlPasaporte(implants[0] || {}, implants, codi, avui,
-    Object.assign({ logo: logoPasaport_() }, opcions));
+  const o = Object.assign({}, opcions);
+  if (!o.logo) o.logo = logoPasaport_();
+  return PortalModel.htmlPasaporte(implants[0] || {}, implants, codi, avui, o);
+}
+
+function nomPdfPasaport_(implants) {
+  return 'Pasaporte_' + String((implants[0] && implants[0].nombre) || 'Paciente').trim().replace(/\s+/g, '_') + '.pdf';
 }
 
 function pdfPasaport_(implants, codi) {
-  const nom = 'Pasaporte_' + String((implants[0] && implants[0].nombre) || 'Paciente').trim().replace(/\s+/g, '_') + '.pdf';
+  const nom = nomPdfPasaport_(implants);
   return Utilities.newBlob(htmlPasaport_(implants, codi), 'text/html', nom).getAs('application/pdf').setName(nom);
 }
 
@@ -2325,15 +2330,18 @@ function doPost(e) {
       
     } else if (action === 'initiateLogin') {
       result = initiateLogin(params.code);
-      // El portal pide el PDF en la misma respuesta: generarlo cuesta una décima, y una
-      // segunda petición a Google a veces se queda colgada 20-30 s.
-      if (params.ambPdf === true && result.ok && result.implantes && result.implantes.length) {
+      // El portal recibe el pasaporte como HTML (pocos KB) y el navegador hace el PDF. Las
+      // respuestas grandes (el PDF, ~200 KB) fallan a menudo en la redirección de Google
+      // (medido: 3 de 6, frente a 0 de 6 las pequeñas). pdfPasaporte queda de respaldo.
+      if (params.ambHtml === true && result.ok && result.implantes && result.implantes.length) {
         try {
-          const b = pdfPasaport_(result.implantes, result.codi_acces);
-          result = Object.assign({}, result, { pdf: { nom: b.getName(), base64: Utilities.base64Encode(b.getBytes()) } });
-          marca_('pdf');
+          result = Object.assign({}, result, { pasaporte: {
+            nom: nomPdfPasaport_(result.implantes),
+            html: htmlPasaport_(result.implantes, result.codi_acces, { logo: LOGO_PASAPORT_URL })
+          } });
+          marca_('html');
         } catch (e) {
-          Logger.log('PDF del portal amb el login: ' + e);
+          Logger.log('HTML del pasaport amb el login: ' + e);
         }
       }
 

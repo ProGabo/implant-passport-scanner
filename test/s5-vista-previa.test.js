@@ -151,16 +151,20 @@ test('doPost: acción pdfPasaporte', () => {
   assert.ok(out.base64.length > 100);
 });
 
-test('doPost: el login del portal trae ya el PDF (una sola petición); sin código, nada', () => {
+test('doPost: el login del portal trae el pasaporte en HTML (pequeño) para hacer el PDF en el navegador', () => {
   const { ctx } = carregar({ usuari: '' });
   ctx.ContentService = { createTextOutput: s => ({ s, setMimeType() { return this; } }), MimeType: { JSON: 'json' } };
+  ctx.logoPasaport_ = () => { throw new Error('el portal usa la URL del logo, no lo incrusta'); };
   const post = p => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(p) } }).s);
-  const out = post({ action: 'initiateLogin', code: 'abc234', ambPdf: true });
+  const out = post({ action: 'initiateLogin', code: 'abc234', ambHtml: true });
   assert.equal(out.ok, true);
-  assert.equal(out.pdf.nom, 'Pasaporte_Àngels_Núñez.pdf');
-  assert.doesNotMatch(Buffer.from(out.pdf.base64, 'base64').toString(), /angels@x\.cat|43000200|12345678Z/);
-  assert.equal(post({ action: 'initiateLogin', code: 'abc234' }).pdf, undefined, 'solo si se pide');
-  assert.equal(post({ action: 'initiateLogin', code: 'ZZZ999', ambPdf: true }).pdf, undefined);
+  assert.equal(out.pasaporte.nom, 'Pasaporte_Àngels_Núñez.pdf');
+  assert.match(out.pasaporte.html, /Pasaporte Implantológico/);
+  assert.match(out.pasaporte.html, /https:\/\/i\.postimg\.cc\//);
+  assert.doesNotMatch(out.pasaporte.html, /angels@x\.cat|43000200|12345678Z|data:image/);
+  assert.ok(JSON.stringify(out).length < 30000, 'respuesta pequeña: ' + JSON.stringify(out).length);
+  assert.equal(post({ action: 'initiateLogin', code: 'abc234' }).pasaporte, undefined, 'solo si se pide');
+  assert.equal(post({ action: 'initiateLogin', code: 'ZZZ999', ambHtml: true }).pasaporte, undefined);
 });
 
 test('portal: los implantes llevan los textos ya escritos y salen ordenados', () => {

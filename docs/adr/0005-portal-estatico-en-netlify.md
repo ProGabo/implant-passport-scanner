@@ -38,11 +38,27 @@
 | | Login (mediana / p90 / máx.) | Errores | PDF (mediana) |
 |---|---|---|---|
 | Antes (@96, 2026-10-04) | 6,06 s / 9,35 s / 15,8 s | 1 de 20 (HTML) | 7,10 s |
-| Después | _(pendiente del despliegue)_ | | |
+| Lectura por columna + filas recortadas (@99) | 4,97 s / 10,2 s / 11,5 s | 0 de 20 | 1,97 s (3 de 5 fallan) |
+| Índice de códigos (@100) | 2,26 s / 4,56 s / 4,96 s | 0 de 20 | (ver abajo) |
+| PDF hecho en el navegador (@102, Chrome) | 2-4 s, PDF listo +0,5 s | 0 de 8 con peticiones escalonadas | — |
 
-El "antes" también incluía leer la hoja entera en cada login (unas 16000 filas, por las
-casillas "Pendent" hasta el final). Eso lo arregla S8 aparte: lectura por columna del Codi
-d'accés y casillas solo con 200 filas de margen.
+Lo que se aprendió midiendo:
+
+- **La hoja tiene 10.665 implantes reales.** Con ese tamaño, cualquier lectura cuesta unos
+  2,5 s, se lea la hoja entera o una sola columna. Por eso el portal usa un **índice de
+  códigos** en la memoria del script (CacheService, 1 hora): en qué filas está cada código,
+  y solo se leen esas (~0,1 s). Se rehace en cada alta (que ya lee la hoja) y cuando el
+  portal lo encuentra desfasado. Lo único que no detecta es una fila añadida a mano a un
+  paciente que ya existía: la verá al cabo de una hora como mucho (aceptado).
+- **Las respuestas grandes fallan en la redirección de Google.** El PDF hecho (~160 KB, ~210
+  KB en base64) fallaba en 3 de cada 6 peticiones; los logins pequeños, en ninguna (en
+  ese momento). Por eso el login trae el pasaporte en **HTML** (~9 KB) y el **navegador hace
+  el PDF** con html2pdf.js 0.10.1 (cdnjs, con SRI), dentro de un marco invisible. Es el
+  mismo HTML que el PDF de la clínica; el PDF del navegador es una imagen del pasaporte
+  (~240 KB). `pdfPasaporte` queda de respaldo si el navegador no puede.
+- **Google a veces se cuelga 10-40 s** también con respuestas pequeñas. El portal manda las
+  peticiones **escalonadas**: si a los 6 s no hay respuesta, sale otra en paralelo (y otra
+  a los 12 s), y vale la primera que llega bien.
 
 ## Consecuencias
 
