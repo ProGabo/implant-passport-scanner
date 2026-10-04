@@ -1,4 +1,10 @@
 // --- CONFIGURACIÓN ---
+// Medición del portal (doPost con diag: true): cuánto tarda la carga del script y cada paso.
+const T_INICI_SCRIPT_ = Date.now();
+let DIAG_ = null;
+function marca_(pas) {
+  if (DIAG_) DIAG_.passos.push([pas, Date.now() - DIAG_.inici]);
+}
 const SPREADSHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
 const SHEET_NAME = "Pacientes";
 const CATALOG_SHEET_NAME = "Catálogo de Implantes";
@@ -150,14 +156,18 @@ function leerPacientes(sheet) {
  */
 function llegirPacientPerCodi_(code) {
   const sheet = hojaPacientes();
+  marca_('obrirFull');
   const nCols = Math.max(sheet.getLastColumn(), 1);
   const headers = sheet.getRange(1, 1, 1, nCols).getValues()[0];
+  marca_('capcaleres');
   const { idx } = PacientModel.indexarCapcaleres(headers);
   if (idx.codi_acces === undefined) throw new Error("No trobo la columna \"Codi d'accés\".");
   const nFiles = sheet.getLastRow() - 1;
+  marca_('lastRow=' + (nFiles + 1));
   if (nFiles < 1) return { codi: '', ambigu: false, objetos: [] };
 
   const codis = sheet.getRange(2, idx.codi_acces + 1, nFiles, 1).getValues().map(f => f[0]);
+  marca_('columnaCodi');
   const r = PortalModel.resoldreCodi(code, codis);
   if (!r.codi) return { codi: '', ambigu: r.ambigu, objetos: [] };
 
@@ -172,6 +182,7 @@ function llegirPacientPerCodi_(code) {
         .forEach(f => objetos.push(PacientModel.filaAObjecte(f, idx)));
     a = b + 1;
   }
+  marca_('filesPacient');
   return { codi: String(r.codi).trim().toUpperCase(), ambigu: false, objetos };
 }
 
@@ -2105,13 +2116,15 @@ function pdfPortal_(code) {
   try {
     const cache = CacheService.getScriptCache();
     const desat = PortalModel.estaPausat(cache) ? null : cache.get(clauLogin_(code));
-    if (desat) r = JSON.parse(desat);
+    if (desat) r = Object.assign(JSON.parse(desat), { _deCache: true });
   } catch (e) {
     Logger.log('Memòria cau del login il·legible: ' + e);
   }
   if (!r) r = initiateLogin(code);
   if (!r.ok) return r;
+  marca_(r._deCache ? 'loginDeCache' : 'login');
   const b = pdfPasaport_(r.implantes, r.codi_acces);
+  marca_('pdf');
   return { ok: true, nom: b.getName(), base64: Utilities.base64Encode(b.getBytes()) };
 }
 
@@ -2124,6 +2137,7 @@ function doPost(e) {
     const params = JSON.parse(e.postData.contents);
     const action = params.action;
     let result;
+    if (params.diag === true) DIAG_ = { inici: Date.now(), passos: [] };
 
     // 2. Ejecutamos la función correspondiente según lo que pida Netlify
     if (action === 'retrieveCodeByEmail') {
@@ -2139,6 +2153,8 @@ function doPost(e) {
       result = { ok: false, message: 'Acción no reconocida por el servidor.' };
     }
 
+    // Solo tiempos, nunca datos: el portal es público.
+    if (DIAG_) result = Object.assign({}, result, { _diag: { carrega_ms: DIAG_.inici - T_INICI_SCRIPT_, passos: DIAG_.passos } });
     // 3. Devolvemos la respuesta a Netlify en formato JSON
     return ContentService.createTextOutput(JSON.stringify(result))
       .setMimeType(ContentService.MimeType.JSON);

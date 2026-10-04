@@ -15,14 +15,14 @@ async function peticio(cos) {
     const res = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(cos),
+      body: JSON.stringify(Object.assign({ diag: true }, cos)),
       signal: ctrl.signal
     });
     const text = await res.text();
     const ms = Date.now() - t0;
     try {
       const json = JSON.parse(text);
-      return { ms, ok: json.ok === true, error: json.ok ? null : 'ok=false: ' + json.message };
+      return { ms, ok: json.ok === true, error: json.ok ? null : 'ok=false: ' + json.message, diag: json._diag };
     } catch (e) {
       const titol = (text.match(/<title>([^<]*)<\/title>/i) || [])[1] || text.replace(/\s+/g, ' ').slice(0, 120);
       return { ms, ok: false, error: 'no es JSON (HTTP ' + res.status + '): ' + titol };
@@ -32,6 +32,12 @@ async function peticio(cos) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Lo que cuenta el servidor: carga del script y pasos (ms desde que entra en doPost).
+function detall(r) {
+  if (!r.diag) return '';
+  return `  [carga ${r.diag.carrega_ms} ms; ` + r.diag.passos.map(p => p[0] + ' ' + p[1]).join(', ') + ']';
 }
 
 function resum(nom, rs) {
@@ -48,13 +54,13 @@ function resum(nom, rs) {
   for (let i = 0; i < N; i++) {
     const r = await peticio({ action: 'initiateLogin', code: CODI });
     logins.push(r);
-    console.log(`login ${i + 1}/${N}: ${(r.ms / 1000).toFixed(2)} s${r.ok ? '' : ' ERROR ' + r.error}`);
+    console.log(`login ${i + 1}/${N}: ${(r.ms / 1000).toFixed(2)} s${r.ok ? '' : ' ERROR ' + r.error}${detall(r)}`);
   }
   const pdfs = [];
   for (let i = 0; i < M; i++) {
     const r = await peticio({ action: 'pdfPasaporte', code: CODI });
     pdfs.push(r);
-    console.log(`pdf ${i + 1}/${M}: ${(r.ms / 1000).toFixed(2)} s${r.ok ? '' : ' ERROR ' + r.error}`);
+    console.log(`pdf ${i + 1}/${M}: ${(r.ms / 1000).toFixed(2)} s${r.ok ? '' : ' ERROR ' + r.error}${detall(r)}`);
   }
   console.log('');
   resum('Login', logins);
