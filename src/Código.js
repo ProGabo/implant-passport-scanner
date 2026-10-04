@@ -253,6 +253,7 @@ function desarIndexCodis_(codis) {
     for (let i = 0; i < text.length || n === 0; i += MIDA_TROS_INDEX) valors[CLAU_INDEX_CODIS + '_' + n++] = text.slice(i, i + MIDA_TROS_INDEX);
     valors[CLAU_INDEX_CODIS] = String(n);
     CacheService.getScriptCache().putAll(valors, SEGONS_INDEX_CODIS);
+    marca_('indexDesat ' + n + 'x' + text.length);
   } catch (e) {
     Logger.log("No es pot desar l'índex de codis: " + e);
   }
@@ -263,11 +264,11 @@ function llegirIndexCodis_() {
   try {
     const cache = CacheService.getScriptCache();
     const n = Number(cache.get(CLAU_INDEX_CODIS));
-    if (!n) return null;
+    if (!n) { marca_('senseIndex'); return null; }
     const claus = [];
     for (let i = 0; i < n; i++) claus.push(CLAU_INDEX_CODIS + '_' + i);
     const trossos = cache.getAll(claus);
-    if (claus.some(k => typeof trossos[k] !== 'string')) return null;
+    if (claus.some(k => typeof trossos[k] !== 'string')) { marca_('indexIncomplet ' + n); return null; }
     const index = {};
     claus.map(k => trossos[k]).join('').split('|').forEach(e => {
       const [k, files] = e.split(':');
@@ -2324,6 +2325,17 @@ function doPost(e) {
       
     } else if (action === 'initiateLogin') {
       result = initiateLogin(params.code);
+      // El portal pide el PDF en la misma respuesta: generarlo cuesta una décima, y una
+      // segunda petición a Google a veces se queda colgada 20-30 s.
+      if (params.ambPdf === true && result.ok && result.implantes && result.implantes.length) {
+        try {
+          const b = pdfPasaport_(result.implantes, result.codi_acces);
+          result = Object.assign({}, result, { pdf: { nom: b.getName(), base64: Utilities.base64Encode(b.getBytes()) } });
+          marca_('pdf');
+        } catch (e) {
+          Logger.log('PDF del portal amb el login: ' + e);
+        }
+      }
 
     } else if (action === 'pdfPasaporte') {
       result = pdfPortal_(params.code);

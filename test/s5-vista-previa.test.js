@@ -151,6 +151,18 @@ test('doPost: acción pdfPasaporte', () => {
   assert.ok(out.base64.length > 100);
 });
 
+test('doPost: el login del portal trae ya el PDF (una sola petición); sin código, nada', () => {
+  const { ctx } = carregar({ usuari: '' });
+  ctx.ContentService = { createTextOutput: s => ({ s, setMimeType() { return this; } }), MimeType: { JSON: 'json' } };
+  const post = p => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(p) } }).s);
+  const out = post({ action: 'initiateLogin', code: 'abc234', ambPdf: true });
+  assert.equal(out.ok, true);
+  assert.equal(out.pdf.nom, 'Pasaporte_Àngels_Núñez.pdf');
+  assert.doesNotMatch(Buffer.from(out.pdf.base64, 'base64').toString(), /angels@x\.cat|43000200|12345678Z/);
+  assert.equal(post({ action: 'initiateLogin', code: 'abc234' }).pdf, undefined, 'solo si se pide');
+  assert.equal(post({ action: 'initiateLogin', code: 'ZZZ999', ambPdf: true }).pdf, undefined);
+});
+
 test('portal: los implantes llevan los textos ya escritos y salen ordenados', () => {
   const { ctx } = carregar({ usuari: '' });
   const r = ctx.initiateLogin('ABC234');

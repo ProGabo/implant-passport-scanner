@@ -265,7 +265,7 @@
             '<p style="font-size: 13px; color: #92400e; text-align: center;">Está tardando un poco más de lo normal. Seguimos buscando, no cierre la página.</p>');
         }, 8000);
 
-        llamarApi({ action: 'initiateLogin', code: code }, 2)
+        llamarApi({ action: 'initiateLogin', code: code, ambPdf: true }, 2)
         .then(res => {
             clearTimeout(avisoLento);
             btnCode.disabled = false;
@@ -287,7 +287,8 @@
                   '<em>Demo mode: fictitious patient, synthetic data.</em></div>');
               }
               downloadAction.style.display = 'block';
-              prepararPdf(currentPatientCode);
+              // El PDF llega con el login; si no ha llegado, se pide aparte.
+              if (!(res.pdf && usarPdf(res.pdf))) prepararPdf(currentPatientCode);
             } else if (res.ok) {
               status.innerHTML = '<span class="error">No se encontraron implantes para este código.</span>';
             } else {
@@ -438,23 +439,34 @@
       };
 
       // --- PDF DEL PASAPORTE (lo genera el servidor: el mismo que ve la clínica) ---
-      // Se pide nada más entrar, en segundo plano: casi siempre está listo antes de pulsar.
+      // Llega con el login, así que está listo al entrar. Si no (fallo al generarlo), se
+      // pide aparte en segundo plano.
       let pdfUrl = null, pdfNom = 'Pasaporte.pdf';
       const btnVerPdf = document.getElementById('btnVerPdf');
       const btnDescargarPdf = document.getElementById('btnDescargarPdf');
       const pdfEstado = document.getElementById('pdfEstado');
 
+      /** Deja el PDF ({nom, base64}) listo en los botones. @returns {boolean} */
+      function usarPdf(pdf) {
+        if (!pdf || !pdf.base64) return false;
+        try {
+          const bytes = Uint8Array.from(atob(pdf.base64), c => c.charCodeAt(0));
+          pdfUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+        } catch (e) {
+          return false;
+        }
+        pdfNom = pdf.nom || pdfNom;
+        btnVerPdf.disabled = false;
+        btnDescargarPdf.disabled = false;
+        pdfEstado.textContent = '';
+        return true;
+      }
+
       function prepararPdf(code) {
         pdfEstado.textContent = 'Preparando su pasaporte en PDF…';
         llamarApi({ action: 'pdfPasaporte', code: code }, 2)
           .then(res => {
-            if (!res.ok || !res.base64) throw new Error(res.message || 'sin PDF');
-            const bytes = Uint8Array.from(atob(res.base64), c => c.charCodeAt(0));
-            pdfUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-            pdfNom = res.nom || pdfNom;
-            btnVerPdf.disabled = false;
-            btnDescargarPdf.disabled = false;
-            pdfEstado.textContent = '';
+            if (!res.ok || !usarPdf(res)) throw new Error(res.message || 'sin PDF');
           })
           .catch(() => {
             pdfEstado.innerHTML = 'No hemos podido preparar el PDF. <a href="#" id="pdfReintentar">Volver a intentarlo</a>';
