@@ -73,6 +73,37 @@ function showSidebar() {
  * Session.getActiveUser() como prueba principal: exige el permiso userinfo.email, que el
  * manifiesto no declara, y añadirlo obligaría a todas las cuentas a volver a autorizar.
  */
+/**
+ * Mensaje al final de una herramienta de mantenimiento. Desde el editor de Apps Script no
+ * hay interfaz de Sheets: el mensaje va al registro de ejecución.
+ */
+function avisar_(titol, text) {
+  try {
+    const ui = SpreadsheetApp.getUi();
+    ui.alert(titol, text, ui.ButtonSet.OK);
+  } catch (e) {
+    console.log(titol + ': ' + text);
+  }
+}
+
+/** Pregunta en la hoja; desde el editor (sin interfaz) devuelve `perDefecte`. null = cancelado. */
+function demanar_(titol, pregunta, perDefecte) {
+  let ui;
+  try {
+    ui = SpreadsheetApp.getUi();
+  } catch (e) {
+    return perDefecte;
+  }
+  const r = ui.prompt(titol, pregunta, ui.ButtonSet.OK_CANCEL);
+  return r.getSelectedButton() === ui.Button.OK ? r.getResponseText() : null;
+}
+
+/** Direcciones de prueba: propiedad del script PROVA_EMAILS, separadas por comas. */
+function adrecesProva_() {
+  return String(PropertiesService.getScriptProperties().getProperty('PROVA_EMAILS') || '')
+      .split(',').map(a => a.trim()).filter(a => PacientModel.esEmail(a));
+}
+
 function exigirUsuariIntern_() {
   try {
     SpreadsheetApp.getUi();
@@ -757,7 +788,7 @@ function enviarPasaport(codi, opcions) {
 // ==========================================
 
 const EMAIL_REMITENT = 'clinicapiesteller@gmail.com';
-const NOM_REMITENT = 'Drs. Pi y Esteller';
+const NOM_REMITENT = 'Doctores Pi y Esteller';
 // Adonde responden los pacientes y adonde llegan los avisos para la Secretària.
 const EMAIL_SECRETARIA = 'consulta@doctorpiurgell.com';
 const FULL_REGISTRE = "Registre d'enviaments";
@@ -827,7 +858,7 @@ function sendPassportEmail_(recipientEmail, patientName, patientCode) {
     return { ok: false, message: 'Email no vàlid.' };
   }
 
-  const subject = 'Su Pasaporte Implantológico - Clínica Drs. Pi y Esteller';
+  const subject = 'Su Pasaporte Implantológico - Clínica Dental Doctores Pi y Esteller';
   const webAppUrl = PortalModel.URL_PORTAL;
   const nom = PortalModel.escapar(patientName);
   const codi = PortalModel.escapar(patientCode);
@@ -837,7 +868,7 @@ function sendPassportEmail_(recipientEmail, patientName, patientCode) {
       <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f8fc;">
         <p>Estimado/a ${nom},</p>
 
-        <p>Gracias por confiar en el equipo de la <strong>Clínica Dental Drs. Pi y Esteller</strong>. Para garantizar la máxima calidad y trazabilidad de su tratamiento, hemos generado su documentación técnica digital.</p>
+        <p>Gracias por confiar en el equipo de la <strong>Clínica Dental Doctores Pi y Esteller</strong>. Para garantizar la máxima calidad y trazabilidad de su tratamiento, hemos generado su documentación técnica digital.</p>
 
         <p>A continuación encontrará su código de acceso personal. Con él podrá consultar en cualquier momento la marca, el modelo, el lote y la fecha de sus implantes.</p>
         <div style="background-color: #eef4fb; border-left: 5px solid #02234f; padding: 20px; margin: 30px 0; border-radius: 4px;">
@@ -856,17 +887,17 @@ function sendPassportEmail_(recipientEmail, patientName, patientCode) {
         <p>Guarde este código en un lugar seguro. Si tiene alguna duda, puede responder a este correo.</p>
 
         <p>Atentamente,<br>
-        El equipo de la Clínica Drs. Pi y Esteller</p>
+        El equipo de la Clínica Dental Doctores Pi y Esteller</p>
       </body>
     </html>
   `;
   const bodyText = `Estimado/a ${patientName}:\n\n` +
-    'Hemos generado el Pasaporte Implantológico de su tratamiento en la Clínica Dental Drs. Pi y Esteller. ' +
+    'Hemos generado el Pasaporte Implantológico de su tratamiento en la Clínica Dental Doctores Pi y Esteller. ' +
     'Con él podrá consultar en cualquier momento la marca, el modelo, el lote y la fecha de sus implantes.\n\n' +
     `Su código de acceso: ${patientCode}\n` +
     `Entre aquí e introduzca el código: ${webAppUrl}\n\n` +
     'Guarde este código en un lugar seguro. Si tiene alguna duda, puede responder a este correo.\n\n' +
-    'Atentamente,\nEl equipo de la Clínica Drs. Pi y Esteller';
+    'Atentamente,\nEl equipo de la Clínica Dental Doctores Pi y Esteller';
 
   return enviarEmail_('pasaport', patientCode, recipientEmail, subject, bodyText, bodyHtml);
 }
@@ -946,32 +977,57 @@ function ultimEnviamentDe_(codi) {
 }
 
 /**
- * Menú: envía a la dirección que se indique el avís que recibiría la Secretària para un
- * paciente, para ver cómo llega (y si va a spam) sin guardar nada ni molestar a la consulta.
+ * Mantenimiento (desde el editor o la hoja): envía a una dirección de prueba el avís que
+ * recibiría la Secretària para un paciente, para ver cómo llega (y si va a spam) sin
+ * guardar nada ni molestar a la consulta. Desde el editor: DEMO2026 y la primera dirección
+ * de la propiedad PROVA_EMAILS.
  */
 function provarAvisSecretaria() {
   exigirUsuariIntern_();
-  const ui = SpreadsheetApp.getUi();
-  const rCodi = ui.prompt('Avís de prova', "Codi d'accés del pacient (per exemple DEMO2026):", ui.ButtonSet.OK_CANCEL);
-  if (rCodi.getSelectedButton() !== ui.Button.OK) return;
-  const { objetos } = leerPacientes(hojaPacientes());
-  const r = PortalModel.resoldreCodi(rCodi.getResponseText(), objetos.map(o => o.codi_acces));
-  if (!r.codi) {
-    ui.alert('Avís de prova', "No trobo cap pacient amb aquest codi d'accés.", ui.ButtonSet.OK);
+  const titol = 'Avís de prova';
+  const codi = demanar_(titol, "Codi d'accés del pacient (per exemple DEMO2026):", 'DEMO2026');
+  if (codi === null) return;
+  const r = llegirPacientPerCodi_(codi);
+  const p = PacientModel.pacientsUnics(r.objetos)[0];
+  if (!p) {
+    avisar_(titol, "No trobo cap pacient amb aquest codi d'accés.");
     return;
   }
-  const p = PacientModel.pacientsUnics(objetos.filter(o => mismoCodigo(o.codi_acces, r.codi)))[0];
-  const rEmail = ui.prompt('Avís de prova', "Email on vols rebre la prova (s'enviarà el mateix que rebria la consulta):", ui.ButtonSet.OK_CANCEL);
-  if (rEmail.getSelectedButton() !== ui.Button.OK) return;
-  const desti = String(rEmail.getResponseText() || '').trim();
+  const rEmail = demanar_(titol, "Email on vols rebre la prova (s'enviarà el mateix que rebria la consulta):", adrecesProva_()[0] || '');
+  if (rEmail === null) return;
+  const desti = String(rEmail || '').trim();
   if (!PacientModel.esEmail(desti)) {
-    ui.alert('Avís de prova', "L'email no és vàlid.", ui.ButtonSet.OK);
+    avisar_(titol, "L'email no és vàlid (des de l'editor, posa'l a la propietat PROVA_EMAILS).");
     return;
   }
   const res = enviarAvisSecretaria_(p, desti);
-  ui.alert('Avís de prova', res.ok
+  avisar_(titol, res.ok
     ? `Enviat a ${desti}. Si no el veus en uns minuts, mira la carpeta de correu brossa (spam).`
-    : `No s'ha pogut enviar: ${res.message}`, ui.ButtonSet.OK);
+    : `No s'ha pogut enviar: ${res.message}`);
+}
+
+/**
+ * Mantenimiento (desde el editor): envía el email del pasaporte de DEMO2026, exactamente
+ * como lo recibe un paciente, a cada dirección de la propiedad del script PROVA_EMAILS
+ * (separadas por comas: una de mail-tester.com, una Hotmail, una Yahoo...). Sirve para
+ * comprobar si llega a la bandeja de entrada o a spam.
+ * @returns {string[]} una línea por dirección
+ */
+function provarEntregabilitat() {
+  exigirUsuariIntern_();
+  const adreces = adrecesProva_();
+  if (!adreces.length) {
+    avisar_("Prova d'entrega", 'Posa les adreces a la propietat del script PROVA_EMAILS (separades per comes).');
+    return [];
+  }
+  const p = PacientModel.pacientsUnics(llegirPacientPerCodi_('DEMO2026').objetos)[0];
+  if (!p) throw new Error('No trobo el pacient DEMO2026.');
+  const linies = adreces.map(a => {
+    const r = sendPassportEmail_(a, p.nombre, p.codi_acces);
+    return a + ': ' + (r.ok ? 'enviat' : 'ERROR ' + r.message);
+  });
+  avisar_("Prova d'entrega", linies.join('\n'));
+  return linies;
 }
 
 /**
@@ -1160,21 +1216,21 @@ function retrieveCodeByEmail(patientEmail) {
     const lineasText = pacientes.map(p => `${p.nombre || 'Paciente'}: ${p.codi_acces}`).join('\n');
     const html = `
         <p>Estimado/a paciente,</p>
-        <p>Hemos recibido una solicitud para recuperar su código de acceso al Pasaporte Implantológico de la <strong>Clínica Dental Drs. Pi y Esteller</strong>.</p>
+        <p>Hemos recibido una solicitud para recuperar su código de acceso al Pasaporte Implantológico de la <strong>Clínica Dental Doctores Pi y Esteller</strong>.</p>
         <div style="background-color: #eef4fb; padding: 15px; border-radius: 8px; text-align: center; margin: 20px 0;">
           <p style="font-size: 16px; font-weight: bold; color: #02234f; margin: 0 0 8px 0;">Su código de acceso:</p>
           ${lineasHtml}
         </div>
         <p>Puede consultar su pasaporte en <a href="${PortalModel.URL_PORTAL}">${PortalModel.URL_PORTAL}</a>.</p>
         <p>Si no ha solicitado este código, puede ignorar este correo.</p>
-        <p>Atentamente,<br>El equipo de la Clínica Dental Drs. Pi y Esteller</p>`;
-    const text = 'Hemos recibido una solicitud para recuperar su código de acceso al Pasaporte Implantológico de la Clínica Dental Drs. Pi y Esteller.\n\n' +
+        <p>Atentamente,<br>El equipo de la Clínica Dental Doctores Pi y Esteller</p>`;
+    const text = 'Hemos recibido una solicitud para recuperar su código de acceso al Pasaporte Implantológico de la Clínica Dental Doctores Pi y Esteller.\n\n' +
       lineasText + '\n\n' +
       'Puede consultar su pasaporte en ' + PortalModel.URL_PORTAL + '\n\n' +
       'Si no ha solicitado este código, puede ignorar este correo.';
 
     enviarEmail_('recuperació', pacientes.map(p => p.codi_acces).join(', '), email,
-      'Recuperación de su código de acceso al Pasaporte Implantológico', text, html);
+      'Su código de acceso al Pasaporte Implantológico - Clínica Dental Doctores Pi y Esteller', text, html);
     return RESPUESTA;
 
   } catch (e) {
@@ -1495,17 +1551,17 @@ function arreglarCodigosUndefined() {
       const columnaCodi = files.map(f => [aTexto(f[colCodi], colCodi)]);
       sheet.getRange(2, colCodi + 1, files.length, 1).setValues(columnaCodi);
       
-      SpreadsheetApp.getUi().alert('✨ Arreglo completado\n\n' +
+      avisar_('✨ Arreglo completado',
         'S\'han arreglat ' + (arregladosExistentes + arregladosNuevos) + ' codis:\n' +
         '- ' + arregladosExistentes + ' files han recuperat el codi que ja tenia el pacient.\n' +
         '- ' + arregladosNuevos + ' files de pacients sense cap codi n\'han rebut un de nou.');
     } else {
-      SpreadsheetApp.getUi().alert('✅ Tot correcte. No s\'ha trobat cap codi "undefined" ni en blanc.');
+      avisar_('✅ Tot correcte', 'No s\'ha trobat cap codi "undefined" ni en blanc.');
     }
     
   } catch (e) {
     Logger.log('Error en arreglarCodigosUndefined: ' + e);
-    SpreadsheetApp.getUi().alert('❌ Error intern: ' + e.message);
+    avisar_('❌ Error intern', e.message);
   } finally {
     lock.releaseLock();
   }
@@ -1537,7 +1593,7 @@ function eliminarDuplicados() {
   } finally {
     lock.releaseLock();
   }
-  SpreadsheetApp.getUi().alert('Neteja feta', `S'han eliminat ${eliminadas} files duplicades.`, SpreadsheetApp.getUi().ButtonSet.OK);
+  avisar_('Neteja feta', `S'han eliminat ${eliminadas} files duplicades.`);
 }
 
 /**
@@ -1571,7 +1627,7 @@ function retallarFilesBuides() {
   } finally {
     lock.releaseLock();
   }
-  SpreadsheetApp.getUi().alert('Retallar files buides', missatge, SpreadsheetApp.getUi().ButtonSet.OK);
+  avisar_('Retallar files buides', missatge);
   return missatge;
 }
 

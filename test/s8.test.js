@@ -223,3 +223,51 @@ test('menú: solo lo que usa la clínica, y Comprovar-ho tot dentro de Mantenime
   assert.deepEqual(items.map(i => i[1]).map(f => (Array.isArray(f) ? f.map(x => x[1]) : f)),
     ['showSidebar', 'obrirPanellPendents', 'autorizarCuenta', ['comprobarTodo']]);
 });
+
+test('mantenimiento desde el editor (sin interfaz de Sheets): funciona y el resultado va al registro', () => {
+  const ss = libro();
+  const logs = [];
+  const { ctx } = cargarCodigo(ss, { senseUi: true });
+  ctx.console = { log: m => logs.push(m) };
+  assert.match(ctx.retallarFilesBuides(), /files buides esborrades|No hi ha res/);
+  ctx.eliminarDuplicados();
+  assert.ok(logs.some(l => /Neteja feta/.test(l)));
+});
+
+test('provarEntregabilitat: el email real del pasaporte de DEMO2026 a cada dirección de PROVA_EMAILS', () => {
+  const ss = libro();
+  pacientes(ss).getRange(2, col('codi_acces')).setValue('DEMO2026');
+  pacientes(ss).getRange(6, col('codi_acces')).setValue('DEMO2026');
+  const { ctx, sent } = cargarCodigo(ss, { senseUi: true, props: { PROVA_EMAILS: 'test-x@srv1.mail-tester.com, gabo@yahoo.com, no-es-email' } });
+  ctx.console = { log() {} };
+  const r = ctx.provarEntregabilitat();
+  assert.deepEqual([...sent.map(e => e.to)], ['test-x@srv1.mail-tester.com', 'gabo@yahoo.com']);
+  assert.doesNotMatch(sent[0].subject, /PROVA/, 'igual que el de un paciente');
+  assert.match(sent[0].body, /DEMO2026/);
+  assert.equal(r.length, 2);
+});
+
+test('avís de prova desde el editor: DEMO2026 a la primera dirección de PROVA_EMAILS', () => {
+  const ss = libro();
+  pacientes(ss).getRange(2, col('codi_acces')).setValue('DEMO2026');
+  pacientes(ss).getRange(6, col('codi_acces')).setValue('DEMO2026');
+  const { ctx, sent } = cargarCodigo(ss, { senseUi: true, props: { PROVA_EMAILS: 'gabo@yahoo.com' } });
+  ctx.console = { log() {} };
+  ctx.provarAvisSecretaria();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, 'gabo@yahoo.com');
+  assert.match(sent[0].subject, /^\[PROVA\]/);
+});
+
+test('nombre de la clínica: remitente "Doctores Pi y Esteller" y en los textos y el PDF la forma completa', () => {
+  const ss = libro();
+  const { ctx, sent } = cargarCodigo(ss);
+  ctx.enviarPasaport('K7XH3P', { email: true });
+  assert.equal(sent[0].options.name, 'Doctores Pi y Esteller');
+  assert.match(sent[0].subject, /Clínica Dental Doctores Pi y Esteller/);
+  assert.match(sent[0].body, /Clínica Dental Doctores Pi y Esteller/);
+  assert.doesNotMatch(sent[0].options.htmlBody, /Drs\./);
+  const PortalModel = require('../src/PortalModel.js');
+  const html = PortalModel.htmlPasaporte({ nombre: 'Maria' }, [], 'K7XH3P', '04/10/2026');
+  assert.match(html, /© Clínica Dental Doctores Pi y Esteller/);
+});

@@ -185,7 +185,7 @@ function crearPortalModel() {
   /** Mensaje para el paciente (en español), listo para reenviar por WhatsApp. */
   function missatgePacient(p) {
     return 'Hola, ' + String(p.nombre || '').trim() + ':\n\n' +
-      'Le enviamos el acceso a su Pasaporte Implantológico de la Clínica Dental Drs. Pi y Esteller, ' +
+      'Le enviamos el acceso a su Pasaporte Implantológico de la Clínica Dental Doctores Pi y Esteller, ' +
       'donde puede consultar la marca, el modelo y el lote de sus implantes.\n\n' +
       'Código de acceso: ' + p.codi + '\n' +
       'Entre aquí: ' + URL_PORTAL + '\n\n' +
@@ -327,7 +327,7 @@ function crearPortalModel() {
       `<td style="width:${amplada};"><div class="psp-et">${etiqueta}</div><div class="psp-val">${valor}</div></td>`;
     return `
       <table class="psp-cap"><tr>
-        <td><img src="${escapar(logo || LOGO_URL)}" alt="Drs. Pi y Esteller" style="height:55px;"></td>
+        <td><img src="${escapar(logo || LOGO_URL)}" alt="Clínica Dental Doctores Pi y Esteller" style="height:55px;"></td>
         <td style="text-align:right;">
           <div class="psp-titol-et">Certificado de autenticidad</div>
           <div class="psp-titol">Pasaporte Implantológico</div>
@@ -384,7 +384,7 @@ function crearPortalModel() {
   const PEU = `
       <div class="psp-peu">
         <div class="psp-peu-text">Este documento certifica los componentes médicos implantados.<br>Se recomienda conservarlo para futuras referencias clínicas.</div>
-        <div class="psp-peu-c">© Clínica Dental Drs. Pi y Esteller</div>
+        <div class="psp-peu-c">© Clínica Dental Doctores Pi y Esteller</div>
       </div>`;
 
   /**

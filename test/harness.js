@@ -145,7 +145,8 @@ function cargarCodigo(ss, opts) {
       openById: id => (o.libres && o.libres[id]) || ss,
       getUi: () => {
         // Como Apps Script: desde el web app (visitante anónimo) no hay interfaz de Sheets.
-        if (o.usuari === '') throw new Error('Cannot call SpreadsheetApp.getUi() from this context.');
+        // Ni desde el editor de Apps Script (opts.senseUi), donde sí hay usuario.
+        if (o.usuari === '' || o.senseUi) throw new Error('Cannot call SpreadsheetApp.getUi() from this context.');
         const prompts = o.prompts || [];
         return {
           alert: (...a) => { alerts.push(a); return 'YES'; },
