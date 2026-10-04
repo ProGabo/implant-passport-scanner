@@ -127,6 +127,8 @@ class FakeSpreadsheet {
   seleccionar(sheet, fila) { this.activa = { sheet, fila }; }
   getActiveSheet() { return this.activa ? this.activa.sheet : this.sheets[0]; }
   getActiveRange() { return this.activa ? this.activa.sheet.getRange(this.activa.fila, 1) : null; }
+  setActiveRange(r) { this.activa = { sheet: r.sheet, fila: r.r }; return r; }
+  toast(msg, titol, s) { (this.toasts = this.toasts || []).push({ msg, titol, s }); }
 }
 
 function cargarCodigo(ss, opts) {
@@ -134,6 +136,7 @@ function cargarCodigo(ss, opts) {
   const sent = [];
   const alerts = [];
   const sidebars = [];
+  const dialegs = [];
   const cache = new Map();
   const props = Object.assign({ ALERT_EMAIL: 'responsable@example.com' }, o.props);
   const ctx = {
@@ -151,6 +154,7 @@ function cargarCodigo(ss, opts) {
         return {
           alert: (...a) => { alerts.push(a); return 'YES'; },
           showSidebar: h => { sidebars.push(h); },
+          showModelessDialog: (h, titol) => { dialegs.push({ h, titol }); },
           prompt: () => {
             const text = prompts.shift();
             return { getSelectedButton: () => (text === undefined ? 'CANCEL' : 'OK'), getResponseText: () => text || '' };
@@ -203,7 +207,9 @@ function cargarCodigo(ss, opts) {
     },
     Logger: { log() {} },
     HtmlService: {
-      createTemplateFromFile: nom => ({ evaluate() { return { nom, setTitle(t) { this.titol = t; return this; } }; } }),
+      createTemplateFromFile: nom => ({ evaluate() {
+        return { nom, setTitle(t) { this.titol = t; return this; }, setWidth(w) { this.w = w; return this; }, setHeight(h) { this.h = h; return this; } };
+      } }),
       createHtmlOutputFromFile: nom => ({ getContent: () => '<!-- ' + nom + ' -->' })
     },
     CacheService: { getScriptCache: () => ({
@@ -227,7 +233,7 @@ function cargarCodigo(ss, opts) {
     book.sheets.push(c);
     return c;
   };
-  return { ctx, sent, alerts, cache, sidebars };
+  return { ctx, sent, alerts, cache, sidebars, dialegs };
 }
 
 module.exports = { FakeRange, FakeSheet, FakeSpreadsheet, cargarCodigo };

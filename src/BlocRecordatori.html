@@ -1,0 +1,125 @@
+<!-- Bloque "🔔 Recordatori" (S6), el mismo en el sidebar y en el panel "Completar i enviar".
+     Se incluye con include_('BlocRecordatori') y necesita RecordatoriModel en la página.
+     Plegado por defecto: una sola línea hasta que la Auxiliar lo abre. -->
+<style>
+    .rec-bloc { margin-top: 10px; border: 1px solid #ddd6fe; border-radius: 6px; padding: 6px 10px; background: #faf5ff; }
+    .rec-bloc summary { cursor: pointer; font-size: 12px; font-weight: 600; color: #6d28d9; display: flex; justify-content: space-between; gap: 6px; }
+    .rec-bloc summary::-webkit-details-marker { display: none; }
+    .rec-bloc summary::before { content: '▸ '; }
+    .rec-bloc[open] summary::before { content: '▾ '; }
+    .rec-bloc[open] summary { margin-bottom: 8px; }
+    .rec-resum { font-weight: 500; color: #64748b; }
+    .rec-resum.actiu { color: #6d28d9; font-weight: 700; }
+    .rec-fila { display: flex; align-items: center; gap: 6px; }
+    .rec-fila label { margin: 0; font-size: 12px; white-space: nowrap; }
+    .rec-fila input[type="date"] { flex: 1; min-width: 0; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; font-family: inherit; }
+    .rec-rapid { display: flex; gap: 4px; margin-top: 6px; }
+    .rec-rapid button, .rec-treure { width: auto; flex: 1; padding: 4px 6px; font-size: 11px; font-weight: 600; border-radius: 5px; border: 1px solid #ddd6fe; background: #fff; color: #6d28d9; cursor: pointer; margin: 0; }
+    .rec-treure { flex: 0 0 auto; color: #64748b; border-color: #cbd5e1; }
+    .rec-ajuda { font-size: 11px; color: #64748b; margin-top: 5px; }
+    .rec-proposta { font-size: 11px; color: #6d28d9; background: #ede9fe; border-radius: 5px; padding: 5px 7px; margin-top: 6px; }
+    .rec-bloc input.rec-motiu { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 5px 7px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px; font-family: inherit; }
+    .rec-llista { display: inline-block; margin-top: 6px; font-size: 11px; color: #6d28d9; cursor: pointer; text-decoration: underline; }
+</style>
+
+<script>
+    /**
+     * BlocRecordatori.muntar(contenidor, {dataColocacio: () => 'AAAA-MM-DD'|''})
+     * -> { carregar(rec), proposar(seguiment, dataColocacio), llegir(), validar(), reset() }
+     */
+    window.BlocRecordatori = (function () {
+        const RM = () => RecordatoriModel;
+
+        function avuiIso() { return RM().avuiIso(Date.now()); }
+
+        function muntar(contenidor, opts) {
+            const o = opts || {};
+            contenidor.innerHTML = `
+                <details class="rec-bloc">
+                    <summary><span>🔔 Recordatori</span><span class="rec-resum">Cap</span></summary>
+                    <div class="rec-fila">
+                        <label>Avisa'm el</label>
+                        <input type="date" class="rec-data">
+                        <button type="button" class="rec-treure" title="Treure el recordatori">✕</button>
+                    </div>
+                    <div class="rec-rapid">
+                        <button type="button" data-mesos="1">d'aquí 1 mes</button>
+                        <button type="button" data-mesos="3">3 mesos</button>
+                        <button type="button" data-mesos="6">6 mesos</button>
+                    </div>
+                    <div class="rec-proposta hidden"></div>
+                    <div class="rec-ajuda rec-colocacio hidden"></div>
+                    <input type="text" class="rec-motiu" maxlength="200" placeholder="Motiu (opcional): ${RM().MOTIU_PER_DEFECTE}">
+                    <a class="rec-llista">Veure tots els recordatoris</a>
+                </details>`;
+            const q = s => contenidor.querySelector(s);
+            const bloc = q('.rec-bloc'), data = q('.rec-data'), motiu = q('.rec-motiu'),
+                resum = q('.rec-resum'), proposta = q('.rec-proposta'), colocacio = q('.rec-colocacio');
+            let origen = 'manual';
+            let dataProposta = '';
+
+            function pintar() {
+                const iso = data.value;
+                resum.textContent = iso ? 'el ' + RM().format(iso) : 'Cap';
+                resum.classList.toggle('actiu', !!iso);
+                const col = o.dataColocacio ? RM().aIso(o.dataColocacio()) : '';
+                colocacio.textContent = col ? 'Col·locació: ' + RM().format(col) : '';
+                colocacio.classList.toggle('hidden', !col);
+                if (iso !== dataProposta) { origen = 'manual'; proposta.classList.add('hidden'); }
+            }
+
+            bloc.addEventListener('toggle', pintar);
+            data.addEventListener('change', pintar);
+            q('.rec-treure').addEventListener('click', () => { data.value = ''; pintar(); });
+            contenidor.querySelectorAll('[data-mesos]').forEach(b => b.addEventListener('click', () => {
+                data.value = RM().sumar(avuiIso(), Number(b.dataset.mesos), 'mesos');
+                pintar();
+            }));
+            q('.rec-llista').addEventListener('click', () => google.script.run
+                .withFailureHandler(err => Swal.fire({ icon: 'error', title: 'Error', text: (err && err.message) || String(err) }))
+                .obrirRecordatoris());
+
+            return {
+                /** El recordatorio Actiu del paciente (del servidor), o null. */
+                carregar(rec) {
+                    data.value = rec && rec.data ? rec.data : '';
+                    motiu.value = rec && rec.motiu && rec.motiu !== RM().MOTIU_PER_DEFECTE ? rec.motiu : '';
+                    dataProposta = '';
+                    origen = rec && rec.origen === 'escàner' ? 'escàner' : 'manual';
+                    proposta.classList.add('hidden');
+                    bloc.open = false;
+                    pintar();
+                },
+                /**
+                 * P10d: lo que el escáner ha leído en la ficha. Solo propone si no hay ya una
+                 * fecha puesta. @returns la propuesta o null
+                 */
+                proposar(seguiment, dataColocacio) {
+                    const p = RM().proposarSeguiment(seguiment, dataColocacio, avuiIso());
+                    if (!p || !p.data || data.value) return null;
+                    data.value = p.data;
+                    dataProposta = p.data;
+                    if (!motiu.value.trim()) motiu.value = p.text;
+                    pintar();
+                    origen = 'escàner';
+                    proposta.textContent = `✨ Proposat per l'escàner: la fitxa diu «${p.text}». Revisa-ho; el pots canviar o treure.`;
+                    proposta.classList.remove('hidden');
+                    bloc.open = true;
+                    return p;
+                },
+                /** {data, motiu, origen} para el servidor ('' = sin recordatorio). */
+                llegir() {
+                    return { data: data.value || '', motiu: motiu.value.trim(), origen: origen };
+                },
+                /** Texto del error, o null. */
+                validar() {
+                    const r = RM().validar(this.llegir());
+                    return r.errors.length ? r.errors[0] : null;
+                },
+                reset() { this.carregar(null); }
+            };
+        }
+
+        return { muntar: muntar };
+    })();
+</script>

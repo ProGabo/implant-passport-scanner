@@ -54,6 +54,7 @@ function onOpen() {
 function showSidebar() {
   const html = HtmlService.createTemplateFromFile('SidebarForm');
   html.pacientModelJs = crearPacientModel.toString();
+  html.recordatoriModelJs = crearRecordatoriModel.toString();
   SpreadsheetApp.getUi()
       .showSidebar(html.evaluate()
       .setTitle("Escàner d'implants"));
@@ -308,7 +309,8 @@ function buscarPacient(termino) {
         dni: p.dni,
         sense_dni: filasPaciente.some(o => o.sense_dni),
         n_implants: p.n_implants,
-        ultimEnviament: ultimEnviamentDe_(codi)
+        ultimEnviament: ultimEnviamentDe_(codi),
+        recordatori: recordatoriActiu_(codi)
       }
     };
   } catch (e) {
@@ -368,6 +370,7 @@ function fusionarPacients(codiQueQueda, codiQueMarxa) {
     escribirColumnasPaciente(sheet, headers, fusio.files);
     oblidarLogin_(codiQueQueda);
     oblidarLogin_(codiQueMarxa);
+    moureRecordatori_(codiQueMarxa, codiQueQueda);
     return { ok: true, pacient: fusio.pacient, filesMogudes: fusio.filesMogudes, avisos: fusio.avisos };
   } catch (e) {
     Logger.log('Error en fusionarPacients: ' + e);
@@ -440,13 +443,15 @@ function saveNewImplant(formData) {
   // Dos guardados a la vez podrían generar el mismo código o pisarse la última fila.
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
-  let paciente, plan, filas;
+  let paciente, plan, filas, recordatori;
   try {
     const sheet = hojaPacientes();
     const headers = asegurarColumnas(sheet);
     const { files, objetos } = leerPacientes(sheet);
 
     plan = PacientModel.planificarDesat(headers, files, Object.assign({}, formData, { mode: 'afegir' }));
+    const rec = RecordatoriModel.validar(formData.recordatori);
+    plan.errors = plan.errors.concat(rec.errors);
     if (plan.errors.length) {
       return { ok: false, message: plan.errors.join('\n'), errors: plan.errors };
     }
@@ -472,6 +477,7 @@ function saveNewImplant(formData) {
     });
     // La primera vez que se guarda algo pendiente: color, desplegable y pestaña "Pendents".
     if (plan.filas.some(f => f.pendent)) prepararHoja_(sheet, headers);
+    recordatori = desarRecordatori_(rec.recordatori, paciente);
   } catch (e) {
     Logger.log('Error en saveNewImplant: ' + e.message);
     return { ok: false, message: 'Error en desar: ' + e.message };
@@ -491,7 +497,8 @@ function saveNewImplant(formData) {
       email: formData.sendEmail === 'true',
       avisSecretaria: !!paciente.sense_email && formData.avisSecretaria === 'true'
     },
-    avisos: plan.avisos
+    avisos: plan.avisos,
+    recordatori: recordatori
   };
 }
 
@@ -576,7 +583,12 @@ function prepararHoja_(sheet, headers) {
     return !!c && RE_REGLA_PENDENT.test(String((c.getCriteriaValues() || [])[0]));
   };
   const regles = sheet.getConditionalFormatRules().filter(r => !esPropia(r));
-  regles.push(SpreadsheetApp.newConditionalFormatRule()
+  // Delante de la del recordatorio vencido (S6): la primera regla que se cumple manda.
+  const iRecordatori = regles.findIndex(r => {
+    const c = r.getBooleanCondition();
+    return !!c && RE_REGLA_RECORDATORI.test(String((c.getCriteriaValues() || [])[0]));
+  });
+  regles.splice(iRecordatori === -1 ? regles.length : iRecordatori, 0, SpreadsheetApp.newConditionalFormatRule()
       .whenFormulaSatisfied(formula)
       .setBackground(COLOR_PENDENT)
       .setRanges([sheet.getRange(2, 1, nFiles, Math.max(sheet.getMaxColumns(), headers.length))])
@@ -621,6 +633,7 @@ function obrirPanellPendents() {
   exigirUsuariIntern_();
   const html = HtmlService.createTemplateFromFile('PanelPendents');
   html.pacientModelJs = crearPacientModel.toString();
+  html.recordatoriModelJs = crearRecordatoriModel.toString();
   SpreadsheetApp.getUi().showSidebar(html.evaluate().setTitle('Completar i enviar'));
 }
 
@@ -689,7 +702,8 @@ function carregarPanell() {
         sense_email: delPacient.some(x => x.sense_email),
         sense_dni: delPacient.some(x => x.sense_dni),
         n_implants: p.n_implants,
-        ultimEnviament: ultimEnviamentDe_(codi)
+        ultimEnviament: ultimEnviamentDe_(codi),
+        recordatori: recordatoriActiu_(codi)
       },
       files: files,
       marques: marquesCataleg_()
@@ -714,6 +728,8 @@ function desarPanell_(formData, completar) {
     const fd = Object.assign({}, formData, { mode: 'completar' });
     if (completar) fd.implantes = (fd.implantes || []).map(i => Object.assign({}, i, { pendent: false }));
     const plan = PacientModel.planificarDesat(headers, files, fd);
+    const rec = RecordatoriModel.validar(formData && formData.recordatori);
+    plan.errors = plan.errors.concat(rec.errors);
     if (plan.errors.length) return { ok: false, message: plan.errors.join('\n'), errors: plan.errors };
 
     const { idx } = PacientModel.indexarCapcaleres(headers);
@@ -737,7 +753,8 @@ function desarPanell_(formData, completar) {
       plan.filas.forEach(imp => updateCatalog_({ marca: imp.marca, modelo: imp.modelo, conexion: imp.conexion }));
     }
     oblidarLogin_(plan.codi);
-    return { ok: true, codi: plan.codi, filesDesades: plan.files_hoja.length, avisos: plan.avisos };
+    const recordatori = desarRecordatori_(rec.recordatori, plan.paciente);
+    return { ok: true, codi: plan.codi, filesDesades: plan.files_hoja.length, avisos: plan.avisos, recordatori: recordatori };
   } catch (e) {
     Logger.log('Error en desarPanell_: ' + e);
     return { ok: false, message: 'Error en desar: ' + e.message };
@@ -759,6 +776,271 @@ function desarPanell(formData) {
 function completarPanell(formData) {
   exigirUsuariIntern_();
   return desarPanell_(formData, true);
+}
+
+// ==========================================
+//  RECORDATORIS (S6): avisos de seguimiento de la Auxiliar, solo dentro de la hoja
+// ==========================================
+// Pestaña "Recordatoris" (una fila por recordatorio, historial incluido), un aviso al abrir
+// la hoja y una ventana con los Actius. Sin emails ni triggers: es de la Auxiliar.
+
+const HOJA_RECORDATORIS = 'Recordatoris';
+const COLOR_RECORDATORI = '#ede9fe';
+const RE_REGLA_RECORDATORI = /INDIRECT\("'?Recordatoris'?!/;
+
+/** La pestaña "Recordatoris" (la crea con sus cabeceras si `crear`), o null. */
+function fullRecordatoris_(crear) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(HOJA_RECORDATORIS);
+  if (!sheet && crear) {
+    sheet = ss.insertSheet(HOJA_RECORDATORIS);
+    const n = RecordatoriModel.CAPCALERES.length;
+    sheet.getRange(1, 1, 1, n).setValues([RecordatoriModel.CAPCALERES]).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    sheet.getRange(1, 1).setNote("Recordatoris de la Auxiliar. Es posen i es canvien des del panell (🔔 Recordatori). " +
+      "Per veure els actius: " + NOM_MENU + " → 🔔 Recordatoris.");
+  }
+  return sheet;
+}
+
+/** Filas de la pestaña como objetos (con su número de fila en `_fila`). */
+function llegirRecordatoris_(sheet) {
+  if (!sheet || sheet.getLastRow() < 1) return { idx: {}, objectes: [] };
+  const data = sheet.getDataRange().getValues();
+  const idx = RecordatoriModel.indexarCapcaleres(data[0]);
+  const objectes = [];
+  data.slice(1).forEach((f, i) => {
+    const o = RecordatoriModel.filaAObjecte(f, idx);
+    if (String(o.codi_acces).trim()) objectes.push(Object.assign(o, { _fila: i + 2 }));
+  });
+  return { idx: idx, objectes: objectes };
+}
+
+/** Escribe unas claves en una fila de la pestaña, por cabecera (las fechas, como fecha). */
+function escriureRecordatori_(sheet, idx, fila, valors) {
+  Object.keys(valors).forEach(k => {
+    if (idx[k] === undefined) return;
+    const cel = sheet.getRange(fila, idx[k] + 1);
+    let v = valors[k];
+    if (k === 'data') { v = RecordatoriModel.aData(v) || ''; cel.setNumberFormat('dd/mm/yyyy'); }
+    else if (k === 'creat' || k === 'tancat') cel.setNumberFormat('dd/mm/yyyy hh:mm');
+    else cel.setNumberFormat('@');
+    cel.setValue(v);
+  });
+}
+
+function avuiIso_() {
+  return RecordatoriModel.avuiIso(ahoraMs());
+}
+
+/**
+ * Aplica el recordatorio del formulario (sidebar o panel) a un paciente ya guardado.
+ * Se llama dentro del lock del guardado. `nou` es RecordatoriModel.validar(...).recordatori.
+ * @returns {{accio, data?}|null}
+ */
+function desarRecordatori_(nou, pacient) {
+  if (!nou) return null;
+  const sheet = fullRecordatoris_(!!nou.data);
+  if (!sheet) return { accio: 'cap' };
+  const { idx, objectes } = llegirRecordatoris_(sheet);
+  const pla = RecordatoriModel.planificar(objectes, nou, pacient);
+  const ara = new Date(ahoraMs());
+  if (pla.accio === 'crear') {
+    const fila = objectes.length ? Math.max.apply(null, objectes.map(o => o._fila)) + 1 : 2;
+    escriureRecordatori_(sheet, idx, fila, Object.assign({}, pla.objecte, { creat: ara }));
+  } else if (pla.accio === 'actualitzar') {
+    escriureRecordatori_(sheet, idx, objectes[pla.index]._fila, pla.objecte);
+  } else if (pla.accio === 'cancellar') {
+    escriureRecordatori_(sheet, idx, objectes[pla.index]._fila, { estat: RecordatoriModel.CANCELLAT, tancat: ara });
+  }
+  if (pla.accio !== 'cap') prepararColorRecordatoris_();
+  return { accio: pla.accio, data: nou.data };
+}
+
+/** El recordatorio Actiu de un paciente para el sidebar y el panel, o null. */
+function recordatoriActiu_(codi) {
+  try {
+    const r = RecordatoriModel.actiuDe(llegirRecordatoris_(fullRecordatoris_(false)).objectes, codi);
+    return r ? { data: r.data, dataText: RecordatoriModel.format(r.data), motiu: String(r.motiu || ''), origen: String(r.origen || '') } : null;
+  } catch (e) {
+    Logger.log('No es pot llegir el recordatori de ' + codi + ': ' + e);
+    return null;
+  }
+}
+
+/** Cierra (Fet o Cancel·lat) el Actiu de un paciente. @returns {boolean} si había uno */
+function tancarRecordatori_(codi, estat) {
+  const sheet = fullRecordatoris_(false);
+  if (!sheet) return false;
+  const { idx, objectes } = llegirRecordatoris_(sheet);
+  const i = RecordatoriModel.indexActiu(objectes, codi);
+  if (i === -1) return false;
+  escriureRecordatori_(sheet, idx, objectes[i]._fila, { estat: estat || RecordatoriModel.FET, tancat: new Date(ahoraMs()) });
+  prepararColorRecordatoris_();
+  return true;
+}
+
+/**
+ * Al unir fichas: el recordatorio de la que desaparece pasa a la que se queda. Si las dos
+ * tenían uno, se queda el de la ficha que queda y el otro se cancela. Nunca lanza.
+ */
+function moureRecordatori_(codiQueMarxa, codiQueQueda) {
+  try {
+    const sheet = fullRecordatoris_(false);
+    if (!sheet) return;
+    const { idx, objectes } = llegirRecordatoris_(sheet);
+    const i = RecordatoriModel.indexActiu(objectes, codiQueMarxa);
+    if (i === -1) return;
+    if (RecordatoriModel.indexActiu(objectes, codiQueQueda) !== -1) {
+      escriureRecordatori_(sheet, idx, objectes[i]._fila, { estat: RecordatoriModel.CANCELLAT, tancat: new Date(ahoraMs()) });
+    } else {
+      escriureRecordatori_(sheet, idx, objectes[i]._fila, { codi_acces: String(codiQueQueda).trim().toUpperCase() });
+    }
+    prepararColorRecordatoris_();
+  } catch (e) {
+    Logger.log('No es pot moure el recordatori de ' + codiQueMarxa + ': ' + e);
+  }
+}
+
+/**
+ * Tras reenviar el pasaporte: si el recordatorio ya toca (o falta poco), está hecho. Nunca
+ * hace fallar el envío.
+ * @returns {{tancat: boolean, data?: string}|null}
+ */
+function tancarRecordatoriSiToca_(codi, env) {
+  try {
+    if (!env || !(env.emailSent || (env.avisSecretaria && env.avisSecretaria.enviat))) return null;
+    const sheet = fullRecordatoris_(false);
+    if (!sheet) return null;
+    const r = RecordatoriModel.actiuDe(llegirRecordatoris_(sheet).objectes, codi);
+    if (!r) return null;
+    if (!RecordatoriModel.tancaAlReenviar(r, avuiIso_())) return { tancat: false, data: RecordatoriModel.format(r.data) };
+    tancarRecordatori_(codi, RecordatoriModel.FET);
+    return { tancat: true, data: RecordatoriModel.format(r.data) };
+  } catch (e) {
+    Logger.log('No es pot tancar el recordatori de ' + codi + ': ' + e);
+    return null;
+  }
+}
+
+/**
+ * Pacientes con un recordatorio vencido: su fila en lila (formato condicional que cruza
+ * con la pestaña; idempotente). Va detrás de la regla de Pendent: el naranja manda.
+ */
+function prepararColorRecordatoris_() {
+  try {
+    const sheet = hojaPacientes();
+    const headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
+    const { idx } = PacientModel.indexarCapcaleres(headers);
+    const rIdx = llegirRecordatoris_(fullRecordatoris_(false)).idx;
+    const esPropia = r => {
+      const c = r.getBooleanCondition();
+      return !!c && RE_REGLA_RECORDATORI.test(String((c.getCriteriaValues() || [])[0]));
+    };
+    const regles = sheet.getConditionalFormatRules().filter(r => !esPropia(r));
+    if (idx.codi_acces !== undefined && ['codi_acces', 'estat', 'data'].every(k => rIdx[k] !== undefined)) {
+      const col = k => { const l = columnaLletra_(rIdx[k] + 1); return 'INDIRECT("' + HOJA_RECORDATORIS + '!' + l + ':' + l + '")'; };
+      const formula = '=COUNTIFS(' + col('codi_acces') + ',$' + columnaLletra_(idx.codi_acces + 1) + '2,' +
+        col('estat') + ',"' + RecordatoriModel.ACTIU + '",' + col('data') + ',"<="&TODAY())>0';
+      const nFiles = Math.max(sheet.getMaxRows(), 2) - 1;
+      regles.push(SpreadsheetApp.newConditionalFormatRule()
+          .whenFormulaSatisfied(formula)
+          .setBackground(COLOR_RECORDATORI)
+          .setRanges([sheet.getRange(2, 1, nFiles, Math.max(sheet.getMaxColumns(), headers.length))])
+          .build());
+    }
+    sheet.setConditionalFormatRules(regles);
+  } catch (e) {
+    // El color es una ayuda: si Sheets no lo acepta, los recordatorios funcionan igual.
+    Logger.log('No es pot preparar el color dels recordatoris: ' + e);
+  }
+}
+
+/** Ventana "Recordatoris": los Actius, vencidos primero. */
+function llistarRecordatoris() {
+  exigirUsuariIntern_();
+  try {
+    const avui = avuiIso_();
+    const llista = RecordatoriModel.llistaActius(llegirRecordatoris_(fullRecordatoris_(false)).objectes, avui)
+      .map(o => ({
+        codi_acces: String(o.codi_acces).trim().toUpperCase(),
+        cuenta_quartup: String(o.cuenta_quartup || ''),
+        nombre: String(o.nombre || ''),
+        motiu: String(o.motiu || ''),
+        origen: String(o.origen || ''),
+        data: o.data,
+        dataText: o.dataText,
+        dies: o.dies,
+        vencut: o.vencut
+      }));
+    return { ok: true, avui: RecordatoriModel.format(avui), recordatoris: llista };
+  } catch (e) {
+    Logger.log('Error en llistarRecordatoris: ' + e);
+    return { ok: false, message: 'Error intern: ' + e.message };
+  }
+}
+
+/** Ventana "Recordatoris": la ✕. */
+function tancarRecordatori(codi) {
+  exigirUsuariIntern_();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    return { ok: true, tancat: tancarRecordatori_(codi, RecordatoriModel.FET) };
+  } catch (e) {
+    Logger.log('Error en tancarRecordatori: ' + e);
+    return { ok: false, message: 'Error en tancar el recordatori: ' + e.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Menú y sidebar: abre la ventana de los recordatorios (no modal, como la vista prèvia). */
+function obrirRecordatoris() {
+  exigirUsuariIntern_();
+  const html = HtmlService.createTemplateFromFile('Recordatoris').evaluate().setWidth(720).setHeight(520);
+  SpreadsheetApp.getUi().showModelessDialog(html, '🔔 Recordatoris');
+}
+
+/**
+ * Ventana "Recordatoris": "Obrir". Selecciona la primera fila del paciente y abre el panel
+ * "Completar i enviar", que lee la selección (desde ahí se reenvía el pasaporte).
+ */
+function obrirPacientDesdeRecordatori(codi) {
+  exigirUsuariIntern_();
+  try {
+    const sheet = hojaPacientes();
+    const { objetos } = leerPacientes(sheet);
+    const i = objetos.findIndex(o => mismoCodigo(o.codi_acces, codi));
+    if (i === -1) return { ok: false, message: "No hi ha cap implant amb el codi " + codi + " a la pestanya " + SHEET_NAME + ". Potser s'ha unit amb una altra fitxa." };
+    SpreadsheetApp.getActiveSpreadsheet().setActiveRange(sheet.getRange(i + 2, 1));
+    obrirPanellPendents();
+    return { ok: true, fila: i + 2 };
+  } catch (e) {
+    Logger.log('Error en obrirPacientDesdeRecordatori: ' + e);
+    return { ok: false, message: "No s'ha pogut obrir el pacient: " + e.message };
+  }
+}
+
+/**
+ * Al abrir la hoja (desde onOpen): un aviso si hay recordatorios que ya tocan. Solo lee
+ * la hoja activa (vale en el onOpen simple, sin permisos) y nunca lanza.
+ */
+function avisarRecordatorisEnObrir_() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(HOJA_RECORDATORIS);
+    if (!sheet) return 0;
+    const v = RecordatoriModel.vencuts(llegirRecordatoris_(sheet).objectes, avuiIso_());
+    if (!v.length) return 0;
+    const qui = v.slice(0, 3).map(o => String(o.nombre || o.codi_acces).trim()).join(', ') + (v.length > 3 ? '...' : '');
+    ss.toast((v.length === 1 ? 'Tens 1 recordatori per revisar: ' : 'Tens ' + v.length + ' recordatoris per revisar: ') + qui +
+      '. Menú ' + NOM_MENU + ' → 🔔 Recordatoris.', '🔔 Recordatoris', 20);
+    return v.length;
+  } catch (e) {
+    Logger.log('avisarRecordatorisEnObrir_: ' + e);
+    return 0;
+  }
 }
 
 /**

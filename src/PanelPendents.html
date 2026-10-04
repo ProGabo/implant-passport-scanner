@@ -68,6 +68,8 @@
             <div class="ajuda" id="pUltim"></div>
             <!-- Datos que faltan: se pueden completar aquí; los ya guardados no se tocan. -->
             <div id="pFaltes" class="hidden" style="margin-top: 10px;"></div>
+            <!-- 🔔 Recordatori (S6): el mismo bloque que en el sidebar. -->
+            <div id="recordatoriSlot"></div>
         </div>
 
         <div id="files"></div>
@@ -149,7 +151,10 @@
 <script>
     <?!= pacientModelJs ?>
     var PacientModel = crearPacientModel();
+    <?!= recordatoriModelJs ?>
+    var RecordatoriModel = crearRecordatoriModel();
 </script>
+<?!= include_('BlocRecordatori') ?>
 
 <script>
     const estat = document.getElementById('estat');
@@ -161,6 +166,10 @@
     const avisGrup = document.getElementById('avisGrup');
     const avisTambe = document.getElementById('avisTambe');
     let dades = null;   // lo que devuelve carregarPanell
+    // 🔔 Recordatori (S6). Referencia: la fecha de colocación de la primera fila del panel.
+    const blocRecordatori = BlocRecordatori.muntar(document.getElementById('recordatoriSlot'), {
+        dataColocacio: () => (dades && dades.files[0] && dades.files[0].fecha_colocacion) || ''
+    });
     let marques = [];
 
     function escapeHtml(s) {
@@ -240,6 +249,7 @@
         document.getElementById('pEmail').textContent = senseEmail ? 'Sense email' : p.email;
         document.getElementById('pUltim').textContent = textUltimEnviament(p.ultimEnviament);
         pintarFaltes(p);
+        blocRecordatori.carregar(p.recordatori);
 
         // Los pendientes del paciente y la fila seleccionada (aunque no lo esté: puede
         // haberse completado a mano o faltarle algo sin estar marcada).
@@ -409,7 +419,9 @@
             });
             implantes.push(imp);
         }
-        const formData = { mode: 'completar', codi_acces: dades.pacient.codi_acces, implantes: implantes };
+        const errorRecordatori = blocRecordatori.validar();
+        if (errorRecordatori) return { error: errorRecordatori };
+        const formData = { mode: 'completar', codi_acces: dades.pacient.codi_acces, implantes: implantes, recordatori: blocRecordatori.llegir() };
         document.querySelectorAll('[data-pacient]').forEach(inp => { if (inp.value.trim()) formData[inp.dataset.pacient] = inp.value.trim(); });
         return { formData: formData };
     }
@@ -503,7 +515,7 @@
                 Swal.fire({ icon: 'error', title: "No s'ha pogut desar", html: `<ul style="text-align:left;">${errorsHtml(res)}</ul>` });
                 return;
             }
-            Swal.fire({ icon: 'success', title: 'Desat', text: 'Els canvis són a la fulla. El que segueixi marcat com a pendent continua en taronja.', confirmButtonColor: '#0ea5e9' })
+            Swal.fire({ icon: 'success', title: 'Desat', html: ['Els canvis són a la fulla. El que segueixi marcat com a pendent continua en taronja.'].concat(textRecordatori(res)).map(l => `<p style="text-align:left;">${l}</p>`).join(''), confirmButtonColor: '#0ea5e9' })
                 .then(carregar);
         });
     });

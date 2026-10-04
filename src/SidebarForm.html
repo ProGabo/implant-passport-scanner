@@ -253,6 +253,8 @@
                     <label for="sense_dni">Sense DNI (no el tenim)</label>
                 </div>
             </div>
+            <!-- 🔔 Recordatori (S6): plegado, a nivel de paciente. -->
+            <div id="recordatoriSlot"></div>
         </div>
 
         <div class="card" style="background: #f0f9ff; border: 2px dashed #7dd3fc; text-align: center;">
@@ -401,7 +403,10 @@
 <script>
     <?!= pacientModelJs ?>
     var PacientModel = crearPacientModel();
+    <?!= recordatoriModelJs ?>
+    var RecordatoriModel = crearRecordatoriModel();
 </script>
+<?!= include_('BlocRecordatori') ?>
 
 <script>
     // Variables globales
@@ -908,6 +913,10 @@
     const TXT_GUARDAR = '💾 Desar-ho tot';
     const CAMPOS_PACIENTE = [cuentaInput, nombreInput, emailInput, dniInput];
     let pacienteActual = null; // datos de la ficha encontrada (null si es nueva)
+    // 🔔 Recordatori (S6). La fecha de colocación de referencia: la del primer implante.
+    const blocRecordatori = BlocRecordatori.muntar(document.getElementById('recordatoriSlot'), {
+        dataColocacio: () => { const i = implantContainer.querySelector('input[name="fecha_colocacion"]'); return i ? i.value : ''; }
+    });
     let dadesPortades = null;  // lo escrito antes de "Obrir la fitxa", para no perderlo
 
     function buscarPaciente(portades) {
@@ -961,6 +970,7 @@
         delete sendEmailCheckbox.dataset.manual;
         mostrarUltimEnviament(res.found ? res.data : null);
 
+        blocRecordatori.carregar(res.found ? res.data.recordatori : null);
         if (res.found) {
             const d = res.data;
             pacienteActual = d;
@@ -1337,7 +1347,10 @@
             return { error: { titol: 'Falten dades', text: 'Omple almenys un implant complet.', icon: 'error' } };
         }
 
-        return { formData: Object.assign({}, paciente, { implantes: implantsArray }), avisos: avisos };
+        const errorRecordatori = blocRecordatori.validar();
+        if (errorRecordatori) return { error: { titol: 'Revisa el recordatori', text: errorRecordatori } };
+
+        return { formData: Object.assign({}, paciente, { implantes: implantsArray, recordatori: blocRecordatori.llegir() }), avisos: avisos };
     }
 
     function mostrarErrorFormulari(err) {
@@ -1412,6 +1425,11 @@
         } else if (senseEmailCheckbox.checked) {
             msg += `<p style="color: #b45309; margin-top: 10px;">ℹ️ El pacient no té email: fes-li arribar el codi d'accés d'una altra manera.</p>`;
         }
+        if (res.recordatori && (res.recordatori.accio === 'crear' || res.recordatori.accio === 'actualitzar')) {
+            msg += `<p style="color: #6d28d9; margin-top: 10px;">🔔 Recordatori per al <b>${escapeHtml(RecordatoriModel.format(res.recordatori.data))}</b>: aquell dia t'avisarà en obrir la fulla.</p>`;
+        } else if (res.recordatori && res.recordatori.accio === 'cancellar') {
+            msg += `<p style="color: #64748b; margin-top: 10px;">🔔 Recordatori tret.</p>`;
+        }
         if (pendentsDesats) {
             msg += `<p style="color: #c2410c; margin-top: 10px;">⏳ ${pendentsDesats} implant(s) queden pendents: surten en taronja a la fulla i a la pestanya «Pendents». Quan els completis, selecciona la fila i prem <b>✏️ Completar i enviar</b>.</p>`;
         }
@@ -1437,6 +1455,7 @@
         cuentaAviso.classList.add('hidden');
         ocultarConflicte();
         pacienteActual = null;
+        blocRecordatori.reset();
         pacienteCodigoInput.value = 'GENERAR';
         patientCodeDisplay.textContent = '';
         patientSection.classList.add('hidden');

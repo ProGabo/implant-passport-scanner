@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+    <base target="_top">
+    <title>Recordatoris</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', Arial, sans-serif; margin: 0; padding: 14px; background: #faf5ff; color: #0f172a; font-size: 13px; }
+        .hidden { display: none !important; }
+        .cap { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+        .cap h3 { margin: 0; font-size: 15px; color: #6d28d9; }
+        .cap span { color: #64748b; font-size: 12px; }
+        .estat { padding: 10px; border-radius: 6px; background: #ede9fe; color: #5b21b6; }
+        .estat.error { background: #fee2e2; color: #991b1b; }
+        .rec { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+               background: #fff; border: 1px solid #e9d5ff; border-left: 4px solid #a78bfa; border-radius: 8px; padding: 9px 10px; margin-bottom: 8px; }
+        .rec.vencut { border-left-color: #dc2626; background: #fff7f7; }
+        .data { font-weight: 700; }
+        .rec.vencut .data { color: #b91c1c; }
+        .quan { font-size: 11px; color: #64748b; }
+        .rec.vencut .quan { color: #b91c1c; font-weight: 600; }
+        .nom { font-weight: 600; }
+        .sub { font-size: 12px; color: #64748b; overflow-wrap: anywhere; }
+        .motiu { font-size: 12px; color: #334155; margin-top: 2px; overflow-wrap: anywhere; }
+        .botons { display: flex; gap: 6px; }
+        button { font-family: inherit; font-weight: 600; font-size: 12px; border-radius: 6px; cursor: pointer; padding: 7px 10px; }
+        button:disabled { opacity: .5; cursor: wait; }
+        .obrir { background: #6d28d9; color: #fff; border: none; }
+        .tancar { background: #fff; color: #64748b; border: 1px solid #cbd5e1; }
+        .peu { font-size: 11px; color: #64748b; margin-top: 12px; }
+        @media (max-width: 480px) { .rec { grid-template-columns: minmax(0, 1fr); } }
+    </style>
+</head>
+<body>
+    <div class="cap"><h3>🔔 Recordatoris actius</h3><span id="avui"></span></div>
+    <div id="estat" class="estat">Carregant...</div>
+    <div id="llista"></div>
+    <div class="peu">
+        <b>Obrir</b> obre el pacient a «Completar i enviar»: si hi reenvies el pasaport, el recordatori es tanca sol.
+        La <b>✕</b> el dona per fet. Per canviar-ne la data, obre el pacient i canvia-la al bloc 🔔.
+    </div>
+
+<script>
+    const estat = document.getElementById('estat');
+    const llista = document.getElementById('llista');
+
+    function escapeHtml(s) {
+        return String(s === undefined || s === null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function mostrarEstat(text, error) {
+        estat.textContent = text || '';
+        estat.className = 'estat' + (error ? ' error' : '');
+        estat.classList.toggle('hidden', !text);
+    }
+
+    function servidor(fn, args, ok) {
+        google.script.run
+            .withSuccessHandler(ok)
+            .withFailureHandler(err => mostrarEstat((err && err.message) || String(err), true))[fn](...args);
+    }
+
+    function quan(r) {
+        if (r.dies === 0) return 'avui';
+        if (r.dies < 0) return r.dies === -1 ? 'ahir' : `fa ${-r.dies} dies`;
+        return r.dies === 1 ? 'demà' : `d'aquí ${r.dies} dies`;
+    }
+
+    function pintar(res) {
+        if (!res || !res.ok) { mostrarEstat((res && res.message) || "No s'han pogut carregar.", true); return; }
+        document.getElementById('avui').textContent = 'Avui: ' + res.avui;
+        const rs = res.recordatoris;
+        mostrarEstat(rs.length ? '' : 'No hi ha cap recordatori actiu.');
+        llista.innerHTML = rs.map(r => `
+            <div class="rec ${r.vencut ? 'vencut' : ''}" data-codi="${escapeHtml(r.codi_acces)}">
+                <div><div class="data">${escapeHtml(r.dataText)}</div><div class="quan">${escapeHtml(quan(r))}</div></div>
+                <div>
+                    <div class="nom">${escapeHtml(r.nombre || '(sense nom)')}</div>
+                    <div class="sub">${escapeHtml(r.codi_acces)}${r.cuenta_quartup ? ' · Cuenta ' + escapeHtml(r.cuenta_quartup) : ''}</div>
+                    <div class="motiu">${escapeHtml(r.motiu)}</div>
+                </div>
+                <div class="botons">
+                    <button type="button" class="obrir">Obrir</button>
+                    <button type="button" class="tancar" title="Fet: treure'l de la llista">✕</button>
+                </div>
+            </div>`).join('');
+        llista.querySelectorAll('.rec').forEach(card => {
+            const codi = card.dataset.codi;
+            card.querySelector('.obrir').addEventListener('click', e => {
+                e.target.disabled = true;
+                servidor('obrirPacientDesdeRecordatori', [codi], res => {
+                    e.target.disabled = false;
+                    if (!res.ok) mostrarEstat(res.message, true);
+                });
+            });
+            card.querySelector('.tancar').addEventListener('click', e => {
+                e.target.disabled = true;
+                servidor('tancarRecordatori', [codi], res => {
+                    if (!res.ok) { e.target.disabled = false; mostrarEstat(res.message, true); return; }
+                    carregar();
+                });
+            });
+        });
+    }
+
+    function carregar() { servidor('llistarRecordatoris', [], pintar); }
+    document.addEventListener('DOMContentLoaded', carregar);
+</script>
+</body>
+</html>
