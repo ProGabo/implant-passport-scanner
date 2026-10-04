@@ -100,6 +100,18 @@ function crearPacientModel() {
     return v === true || String(v).trim().toUpperCase() === 'TRUE' || String(v).trim().toUpperCase() === 'VERDADERO';
   }
 
+  /**
+   * Cuántas filas de datos (sin cabecera) hay hasta la última con algo escrito. Una casilla
+   * vacía vale FALSE, y "Pendent" tiene casillas hasta el final de la hoja: getLastRow()
+   * daría la última fila de la hoja y lo nuevo se guardaría allí abajo.
+   */
+  function filesAmbDades(files) {
+    for (let i = files.length - 1; i >= 0; i--) {
+      if (files[i].some(v => v !== '' && v !== null && v !== undefined && v !== false)) return i + 1;
+    }
+    return 0;
+  }
+
   // --- Identificadores ---
 
   // DNI: 8 dígitos + letra. NIE: X/Y/Z + 7 dígitos + letra. Se toleran espacios y guiones.
@@ -1095,6 +1107,7 @@ function crearPacientModel() {
     filaAObjecte,
     objecteAFila,
     esCert,
+    filesAmbDades,
     esDni,
     esEmail,
     netejarDocument,

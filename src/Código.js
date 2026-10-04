@@ -107,7 +107,9 @@ function leerPacientes(sheet) {
   const data = sheet.getDataRange().getValues();
   const headers = data.length ? data[0] : [];
   const { idx } = PacientModel.indexarCapcaleres(headers);
+  // Sin las filas vacías del final (con casillas FALSE hasta abajo de la hoja).
   const files = data.slice(1);
+  files.length = PacientModel.filesAmbDades(files);
   return { headers, idx, files, objetos: files.map(f => PacientModel.filaAObjecte(f, idx)) };
 }
 
@@ -361,7 +363,8 @@ function saveNewImplant(formData) {
     }
 
     filas = plan.filas.map(o => PacientModel.objecteAFila(o, headers));
-    const primera = sheet.getLastRow() + 1;
+    // Justo después de la última fila con datos (no getLastRow(): ver filesAmbDades).
+    const primera = files.length + 2;
     ponerFormatoTexto(sheet, headers, primera, filas.length);
     sheet.getRange(primera, 1, filas.length, headers.length).setValues(filas);
     ponerCasillas(sheet, headers, primera, filas.length);

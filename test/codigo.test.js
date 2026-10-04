@@ -94,6 +94,31 @@ test('saveNewImplant da de alta un paciente nuevo con las columnas en su sitio',
   assert.equal(anna.lote, 'L9');
 });
 
+test('saveNewImplant guarda justo después de la última fila con datos, aunque haya casillas vacías hasta abajo', () => {
+  const ss = libroAntiguo();
+  const { ctx } = cargarCodigo(ss);
+  ctx.migrarDadesS2();
+  const sh = ss.getSheetByName('Pacientes');
+  const ultima = sh.getLastRow();
+  // Como "Pendent": casilla vacía (FALSE) hasta el final de la hoja.
+  for (let r = ultima + 1; r <= 400; r++) sh.getRange(r, 1).setValue(false);
+
+  const res = ctx.saveNewImplant({
+    codi_acces: 'GENERAR', cuenta_quartup: '43000501', nombre: 'Pau Vila', email: 'pau@x.cat',
+    sense_email: false, dni: '', sense_dni: true, sendEmail: 'false', implantes: [IMPLANT]
+  });
+  assert.equal(res.ok, true, res.message);
+  const files = sh.rows();
+  const fila = files.findIndex(f => f.includes('Pau Vila')) + 1;
+  assert.equal(fila, ultima + 1, 'en la siguiente fila libre, no al final de la hoja');
+});
+
+test('filesAmbDades: las casillas FALSE y las celdas vacías del final no cuentan', () => {
+  const PM = require('../src/PacientModel.js');
+  assert.equal(PM.filesAmbDades([['A', false], ['', true], [false, ''], ['', false]]), 2);
+  assert.equal(PM.filesAmbDades([[false, ''], ['', null]]), 0);
+});
+
 test('saveNewImplant bloquea una Cuenta repetida y un DNI en el campo Cuenta', () => {
   const ss = libroAntiguo();
   const { ctx } = cargarCodigo(ss);
