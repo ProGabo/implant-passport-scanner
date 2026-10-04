@@ -43,7 +43,8 @@ function onOpen() {
           .addItem('🩺 Comprovar-ho tot', 'comprobarTodo'))
       .addToUi();
   // Sin menú a propósito (solo para quien mantiene la herramienta, desde el editor de
-  // Apps Script): arreglarCodigosUndefined, eliminarDuplicados, provarAvisSecretaria.
+  // Apps Script): arreglarCodigosUndefined, eliminarDuplicados, provarAvisSecretaria,
+  // retallarFilesBuides.
 }
 
 /**
@@ -103,6 +104,76 @@ function leerPacientes(sheet) {
   const files = data.slice(1);
   files.length = PacientModel.filesAmbDades(files);
   return { headers, idx, files, objetos: files.map(f => PacientModel.filaAObjecte(f, idx)) };
+}
+
+/**
+ * Lee solo lo necesario de un paciente: la columna del Codi d'accés y después únicamente
+ * sus filas (por tramos seguidos), en vez de la hoja entera. Acepta el código como lo
+ * escribe el paciente (O/0, I/1, minúsculas: PortalModel.resoldreCodi).
+ * @returns {{codi: string, ambigu: boolean, objetos: object[]}} codi '' si no existe
+ */
+function llegirPacientPerCodi_(code) {
+  const sheet = hojaPacientes();
+  const nCols = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, nCols).getValues()[0];
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  if (idx.codi_acces === undefined) throw new Error("No trobo la columna \"Codi d'accés\".");
+  const nFiles = sheet.getLastRow() - 1;
+  if (nFiles < 1) return { codi: '', ambigu: false, objetos: [] };
+
+  const codis = sheet.getRange(2, idx.codi_acces + 1, nFiles, 1).getValues().map(f => f[0]);
+  const r = PortalModel.resoldreCodi(code, codis);
+  if (!r.codi) return { codi: '', ambigu: r.ambigu, objetos: [] };
+
+  const posicions = [];
+  codis.forEach((c, i) => { if (mismoCodigo(c, r.codi)) posicions.push(i); });
+  const objetos = [];
+  // Las filas de un paciente suelen ir seguidas, pero la 2ª visita las añade al final.
+  for (let a = 0; a < posicions.length;) {
+    let b = a;
+    while (b + 1 < posicions.length && posicions[b + 1] === posicions[b] + 1) b++;
+    sheet.getRange(posicions[a] + 2, 1, b - a + 1, nCols).getValues()
+        .forEach(f => objetos.push(PacientModel.filaAObjecte(f, idx)));
+    a = b + 1;
+  }
+  return { codi: String(r.codi).trim().toUpperCase(), ambigu: false, objetos };
+}
+
+// Caché del login (60 s), solo para que el PDF que el portal pide justo después no vuelva a
+// leer la hoja. Se borra al guardar o completar ese paciente.
+const SEGONS_CACHE_LOGIN = 60;
+
+function clauLogin_(codi) {
+  return 'LOGIN_' + PortalModel.netejarCodi(codi);
+}
+
+function oblidarLogin_(codi) {
+  try {
+    CacheService.getScriptCache().remove(clauLogin_(codi));
+  } catch (e) {
+    Logger.log('No es pot esborrar la memòria cau del login: ' + e);
+  }
+}
+
+// Filas vacías que se dejan por debajo de los datos, con la casilla "Pendent" puesta, para
+// que la Auxiliar pueda escribir a mano. No más: cada casilla cuenta como fila para Sheets
+// (getLastRow, getDataRange) y leer miles de filas vacías hacía lento el portal.
+const MARGE_FILES = 200;
+
+/**
+ * Deja MARGE_FILES filas por debajo de las nDades filas de datos: las añade si faltan y les
+ * pone la casilla "Pendent". Devuelve hasta qué fila (sin cabecera) llega el margen.
+ */
+function assegurarMarge_(sheet, headers, nDades) {
+  const n = nDades + MARGE_FILES;
+  const falten = n + 1 - sheet.getMaxRows();
+  if (falten > 0) sheet.insertRowsAfter(sheet.getMaxRows(), falten);
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  if (idx.pendent !== undefined) {
+    sheet.getRange(nDades + 2, idx.pendent + 1, MARGE_FILES, 1)
+        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+  }
+  return n;
 }
 
 function mismoCodigo(a, b) {
@@ -262,6 +333,8 @@ function fusionarPacients(codiQueQueda, codiQueMarxa) {
     const fusio = PacientModel.planificarFusio(headers, files, codiQueQueda, codiQueMarxa);
     if (fusio.errors.length) return { ok: false, message: fusio.errors.join('\n'), errors: fusio.errors };
     escribirColumnasPaciente(sheet, headers, fusio.files);
+    oblidarLogin_(codiQueQueda);
+    oblidarLogin_(codiQueMarxa);
     return { ok: true, pacient: fusio.pacient, filesMogudes: fusio.filesMogudes, avisos: fusio.avisos };
   } catch (e) {
     Logger.log('Error en fusionarPacients: ' + e);
@@ -302,16 +375,14 @@ function corregirCuenta(codi, novaCuenta) {
  */
 function getPatientDataVerbose_(code) {
   try {
-    const { objetos } = leerPacientes(hojaPacientes());
-    const r = PortalModel.resoldreCodi(code, objetos.map(o => o.codi_acces));
+    const r = llegirPacientPerCodi_(code);
     if (r.ambigu) {
       Logger.log('Codi ambigu al portal: ' + code);
       return { ok: true, found: false, ambigu: true, message: 'No podemos identificar este código. Por favor, contacte con la clínica.' };
     }
     if (!r.codi) return { ok: true, found: false, message: 'No se encontraron implantes para este código.' };
 
-    const implantes = implantsPerAlPacient_(objetos.filter(o => mismoCodigo(o.codi_acces, r.codi)));
-    return { ok: true, found: true, codi_acces: String(r.codi).trim().toUpperCase(), implantes: implantes };
+    return { ok: true, found: true, codi_acces: r.codi, implantes: implantsPerAlPacient_(r.objetos) };
 
   } catch (err) {
     Logger.log('ERROR en getPatientDataVerbose_: ' + err);
@@ -351,12 +422,14 @@ function saveNewImplant(formData) {
       paciente.codi_acces = generarCodigoUnico(objetos.map(o => o.codi_acces));
       plan.filas.forEach(f => { f.codi_acces = paciente.codi_acces; });
     } else {
-      completarDatosPaciente(sheet, headers, paciente);
+      completarDatosPaciente(sheet, headers, paciente, files.length);
     }
 
     filas = plan.filas.map(o => PacientModel.objecteAFila(o, headers));
     // Justo después de la última fila con datos (no getLastRow(): ver filesAmbDades).
+    // Antes, el margen: si la hoja se ha quedado corta, se añaden filas.
     const primera = files.length + 2;
+    assegurarMarge_(sheet, headers, files.length + filas.length);
     ponerFormatoTexto(sheet, headers, primera, filas.length);
     sheet.getRange(primera, 1, filas.length, headers.length).setValues(filas);
     ponerCasillas(sheet, headers, primera, filas.length);
@@ -373,19 +446,18 @@ function saveNewImplant(formData) {
     lock.releaseLock();
   }
 
-  // Los envíos van fuera del lock: un email lento no debe bloquear otros guardados.
-  // Sin email, la Secretària hace llegar el codi (casilla marcada por defecto en el panel).
-  const env = enviarPasaport_(paciente.codi_acces, {
-    email: formData.sendEmail === 'true',
-    avisSecretaria: paciente.sense_email && formData.avisSecretaria === 'true'
-  });
+  oblidarLogin_(paciente.codi_acces);
+  // Guardar no envía: el panel lanza enseguida enviarPasaport(newCode, enviar) en otra
+  // llamada, para que "Desat" salga sin esperar al email. Sin email, la Secretària hace
+  // llegar el codi (casilla marcada por defecto en el panel).
   return {
     ok: true,
     newCode: paciente.codi_acces,
     implantsCount: filas.length,
-    emailSent: env.emailSent,
-    emailError: env.emailError,
-    avisSecretaria: env.avisSecretaria,
+    enviar: {
+      email: formData.sendEmail === 'true',
+      avisSecretaria: !!paciente.sense_email && formData.avisSecretaria === 'true'
+    },
     avisos: plan.avisos
   };
 }
@@ -395,11 +467,10 @@ function saveNewImplant(formData) {
  * vacíos (p. ej. la Cuenta Quartup de un paciente antiguo dado de alta con el DNI).
  * Nunca sobrescribe un dato ya guardado; editar datos existentes es cosa de S3.
  */
-function completarDatosPaciente(sheet, headers, paciente) {
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return;
+function completarDatosPaciente(sheet, headers, paciente, nFiles) {
+  if (nFiles < 1) return;
   const { idx } = PacientModel.indexarCapcaleres(headers);
-  const rango = sheet.getRange(2, 1, lastRow - 1, headers.length);
+  const rango = sheet.getRange(2, 1, nFiles, headers.length);
   const filas = rango.getValues();
   const campos = ['cuenta_quartup', 'email', 'sense_email', 'dni', 'sense_dni'];
   let cambios = false;
@@ -451,17 +522,17 @@ function columnaLletra_(n) {
 
 /**
  * Deja la hoja lista para los pendientes (idempotente; las columnas se buscan por cabecera,
- * así que si se mueven basta con volver a llamarla): casillas en "Pendent", fila en naranja
- * mientras está marcada (también si se edita a mano), desplegable de aviso en "Pilar" y la
- * pestaña "Pendents".
+ * así que si se mueven basta con volver a llamarla): fila en naranja mientras "Pendent" está
+ * marcada (también si se edita a mano), "Què falta" como texto, desplegable de aviso en
+ * "Pilar" y la pestaña "Pendents". Las casillas las pone assegurarMarge_.
  */
 function prepararHoja_(sheet, headers) {
   const { idx } = PacientModel.indexarCapcaleres(headers);
   if (idx.pendent === undefined) return;
+  // El color, el formato y el desplegable no escriben valores: pueden llegar al final de la
+  // hoja. La casilla "Pendent" sí (FALSE), y por eso solo llega al margen (assegurarMarge_).
   const nFiles = Math.max(sheet.getMaxRows(), 2) - 1;
 
-  sheet.getRange(2, idx.pendent + 1, nFiles, 1)
-      .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
   // "Què falta" como texto: "+PC, falta el pilar" no debe convertirse en fórmula.
   if (idx.que_falta !== undefined) sheet.getRange(2, idx.que_falta + 1, nFiles, 1).setNumberFormat('@');
 
@@ -628,10 +699,11 @@ function desarPanell_(formData, completar) {
       });
       ponerCasillas(sheet, headers, n, 1);
     });
-    completarDatosPaciente(sheet, headers, plan.paciente);
+    completarDatosPaciente(sheet, headers, plan.paciente, files.length);
     if (['marca', 'modelo', 'conexion'].some(k => plan.claus_tocades.indexOf(k) !== -1)) {
       plan.filas.forEach(imp => updateCatalog_({ marca: imp.marca, modelo: imp.modelo, conexion: imp.conexion }));
     }
+    oblidarLogin_(plan.codi);
     return { ok: true, codi: plan.codi, filesDesades: plan.files_hoja.length, avisos: plan.avisos };
   } catch (e) {
     Logger.log('Error en desarPanell_: ' + e);
@@ -648,30 +720,36 @@ function desarPanell(formData) {
 }
 
 /**
- * Panel: "Completar i enviar". Guarda, desmarca Pendent y envía: con email, el email del
- * pasaporte (y el avís si se pide); sin email, el avís a la Secretària.
+ * Panel: "Completar i enviar". Guarda y desmarca Pendent; el panel envía después con
+ * enviarPasaport(codi, {email: true, avisSiSenseEmail: true, avisSecretaria?}).
  */
-function completarIEnviarPanell(formData, opcions) {
+function completarPanell(formData) {
   exigirUsuariIntern_();
-  const r = desarPanell_(formData, true);
-  if (!r.ok) return r;
-  return Object.assign(r, enviarPasaport_(r.codi, opcionsEnviament_(opcions)));
+  return desarPanell_(formData, true);
 }
 
-/** Panel: "Enviar el pasaport" sin cambiar nada (la fila ya se completó a mano). */
-function enviarPasaportPanell(codi, opcions) {
+/**
+ * Envía el pasaporte de un paciente ya guardado. Es la segunda llamada del sidebar y del
+ * panel, justo después de guardar: así guardar responde enseguida y el envío (que puede
+ * tardar o fallar) se ve aparte, con "Tornar a enviar" si falla.
+ * @param {string} codi Codi d'accés
+ * @param {{email?: boolean, avisSecretaria?: boolean, avisSiSenseEmail?: boolean,
+ *   noTancarRecordatori?: boolean}} opcions ver enviarPasaport_
+ */
+function enviarPasaport(codi, opcions) {
   exigirUsuariIntern_();
+  const o = opcions || {};
   try {
-    return Object.assign({ ok: true, codi: String(codi || '').trim().toUpperCase() },
-      enviarPasaport_(codi, opcionsEnviament_(opcions)));
+    const env = enviarPasaport_(codi, { email: !!o.email, avisSecretaria: !!o.avisSecretaria, avisSiSenseEmail: !!o.avisSiSenseEmail });
+    return Object.assign({ ok: true, codi: String(codi || '').trim().toUpperCase() }, env, {
+      // Recordatorios (S6): reenviar el pasaporte cierra el que ya toca.
+      recordatoriTancat: (typeof tancarRecordatoriSiToca_ === 'function' && !o.noTancarRecordatori)
+        ? tancarRecordatoriSiToca_(codi, env) : null
+    });
   } catch (e) {
-    Logger.log('Error en enviarPasaportPanell: ' + e);
+    Logger.log('Error en enviarPasaport: ' + e);
     return { ok: false, message: 'Error en enviar: ' + e.message };
   }
-}
-
-function opcionsEnviament_(opcions) {
-  return { email: true, avisSecretaria: !!(opcions && opcions.avisSecretaria), avisSiSenseEmail: true };
 }
 
 // ==========================================
@@ -829,9 +907,8 @@ function enviarAvisSecretaria_(paciente, destiProva) {
 function enviarPasaport_(codi, opcions) {
   const o = opcions || {};
   const res = { emailSent: false, emailError: null, emailDesti: '', avisSecretaria: null };
-  if (!o.email && !o.avisSecretaria) return res;
-  const { objetos } = leerPacientes(hojaPacientes());
-  const p = PacientModel.pacientsUnics(objetos.filter(x => mismoCodigo(x.codi_acces, codi)))[0];
+  if (!o.email && !o.avisSecretaria && !o.avisSiSenseEmail) return res;
+  const p = PacientModel.pacientsUnics(llegirPacientPerCodi_(codi).objetos)[0];
   if (!p) {
     res.emailError = "No trobo el pacient " + codi + '.';
     return res;
@@ -1126,7 +1203,13 @@ function initiateLogin(patientCode) {
       const r = contarIntentoFallido_();
       return { ok: false, message: r.pausat ? MENSAJE_PAUSA : 'Código no encontrado. Revise que esté bien escrito (son 6 caracteres).' };
     }
-    return { ok: true, codi_acces: datos.codi_acces, implantes: datos.implantes };
+    const res = { ok: true, codi_acces: datos.codi_acces, implantes: datos.implantes };
+    try {
+      CacheService.getScriptCache().put(clauLogin_(patientCode), JSON.stringify(res), SEGONS_CACHE_LOGIN);
+    } catch (e) {
+      Logger.log('No es pot desar el login a la memòria cau: ' + e);
+    }
+    return res;
 
   } catch (e) {
     Logger.log("Error Login: " + e);
@@ -1204,7 +1287,7 @@ function comprobarTodo() {
   try {
     const hoja = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SHEET_NAME);
     lineas.push(hoja
-      ? "✅ Base de dades: OK (" + Math.max(hoja.getLastRow() - 1, 0) + " files)"
+      ? "✅ Base de dades: OK (" + leerPacientes(hoja).files.filter(f => !PacientModel.filaBuida(f)).length + " implants)"
       : "❌ Base de dades: no existeix la pestanya '" + SHEET_NAME + "'. Avisa en Gabriel.");
   } catch (e) {
     lineas.push("❌ Base de dades: no es pot llegir (" + e.message + ")");
@@ -1373,6 +1456,8 @@ function arreglarCodigosUndefined() {
     
     // Recorrer las filas y arreglar
     files.forEach((f, indexFila) => {
+      // Una fila vaciada a mano es un implante borrado, no un paciente sin código.
+      if (PacientModel.filaBuida(f)) return;
       const o = objetos[indexFila];
       const codiActual = String(o.codi_acces || '').trim().toUpperCase();
       
@@ -1432,14 +1517,62 @@ function arreglarCodigosUndefined() {
  */
 function eliminarDuplicados() {
   exigirUsuariIntern_();
-  const sheet = hojaPacientes();
-  const range = sheet.getDataRange();
-  const filasAntes = range.getNumRows();
-
-  range.removeDuplicates();
-
-  const eliminadas = filasAntes - sheet.getDataRange().getNumRows();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  let eliminadas = 0;
+  try {
+    const sheet = hojaPacientes();
+    const { files } = leerPacientes(sheet);
+    // Las filas vaciadas a mano no son duplicados: se quedan donde están.
+    const vistas = new Set();
+    const repetides = [];
+    files.forEach((f, i) => {
+      if (PacientModel.filaBuida(f)) return;
+      const clau = JSON.stringify(f.map(v => (v instanceof Date ? v.getTime() : v)));
+      if (vistas.has(clau)) repetides.push(i + 2); else vistas.add(clau);
+    });
+    // De abajo arriba, para que los números de fila que quedan por borrar no cambien.
+    repetides.reverse().forEach(n => sheet.deleteRow(n));
+    eliminadas = repetides.length;
+  } finally {
+    lock.releaseLock();
+  }
   SpreadsheetApp.getUi().alert('Neteja feta', `S'han eliminat ${eliminadas} files duplicades.`, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Una sola vez (desde el editor): borra las filas vacías que sobran por debajo del margen.
+ * Antes, la casilla "Pendent" llegaba hasta el final de la hoja (miles de filas), y Sheets
+ * las cuenta todas al leer. Solo borra si de verdad están vacías (o con casillas sin marcar).
+ */
+function retallarFilesBuides() {
+  exigirUsuariIntern_();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  let missatge;
+  try {
+    const sheet = hojaPacientes();
+    const { headers, files } = leerPacientes(sheet);
+    const finsA = files.length + 1 + MARGE_FILES; // última fila que se queda
+    const maxFiles = sheet.getMaxRows();
+    if (maxFiles <= finsA) {
+      missatge = `No hi ha res a retallar: ${files.length} files amb dades i ${maxFiles - files.length - 1} de marge.`;
+    } else {
+      const sobrants = sheet.getRange(finsA + 1, 1, maxFiles - finsA, Math.max(sheet.getLastColumn(), 1)).getValues();
+      const plena = sobrants.findIndex(f => !PacientModel.filaBuida(f));
+      if (plena !== -1) {
+        missatge = `No he retallat res: la fila ${finsA + 1 + plena} té dades. Revisa-la abans.`;
+      } else {
+        sheet.deleteRows(finsA + 1, maxFiles - finsA);
+        assegurarMarge_(sheet, headers, files.length);
+        missatge = `Fet: ${maxFiles - finsA} files buides esborrades. Queden ${files.length} files amb dades i ${MARGE_FILES} de marge.`;
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  SpreadsheetApp.getUi().alert('Retallar files buides', missatge, SpreadsheetApp.getUi().ButtonSet.OK);
+  return missatge;
 }
 
 /** Codi d'accés, Cuenta y DNI se escriben como texto (sin conversión a número). */
@@ -1567,7 +1700,16 @@ function pdfVistaPreviaPasaport(formData) {
  * protecciones que la entrada (límite de intentos, lista blanca): pasa por initiateLogin.
  */
 function pdfPortal_(code) {
-  const r = initiateLogin(code);
+  // El portal pide el PDF justo después de entrar: el login de hace un momento sirve.
+  let r = null;
+  try {
+    const cache = CacheService.getScriptCache();
+    const desat = PortalModel.estaPausat(cache) ? null : cache.get(clauLogin_(code));
+    if (desat) r = JSON.parse(desat);
+  } catch (e) {
+    Logger.log('Memòria cau del login il·legible: ' + e);
+  }
+  if (!r) r = initiateLogin(code);
   if (!r.ok) return r;
   const b = pdfPasaport_(r.implantes, r.codi_acces);
   return { ok: true, nom: b.getName(), base64: Utilities.base64Encode(b.getBytes()) };

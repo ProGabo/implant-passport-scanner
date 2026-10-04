@@ -67,6 +67,7 @@ class FakeSheet {
     this.conditionalRules = [];
     this.sheetId = ++FakeSheet.ids;
     this.maxCols = 26;
+    this.maxRows = 1000;
     (rows || []).forEach((row, i) => row.forEach((v, j) => this.set(i + 1, j + 1, v)));
   }
   get(r, c) { const v = this.cells.get(r + ',' + c); return v === undefined ? '' : v; }
@@ -78,9 +79,27 @@ class FakeSheet {
   }
   getLastRow() { let m = 0; for (const k of this.cells.keys()) m = Math.max(m, +k.split(',')[0]); return m; }
   getLastColumn() { let m = 0; for (const k of this.cells.keys()) m = Math.max(m, +k.split(',')[1]); return m; }
-  getMaxRows() { return Math.max(this.getLastRow(), 1000); }
+  getMaxRows() { return Math.max(this.getLastRow(), this.maxRows); }
   getMaxColumns() { return this.maxCols; }
   insertColumnsAfter(_, n) { this.maxCols += n; }
+  insertRowsAfter(_, n) { this.maxRows = this.getMaxRows() + n; }
+  // Como Sheets: las filas de debajo suben, con sus valores, formatos y casillas.
+  deleteRows(desde, n) {
+    const moure = mapa => {
+      const out = new Map();
+      for (const [k, v] of mapa) {
+        const [r, c] = k.split(',').map(Number);
+        if (r < desde) out.set(k, v); else if (r >= desde + n) out.set((r - n) + ',' + c, v);
+      }
+      return out;
+    };
+    this.cells = moure(this.cells);
+    this.formats = moure(this.formats);
+    this.validations = moure(this.validations);
+    this.checkboxes = new Set(moure(new Map([...this.checkboxes].map(k => [k, true]))).keys());
+    this.maxRows = Math.max(this.getMaxRows() - n, 1);
+  }
+  deleteRow(r) { this.deleteRows(r, 1); }
   getRange(r, c, nr, nc) { return new FakeRange(this, r, c, nr || 1, nc || 1); }
   getDataRange() { return new FakeRange(this, 1, 1, Math.max(this.getLastRow(), 1), Math.max(this.getLastColumn(), 1)); }
   setFrozenRows() {}

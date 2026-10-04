@@ -212,6 +212,10 @@ function crearPacientModel() {
 
   // --- Filas ---
 
+  /**
+   * Fila sin nada escrito: celdas vacías o casillas sin marcar. Así queda una fila cuando la
+   * Auxiliar borra su contenido, que es la forma de borrar un implante: hay que saltársela.
+   */
   function filaBuida(fila) {
     return fila.every(v => v === '' || v === null || v === undefined || v === false);
   }
@@ -695,6 +699,7 @@ function crearPacientModel() {
     objecteAFila,
     esCert,
     filesAmbDades,
+    filaBuida,
     esDni,
     esEmail,
     netejarDocument,

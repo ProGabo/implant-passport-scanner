@@ -113,6 +113,10 @@
         .status-info { color: #0284c7; background: #e0f2fe; }
         .status-success { background-color: #dcfce7; color: #166534; }
         .status-error { background-color: #fee2e2; color: #991b1b; }
+        /* Resultado del envío del último paciente guardado: se queda aunque se vacíe el formulario. */
+        .enviament { padding: 8px 12px; margin-top: 8px; border-radius: 6px; font-size: 13px; line-height: 1.4; }
+        .enviament p { margin: 2px 0; }
+        .enviament button { width: auto; margin-top: 6px; padding: 5px 10px; font-size: 12px; }
 
         /* Diseño de Dimensiones */
         .dim-wrapper { display: flex; align-items: center; gap: 8px; }
@@ -207,6 +211,7 @@
             <button class="btn-primary" id="search-btn" style="margin-top: 8px;" onclick="buscarPaciente()">🔍 Cercar pacient</button>
         </div>
         <div id="status"></div>
+        <div id="enviamentEstat" class="enviament hidden" role="status"></div>
     </div>
 
     <div id="patientSection" class="hidden">
@@ -1382,14 +1387,11 @@
         let msg = `<p><b>${res.implantsCount}</b> implant(s) desat(s) correctament.</p>`;
         msg += `<p>Codi d'accés: <b>${escapeHtml(res.newCode)}</b></p>`;
 
-        if (res.emailSent) {
-            msg += `<p style="color: #166534; margin-top: 10px;">✅ Pasaport enviat per email a ${escapeHtml(emailInput.value)}.</p>`;
-        } else if (res.emailError) {
-            msg += `<p style="color: #991b1b; margin-top: 10px;">⚠️ ERROR en enviar l'email: ${escapeHtml(res.emailError)}</p>`;
-        } else if (res.avisSecretaria && res.avisSecretaria.enviat) {
-            msg += `<p style="color: #166534; margin-top: 10px;">✅ Avís enviat a la secretària, amb el codi, el missatge per WhatsApp i el PDF.</p>`;
-        } else if (res.avisSecretaria) {
-            msg += `<p style="color: #991b1b; margin-top: 10px;">⚠️ No s'ha pogut avisar la secretària: ${escapeHtml(res.avisSecretaria.error)} Fes-li arribar el codi d'accés d'una altra manera.</p>`;
+        // El envío va en otra llamada, para no esperar al email: el resultado sale a dalt.
+        const enviar = res.enviar || {};
+        if (enviar.email || enviar.avisSecretaria) {
+            enviarDesat(res.newCode, enviar, nombreInput.value);
+            msg += `<p style="color: #0284c7; margin-top: 10px;">📨 S'està enviant ${enviar.email ? 'el pasaport' : "l'avís a la secretària"}: el resultat surt a dalt del panell. Ja pots continuar amb el pacient següent.</p>`;
         } else if (senseEmailCheckbox.checked) {
             msg += `<p style="color: #b45309; margin-top: 10px;">ℹ️ El pacient no té email: fes-li arribar el codi d'accés d'una altra manera.</p>`;
         }
@@ -1423,6 +1425,46 @@
         patientSection.classList.add('hidden');
         implantContainer.innerHTML = '';
         addImplantSection();
+    }
+
+    /**
+     * Segunda llamada tras guardar: envía el pasaporte (o el avís) y deja el resultado en
+     * #enviamentEstat. Si algo falla, "Tornar a enviar" repite solo lo que ha fallado.
+     */
+    function enviarDesat(codi, enviar, nom) {
+        const estat = document.getElementById('enviamentEstat');
+        const pinta = (tipus, html) => {
+            estat.className = 'enviament status-' + tipus;
+            estat.innerHTML = html;
+        };
+        const qui = nom ? ` de <b>${escapeHtml(nom)}</b>` : '';
+        pinta('info', `<p>📨 Enviant el pasaport${qui} (${escapeHtml(codi)})...</p>`);
+        const tornar = (repetir, motiu) => {
+            pinta('error', `<p>${motiu}</p><p>Si torna a fallar, el pots reenviar des de <b>✏️ Completar i enviar</b>.</p>` +
+                '<button type="button" class="btn-primary" id="tornarEnviar">🔁 Tornar a enviar</button>');
+            document.getElementById('tornarEnviar').onclick = () => enviarDesat(codi, repetir, nom);
+        };
+        llamarServidor('enviarPasaport', [codi, enviar], res => {
+            if (!res || !res.ok) {
+                tornar(enviar, `❌ No s'ha pogut enviar el pasaport${qui}: ${escapeHtml(res ? res.message : '')}`);
+                return;
+            }
+            const fets = [], errors = [], repetir = {};
+            if (res.emailSent) fets.push(`✅ Pasaport${qui} enviat per email a ${escapeHtml(res.emailDesti)}.`);
+            else if (res.emailError) { errors.push(`❌ No s'ha pogut enviar l'email${qui}: ${escapeHtml(res.emailError)}`); repetir.email = true; }
+            if (res.avisSecretaria && res.avisSecretaria.enviat) fets.push(`✅ Avís${qui} enviat a la secretària, amb el codi, el missatge per WhatsApp i el PDF.`);
+            else if (res.avisSecretaria) { errors.push(`❌ No s'ha pogut avisar la secretària${qui}: ${escapeHtml(res.avisSecretaria.error)}`); repetir.avisSecretaria = true; }
+            // Recordatorios (S6): si el envío ha cerrado uno, se dice aquí.
+            const rec = typeof window.textRecordatori === 'function' ? window.textRecordatori(res) : '';
+            if (errors.length) {
+                tornar(repetir, fets.concat(errors).join('</p><p>'));
+                return;
+            }
+            if (!fets.length) fets.push(`ℹ️ No hi havia res a enviar${qui}.`);
+            pinta('success', fets.map(l => `<p>${l}</p>`).join('') + (rec ? `<p>${rec}</p>` : ''));
+        }, err => {
+            tornar(enviar, `❌ No s'ha pogut enviar el pasaport${qui}: ${escapeHtml((err && (err.message || String(err))) || 'error desconegut')}`);
+        });
     }
 
     function handleError(err) {

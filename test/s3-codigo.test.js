@@ -27,6 +27,17 @@ function libro() {
 const pacientes = ss => ss.getSheetByName('Pacientes');
 const celda = (ss, n, clau) => pacientes(ss).get(n, H.indexOf(PM.COLUMNES.find(c => c.clau === clau).capcalera) + 1);
 
+// Como el sidebar y el panel: guardar y, si ha ido bien, enviar en una segunda llamada.
+const OPCIONS_PANELL = o => Object.assign({ email: true, avisSiSenseEmail: true }, o);
+function desarIEnviar(ctx, formData) {
+  const r = ctx.saveNewImplant(formData);
+  return r.ok ? Object.assign({}, r, ctx.enviarPasaport(r.newCode, r.enviar)) : r;
+}
+function completarIEnviar(ctx, formData, opcions) {
+  const r = ctx.completarPanell(formData);
+  return r.ok ? Object.assign({}, r, ctx.enviarPasaport(r.codi, OPCIONS_PANELL(opcions))) : r;
+}
+
 const NOU = {
   codi_acces: 'GENERAR', cuenta_quartup: '43005555', nombre: 'Anna Font', email: 'anna@x.cat', dni: '22222222J',
   implantes: [{ posicion: '14', fecha_colocacion: '2026-10-03', marca: 'Ticare', modelo: 'Inhex', pilar: 'A cabeza de implante', pendent: 'true', que_falta: 'canvi de pilars' }]
@@ -58,7 +69,7 @@ test('saveNewImplant: la fila nueva guarda Pendent y Què falta, prepara la hoja
 test('saveNewImplant: con email y "Enviar" envía el pasaporte; queda en el registro y buscarPacient lo enseña', () => {
   const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  const r = ctx.saveNewImplant(Object.assign({}, NOU, { sendEmail: 'true', implantes: [{ posicion: '14', pilar: 'Sin pilar' }] }));
+  const r = desarIEnviar(ctx, Object.assign({}, NOU, { sendEmail: 'true', implantes: [{ posicion: '14', pilar: 'Sin pilar' }] }));
   assert.equal(r.emailSent, true);
   assert.equal(sent.length, 1);
   assert.equal(sent[0].to, 'anna@x.cat');
@@ -72,7 +83,7 @@ test('saveNewImplant: con email y "Enviar" envía el pasaporte; queda en el regi
 test('saveNewImplant: Sense email + avís -> solo el avís a la Secretària', () => {
   const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  const r = ctx.saveNewImplant(Object.assign({}, NOU, { email: '', sense_email: 'true', sendEmail: 'true', avisSecretaria: 'true' }));
+  const r = desarIEnviar(ctx, Object.assign({}, NOU, { email: '', sense_email: 'true', sendEmail: 'true', avisSecretaria: 'true' }));
   assert.equal(r.ok, true, r.message);
   assert.equal(r.emailSent, false);
   assert.equal(r.avisSecretaria.enviat, true);
@@ -110,10 +121,10 @@ test('carregarPanell: desde la pestaña Pendents (columna Fila), y errores claro
   assert.match(ctx.carregarPanell().message, /no té cap pacient/);
 });
 
-test('completarIEnviarPanell: escribe solo lo tocado, desmarca Pendent y envía el email', () => {
+test('Completar i enviar: escribe solo lo tocado, desmarca Pendent y envía el email', () => {
   const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  const r = ctx.completarIEnviarPanell({ codi_acces: 'K7XH3P', implantes: [
+  const r = completarIEnviar(ctx, { codi_acces: 'K7XH3P', implantes: [
     { fila: 2, posicion_esperada: '25', pilar: 'Multi-unit', pilar_altura: '3', pilar_ref: '0196', pendent: true }
   ] }, {});
   assert.equal(r.ok, true, r.message);
@@ -128,17 +139,17 @@ test('completarIEnviarPanell: escribe solo lo tocado, desmarca Pendent y envía 
   assert.equal(pacientes(ss).get(2, H.length), 'nota 25'); // columna ajena intacta
 });
 
-test('completarIEnviarPanell: "Avisar també la secretària" con email -> email + avís; Sense email -> solo avís', () => {
+test('Completar i enviar: "Avisar també la secretària" con email -> email + avís; Sense email -> solo avís', () => {
   let ss = libro();
   let c = cargarCodigo(ss);
-  let r = c.ctx.completarIEnviarPanell({ codi_acces: 'K7XH3P', implantes: [{ fila: 3, posicion_esperada: '26', pilar: 'Sin pilar' }] }, { avisSecretaria: true });
+  let r = completarIEnviar(c.ctx, { codi_acces: 'K7XH3P', implantes: [{ fila: 3, posicion_esperada: '26', pilar: 'Sin pilar' }] }, { avisSecretaria: true });
   assert.equal(r.emailSent, true);
   assert.equal(r.avisSecretaria.enviat, true);
   assert.deepEqual(c.sent.map(s => s.to), ['maria@x.cat', 'consulta@doctorpiurgell.com']);
 
   ss = libro();
   c = cargarCodigo(ss);
-  r = c.ctx.completarIEnviarPanell({ codi_acces: 'J0AN22', implantes: [{ fila: 5, posicion_esperada: '11', pilar: 'Multi-unit' }] }, {});
+  r = completarIEnviar(c.ctx, { codi_acces: 'J0AN22', implantes: [{ fila: 5, posicion_esperada: '11', pilar: 'Multi-unit' }] }, {});
   assert.equal(r.ok, true, r.message);
   assert.equal(r.emailSent, false);
   assert.equal(r.avisSecretaria.enviat, true);
@@ -172,10 +183,10 @@ test('desarPanell: rellena el email que faltaba en todas las filas del paciente,
   assert.equal(celda(ss, 2, 'email'), 'maria@x.cat');
 });
 
-test('completarIEnviarPanell: un Sense email al que se le escribe el email en el panel recibe el pasaporte por email', () => {
+test('Completar i enviar: un Sense email al que se le escribe el email en el panel recibe el pasaporte por email', () => {
   const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  const r = ctx.completarIEnviarPanell({ codi_acces: 'J0AN22', email: 'joan@x.cat',
+  const r = completarIEnviar(ctx, { codi_acces: 'J0AN22', email: 'joan@x.cat',
     implantes: [{ fila: 5, posicion_esperada: '11', pilar: 'Multi-unit' }] }, {});
   assert.equal(r.ok, true, r.message);
   assert.equal(r.emailSent, true);
@@ -183,12 +194,12 @@ test('completarIEnviarPanell: un Sense email al que se le escribe el email en el
   assert.deepEqual(sent.map(s => s.to), ['joan@x.cat']);
 });
 
-test('enviarPasaportPanell: envía sin cambiar nada; codi inexistente -> error sin enviar', () => {
+test('enviarPasaport: envía sin cambiar nada; codi inexistente -> error sin enviar', () => {
   const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  assert.equal(ctx.enviarPasaportPanell('k7xh3p', {}).emailSent, true);
+  assert.equal(ctx.enviarPasaport('k7xh3p', OPCIONS_PANELL()).emailSent, true);
   assert.equal(sent.length, 1);
-  const r = ctx.enviarPasaportPanell('NOPE00', {});
+  const r = ctx.enviarPasaport('NOPE00', OPCIONS_PANELL());
   assert.equal(r.emailSent, false);
   assert.match(r.emailError, /No trobo/);
   assert.equal(sent.length, 1);
@@ -210,7 +221,7 @@ test('prepararHoja_ es idempotente y respeta las reglas de formato de la clínic
 test('el panel y los menús de S3 son solo para el personal (ADR 0003)', () => {
   const ss = libro();
   const { ctx } = cargarCodigo(ss, { usuari: '' });
-  ['carregarPanell', 'desarPanell', 'completarIEnviarPanell', 'enviarPasaportPanell', 'obrirPanellPendents'].forEach(fn => {
+  ['carregarPanell', 'desarPanell', 'completarPanell', 'enviarPasaport', 'obrirPanellPendents'].forEach(fn => {
     assert.throws(() => ctx[fn]({ codi_acces: 'K7XH3P', implantes: [] }), /full de càlcul de la clínica/, fn);
   });
 });
@@ -254,7 +265,7 @@ test('revisión: el panel solo escribe las celdas que cambia cada fila (una fech
 test('revisión: el resultado del envío dice a qué email se ha enviado', () => {
   const ss = libro();
   const { ctx } = cargarCodigo(ss);
-  const r = ctx.completarIEnviarPanell({ codi_acces: 'J0AN22', email: 'joan@x.cat', implantes: [{ fila: 5, posicion_esperada: '11' }] }, {});
+  const r = completarIEnviar(ctx, { codi_acces: 'J0AN22', email: 'joan@x.cat', implantes: [{ fila: 5, posicion_esperada: '11' }] }, {});
   assert.equal(r.ok, true, r.message);
   assert.equal(r.emailSent, true);
   assert.equal(r.emailDesti, 'joan@x.cat');

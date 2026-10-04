@@ -44,11 +44,17 @@
         .estat { padding: 8px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; }
         .estat-info { color: #0284c7; background: #e0f2fe; }
         .estat-error { color: #991b1b; background: #fee2e2; }
+        .estat-ok { color: #166534; background: #dcfce7; }
+        /* Resultado del último envío: se queda aunque el panel se recargue. */
+        #enviamentEstat { margin-bottom: 10px; line-height: 1.4; }
+        #enviamentEstat p { margin: 2px 0; text-align: left; }
+        #enviamentEstat button { margin-top: 6px; }
         .pacient-linia { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
         .pacient-linia span:first-child { color: #64748b; }
     </style>
 </head>
 <body>
+    <div id="enviamentEstat" class="estat hidden" role="status"></div>
     <div id="estat" class="estat estat-info">Carregant la fila seleccionada...</div>
 
     <div id="contingut" class="hidden">
@@ -413,11 +419,54 @@
 
     function resultatEnviament(res) {
         const linies = [];
-        if (res.emailSent) linies.push(`✅ Pasaport enviat per email a ${escapeHtml(res.emailDesti || dades.pacient.email)}.`);
+        if (res.emailSent) linies.push(`✅ Pasaport enviat per email a ${escapeHtml(res.emailDesti)}.`);
         else if (res.emailError) linies.push(`⚠️ No s'ha pogut enviar l'email: ${escapeHtml(res.emailError)}`);
         if (res.avisSecretaria && res.avisSecretaria.enviat) linies.push('✅ Avís enviat a la secretària (codi, missatge per WhatsApp i PDF).');
         else if (res.avisSecretaria) linies.push(`⚠️ No s'ha pogut avisar la secretària: ${escapeHtml(res.avisSecretaria.error)}`);
+        // Recordatorios (S6): si el envío ha cerrado uno, se dice aquí.
+        const rec = typeof window.textRecordatori === 'function' ? window.textRecordatori(res) : '';
+        if (rec) linies.push(rec);
         return linies.map(l => `<p style="text-align:left;">${l}</p>`).join('');
+    }
+
+    /**
+     * Segunda llamada tras guardar: envía y deja el resultado arriba (#enviamentEstat), que
+     * no se borra al recargar el panel. Si algo falla, "Tornar a enviar" repite solo eso.
+     */
+    function enviarPasaport(codi, opcionsEnviar, nom) {
+        const caixa = document.getElementById('enviamentEstat');
+        const pinta = (tipus, html) => {
+            caixa.className = 'estat estat-' + tipus;
+            caixa.innerHTML = html;
+        };
+        const qui = nom ? ` (${escapeHtml(nom)})` : '';
+        pinta('info', `<p>📨 Enviant el pasaport${qui}...</p>`);
+        const tornar = (repetir, html) => {
+            pinta('error', html + '<button type="button" class="btn-sec btn-petit" id="tornarEnviar">🔁 Tornar a enviar</button>');
+            document.getElementById('tornarEnviar').onclick = () => enviarPasaport(codi, repetir, nom);
+        };
+        google.script.run
+            .withSuccessHandler(res => {
+                if (!res || !res.ok) { tornar(opcionsEnviar, `<p>❌ No s'ha pogut enviar${qui}: ${escapeHtml(res ? res.message : '')}</p>`); return; }
+                const html = resultatEnviament(res) || `<p>ℹ️ No hi havia res a enviar${qui}.</p>`;
+                const repetir = Object.assign({}, opcionsEnviar, {
+                    email: !!res.emailError,
+                    avisSecretaria: !!(res.avisSecretaria && !res.avisSecretaria.enviat),
+                    avisSiSenseEmail: false
+                });
+                if (repetir.email || repetir.avisSecretaria) tornar(repetir, html);
+                else pinta('ok', html);
+            })
+            .withFailureHandler(err => tornar(opcionsEnviar, `<p>❌ No s'ha pogut enviar${qui}: ${escapeHtml((err && (err.message || String(err))) || '')}</p>`))
+            .enviarPasaport(codi, opcionsEnviar);
+    }
+
+    /** Lo que envía el panel: siempre el email si lo hay; sin email, el avís. */
+    function opcionsPanell(res) {
+        return Object.assign({ email: true, avisSiSenseEmail: true }, opcions(), {
+            // Si en el mismo clic se ha cambiado el recordatorio (S6), el envío no lo cierra.
+            noTancarRecordatori: !!(res.recordatori && res.recordatori.accio && res.recordatori.accio !== 'cap')
+        });
     }
 
     btnDesar.addEventListener('click', () => {
@@ -439,14 +488,15 @@
         const r = llegirPanel();
         if (r.error) { Swal.fire({ icon: 'warning', title: 'Revisa-ho', text: r.error }); return; }
         activarBotons(false);
-        btnCompletar.textContent = '⏳ Desant i enviant...';
-        servidor('completarIEnviarPanell', [r.formData, opcions()], res => {
+        btnCompletar.textContent = '⏳ Desant...';
+        servidor('completarPanell', [r.formData], res => {
             if (!res.ok) {
                 restaurarBotons();
                 Swal.fire({ icon: 'error', title: "No s'ha pogut desar", html: `<ul style="text-align:left;">${errorsHtml(res)}</ul>` });
                 return;
             }
-            Swal.fire({ icon: 'success', title: 'Fitxa completada', html: `<p style="text-align:left;">Desat i fora del taronja.</p>${resultatEnviament(res)}`, confirmButtonColor: '#0ea5e9' })
+            enviarPasaport(res.codi, opcionsPanell(res), dades.pacient.nombre);
+            Swal.fire({ icon: 'success', title: 'Fitxa completada', html: `<p style="text-align:left;">Desat i fora del taronja.</p><p style="text-align:left;">📨 S'està enviant: el resultat surt a dalt del panell.</p>`, confirmButtonColor: '#0ea5e9' })
                 .then(carregar);
         });
     });
@@ -457,11 +507,11 @@
         const r = llegirPanel();
         if (r.error) { Swal.fire({ icon: 'warning', title: 'Revisa-ho', text: r.error }); return; }
         activarBotons(false);
-        servidor('completarIEnviarPanell', [r.formData, opcions()], res => {
+        servidor('completarPanell', [r.formData], res => {
             restaurarBotons();
             if (!res.ok) { Swal.fire({ icon: 'error', title: "No s'ha pogut enviar", html: `<ul style="text-align:left;">${errorsHtml(res)}</ul>` }); return; }
-            Swal.fire({ icon: res.emailError ? 'warning' : 'success', title: 'Enviament', html: resultatEnviament(res) || '<p>No hi havia res a enviar.</p>', confirmButtonColor: '#0ea5e9' })
-                .then(carregar);
+            enviarPasaport(res.codi, opcionsPanell(res), dades.pacient.nombre);
+            carregar();
         });
     });
 

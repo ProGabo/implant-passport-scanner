@@ -154,7 +154,7 @@ test('doPost: acción pdfPasaporte', () => {
 test('portal: los implantes llevan los textos ya escritos y salen ordenados', () => {
   const { ctx } = carregar({ usuari: '' });
   const r = ctx.initiateLogin('ABC234');
-  assert.deepEqual(r.implantes.map(i => i.posicion), ['14', '26']);
+  assert.deepEqual([...r.implantes.map(i => i.posicion)], ['14', '26']); // copia: otro realm (vm)
   assert.equal(r.implantes[1].pilar_texto, 'Multi-unit · 30º · 5 mm · ref. pilar HE48865');
   assert.equal(r.implantes[1].implante_texto, 'Ticare Inhex Quattro');
   assert.equal(r.implantes[0].pilar_pendiente, false);

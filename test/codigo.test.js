@@ -47,6 +47,12 @@ function libroCabecerasAntiguas() {
 const IMPLANT = { posicion: '21', fecha_colocacion: '2026-10-03', marca: 'Nobel', modelo: 'Active', dimensiones: '4.3 x 11.5 mm',
   plataforma: 'RP', conexion: 'Cónica', pilar: 'No', cod_implante: 'NB-1', lote: 'L9' };
 
+// Como el panel: guarda y, si ha ido bien, envía en una segunda llamada (enviarPasaport).
+function desarIEnviar(ctx, formData) {
+  const res = ctx.saveNewImplant(formData);
+  return res.ok ? Object.assign({}, res, ctx.enviarPasaport(res.newCode, res.enviar)) : res;
+}
+
 function objetosDe(ctx, sheet) {
   const rows = sheet.rows();
   const { idx } = ctx.PacientModel.indexarCapcaleres(rows[0]);
@@ -59,7 +65,7 @@ test('saveNewImplant da de alta un paciente nuevo con las columnas en su sitio',
   const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
 
-  const res = ctx.saveNewImplant({
+  const res = desarIEnviar(ctx, {
     codi_acces: 'GENERAR', cuenta_quartup: '43000500', nombre: 'Anna Puig', email: 'anna@x.cat',
     sense_email: false, dni: '87654321x', sense_dni: false, sendEmail: 'true', implantes: [IMPLANT]
   });
@@ -124,7 +130,7 @@ test('un paciente antiguo encontrado por DNI completa su Cuenta en todas sus fil
   assert.equal(b.data.cuenta_quartup, '');
   assert.equal(b.data.sense_email, true);
 
-  const res = ctx.saveNewImplant({
+  const res = desarIEnviar(ctx, {
     codi_acces: 'BBB222', cuenta_quartup: '43000222', nombre: 'Maria Roca', email: '', sense_email: true,
     dni: '12345678Z', sense_dni: false, sendEmail: 'true', implantes: [IMPLANT]
   });
@@ -250,7 +256,7 @@ test('recuperar código: misma respuesta exista o no el email, y queda en el reg
 test('envío de pasaporte que falla: el sidebar recibe el error y queda en el registro', () => {
   const ss = libro();
   const { ctx } = cargarCodigo(ss, { gmailFalla: 'Service invoked too many times for one day: email.' });
-  const res = ctx.saveNewImplant({
+  const res = desarIEnviar(ctx, {
     codi_acces: 'GENERAR', cuenta_quartup: '43000500', nombre: 'Anna Puig', email: 'anna@hotmail.com',
     sense_email: false, dni: '87654321x', sense_dni: false, sendEmail: 'true', implantes: [IMPLANT]
   });
@@ -278,7 +284,7 @@ test('saveNewImplant genera códigos del alfabeto nuevo', () => {
 test('Sense email + avís: email a la secretaria con quién es, WhatsApp y el PDF adjunto', () => {
   const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  const res = ctx.saveNewImplant({
+  const res = desarIEnviar(ctx, {
     codi_acces: 'BBB222', cuenta_quartup: '43000222', nombre: 'Maria Roca', email: '', sense_email: true,
     dni: '12345678Z', sense_dni: false, sendEmail: 'false', avisSecretaria: 'true', implantes: [IMPLANT]
   });
@@ -304,7 +310,7 @@ test('Sense email + avís: email a la secretaria con quién es, WhatsApp y el PD
 test('Sense email con el avís desmarcado: no se envía nada', () => {
   const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  const res = ctx.saveNewImplant({
+  const res = desarIEnviar(ctx, {
     codi_acces: 'BBB222', cuenta_quartup: '43000222', nombre: 'Maria Roca', email: '', sense_email: true,
     dni: '12345678Z', sense_dni: false, sendEmail: 'false', avisSecretaria: 'false', implantes: [IMPLANT]
   });
@@ -316,7 +322,7 @@ test('Sense email con el avís desmarcado: no se envía nada', () => {
 test('con email, el avís a la secretaria no se envía aunque llegue marcado', () => {
   const ss = libro();
   const { ctx, sent } = cargarCodigo(ss);
-  ctx.saveNewImplant({
+  desarIEnviar(ctx, {
     codi_acces: 'AAA111', cuenta_quartup: '43000001', nombre: 'Pere Vila', email: 'pere@x.cat', sense_email: false,
     dni: '', sense_dni: true, sendEmail: 'false', avisSecretaria: 'true', implantes: [IMPLANT]
   });
@@ -357,6 +363,7 @@ test('visitante anónimo del web app: el portal funciona, el panel y el menú no
     () => ctx.buscarPacient('43000001'),
     () => ctx.comprovarCuenta('43000001', 'GENERAR'),
     () => ctx.saveNewImplant(nuevo),
+    () => ctx.enviarPasaport('AAA111', { email: true }),
     () => ctx.fusionarPacients('BBB222', 'AAA111'),
     () => ctx.corregirCuenta('AAA111', ''),
     () => ctx.getImplantOptions(),
