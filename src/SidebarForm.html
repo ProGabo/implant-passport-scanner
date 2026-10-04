@@ -538,21 +538,12 @@
     };
 
     // ===============================================
-    //  Pendent (S3): la Auxiliar marca el implante al que aún le falta algo. Se propone
-    //  sola con "A cabeza de implante" (el +PC provisional), pero una vez la toca ella,
-    //  manda lo que haya decidido.
+    //  Pendent (S3): la Auxiliar marca el implante al que aún le falta algo. Sale siempre
+    //  desmarcada y no se propone sola: lo normal es que no quede nada pendiente.
     // ===============================================
     function prepararPendent(section) {
         const casilla = section.querySelector('.implant-pendent');
-        casilla.addEventListener('change', () => {
-            casilla.dataset.manual = '1';
-            pintarPendent(section);
-        });
-    }
-
-    function fixarPendent(section, marcat) {
-        section.querySelector('.implant-pendent').checked = !!marcat;
-        pintarPendent(section);
+        casilla.addEventListener('change', () => pintarPendent(section));
     }
 
     function pintarPendent(section) {
@@ -561,14 +552,6 @@
         section.classList.toggle('es-pendent', marcat);
         section.querySelector('.implant-que-falta').classList.toggle('hidden', !marcat);
         actualizarEnviar();
-    }
-
-    /** Al cambiar el tipo de pilar: vuelve a proponer, si la Auxiliar no lo ha decidido ya. */
-    function proposarPendent(section) {
-        const casilla = section.querySelector('.implant-pendent');
-        const pilar = section.querySelector('input[name="pilar"]').value;
-        if (!casilla || casilla.dataset.manual === '1' || !pilar) return;
-        fixarPendent(section, PacientModel.suggereixPendent({ pilar: pilar }));
     }
 
     function algunPendent() {
@@ -626,7 +609,6 @@
                 if (inp) inp.value = '';
             });
         }
-        proposarPendent(section);
     }
 
     /** Pone un tipo de pilar en el desplegable (o en "Un altre..." si no es de la lista). */
@@ -1536,7 +1518,6 @@
             populateThisSection(currentSection, data);
         });
         actualizarEnviar();
-        const nPendents = container.querySelectorAll('.implant-pendent:checked').length;
 
         // Contador de dudas (fire-and-forget): datos reales para decidir si algún día
         // merece la pena que la IA proponga posiciones candidatas.
@@ -1557,7 +1538,6 @@
                     <ul style="margin-top: 8px;">
                         <li>Comprova que la <b>POSICIÓ (dent)</b> sigui correcta, també si és una <b>fisura pterigoidea</b> (quadrant 1 o 2).</li>
                         <li>Comprova el <b>PILAR</b>: "+PC" és <b>A cabeza de implante</b>, i als MULTI-UNIT revisa els <b>mm</b>, l'angulació i la referència (escrits a mà poden tenir errors).</li>
-                        ${nPendents ? `<li>${nPendents} implant(s) amb +PC surten marcats com a <b>⏳ Pendent</b>. Desmarca'ls si no esperen res més.</li>` : ''}
                     </ul>
                 </div>
             `,

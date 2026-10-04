@@ -18,11 +18,15 @@
     .avisos.cap { background: #f0fdf4; border-color: #22c55e; color: #166534; }
     .full { background: #fff; width: 794px; margin: 14px auto 30px auto; padding: 15mm; box-sizing: border-box;
             box-shadow: 0 1px 6px rgba(0,0,0,.18); }
-    @page { size: A4; margin: 15mm; }
+    /* El margen va dentro de la hoja (padding repetido en cada página), no en @page:
+       al imprimir desde el diálogo de Sheets, Chrome no siempre respeta el @page del
+       iframe y el pasaporte salía pegado a los bordes. Así queda como el PDF (15 mm). */
+    @page { size: A4; margin: 0; }
     @media print {
         .barra, .avisos { display: none; }
         body { background: #fff; }
-        .full { box-shadow: none; margin: 0; width: auto; padding: 0; }
+        .full { box-shadow: none; margin: 0; width: auto; padding: 15mm;
+                -webkit-box-decoration-break: clone; box-decoration-break: clone; }
     }
 </style>
 </head>
