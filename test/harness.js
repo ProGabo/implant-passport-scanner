@@ -124,6 +124,7 @@ class FakeSpreadsheet {
   constructor(sheets) { this.sheets = sheets; }
   getId() { return 'fake-id'; }
   getName() { return 'fake'; }
+  getSpreadsheetTimeZone() { return this.tz || 'Europe/Madrid'; }
   getSheetByName(n) { return this.sheets.find(s => s.name === n) || null; }
   getSheets() { return this.sheets.slice(); }
   // Como Sheets: la pestaña nueva queda activa.

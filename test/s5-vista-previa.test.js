@@ -144,7 +144,7 @@ test('vista previa desde el menú: la cabecera o una fila vacía avisan y no abr
   ctx.vistaPreviaFilaSeleccionada();
   assert.equal(dialegs.length, 0);
   assert.match(alerts[0][1], /no la capçalera/);
-  assert.match(alerts[1][1], /no té cap pacient/);
+  assert.match(alerts[1][1], /La fila 40 està buida/);
 });
 
 test('la vista previa desde el menú también exige estar en la hoja (ADR 0003)', () => {

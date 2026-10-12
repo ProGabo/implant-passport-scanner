@@ -114,6 +114,19 @@ test('textData: siempre dd/mm/aaaa (la hoja, el input date del formulario o d/m/
   assert.equal(PM.textData(''), '');
   assert.equal(PM.textData(null), '');
   assert.equal(PM.textData('setembre'), 'setembre');
+  // Lo que se quedó escrito como texto en filas antiguas de la hoja real.
+  assert.equal(PM.textData('Wed Jan 21 2004 00:00:00 GMT+0100 (Central European Standard Time)'), '21/01/2004');
+  assert.equal(PM.textData('Mon Oct 26 2015 00:00:00 GMT+0100 (Central European Standard Standard Time)'), '26/10/2015');
+  assert.equal(PM.textData('Tue Mar 29 2005 00:00:00 GMT+0200 (Central European Summer Time)'), '29/03/2005');
+  assert.equal(PM.textData('Mon Nov 19 2007 00:00:00'), '19/11/2007');
+  assert.equal(PM.textData('Mon Jul 07 2014'), '07/07/2014');
+  assert.equal(PM.textData('Apr 11 2018'), '11/04/2018');
+  assert.equal(PM.textData('01/27/2014'), '27/01/2014', 'm/d americano si el 2º pasa de 12');
+  assert.equal(PM.textData('03/04/2002'), '03/04/2002', 'si los dos caben, d/m');
+  assert.equal(PM.textData('31/02/2004'), '31/02/2004', 'un día que no existe no se inventa');
+  assert.equal(PM.textData('Foo Jan 21 2004'), 'Foo Jan 21 2004');
+  assert.equal(PM.textData('Wed Xyz 21 2004'), 'Wed Xyz 21 2004');
+  assert.equal(PM.textData('Thu Jan 21 2004'), 'Thu Jan 21 2004', 'el 21/01/2004 fue miércoles');
   // La vista previa (antes de guardar) recibe el valor del input date.
   assert.equal(PM.perAlPortal({ nombre: 'A', fecha_colocacion: '2026-10-01' }).fecha_colocacion, '01/10/2026');
 });
@@ -187,4 +200,11 @@ test('htmlPasaporte: sin Cuenta ni email, con DNI parcial y Código de acceso, e
   assert.match(html, /&lt;L9&gt;/);
   assert.doesNotMatch(html, /43000001|p@x\.cat|id_quartup|Historial/);
   assert.doesNotMatch(html, /<i>Vila<\/i>/);
+});
+
+test('isoData: el texto largo tiene que acabar donde acaba una fecha', () => {
+  assert.equal(PM.isoData('Mar 5 2004 - Jun 9 2005'), '');
+  assert.equal(PM.isoData('Apr 11 2018 foo'), '');
+  assert.equal(PM.isoData('Wed Jan 21 2004 00:00:00 GMT+0100'), '2004-01-21');
+  assert.equal(PM.isoData('Wed Jan 21 2004 00:00:00 GMT+0100 (hora estándar de Europa central)'), '2004-01-21');
 });

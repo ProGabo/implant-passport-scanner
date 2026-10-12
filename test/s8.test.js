@@ -221,7 +221,7 @@ test('menú: solo lo que usa la clínica, y Comprovar-ho tot dentro de Mantenime
   ctx.SpreadsheetApp.getUi = () => Object.assign(getUi(), { createMenu: menu });
   ctx.onOpen();
   assert.deepEqual(items.map(i => i[1]).map(f => (Array.isArray(f) ? f.map(x => x[1]) : f)),
-    ['showSidebar', 'obrirPanellPendents', 'vistaPreviaFilaSeleccionada', 'obrirRecordatoris', 'autorizarCuenta', ['comprobarTodo']]);
+    ['showSidebar', 'obrirPanellPendents', 'vistaPreviaFilaSeleccionada', 'obrirRecordatoris', 'autorizarCuenta', ['comprobarTodo', 'arreglarDates']]);
 });
 
 test('mantenimiento desde el editor (sin interfaz de Sheets): funciona y el resultado va al registro', () => {
@@ -456,4 +456,94 @@ test('guardar con recordatorio: el color lila no se rehace si ya está', () => {
   assert.equal(ctx.saveNewImplant(amb('43007002', '55555555K')).ok, true);
   assert.equal(n.regles, 0);
   assert.equal(pacientes(ss).getConditionalFormatRules().filter(r => /Recordatoris/.test(r.formula)).length, 1);
+});
+
+// Filas antiguas de la hoja real: la fecha se quedó escrita como el texto largo de JavaScript.
+function libroDates() {
+  const d = (k, v) => fila(Object.assign({}, MARIA, IMP, { posicion: k, fecha_colocacion: v }));
+  return new FakeSpreadsheet([
+    new FakeSheet('Pacientes', [
+      H,
+      d('11', new Date(2004, 0, 20)),
+      d('12', 'Wed Jan 21 2004 00:00:00 GMT+0100 (Central European Standard Time)'),
+      d('13', 'Apr 11 2018'),
+      d('14', '01/27/2014'),
+      d('15', 'ni idea'),
+      d('16', ''),
+      d('17', '2014')
+    ]),
+    new FakeSheet('Catálogo de Implantes', [['Marca', 'Modelo', 'Conexión'], ['Ticare', 'Inhex', 'Interna']])
+  ]);
+}
+const iso = v => (Object.prototype.toString.call(v) === '[object Date]'
+  ? v.getFullYear() + '-' + (v.getMonth() + 1) + '-' + v.getDate() : v);
+
+test('Comprovar-ho tot: cuenta las fechas en texto y dice cómo arreglarlas, sin tocarlas', () => {
+  const ss = libroDates();
+  const { ctx, alerts } = cargarCodigo(ss);
+  ctx.comprobarTodo();
+  const text = alerts[0][1];
+  assert.match(text, /3 escrites com a text: es poden convertir/);
+  assert.match(text, /fila 6 \(ni idea\)/);
+  assert.equal(pacientes(ss).get(3, col('fecha_colocacion')), 'Wed Jan 21 2004 00:00:00 GMT+0100 (Central European Standard Time)');
+});
+
+test('Arreglar les dates: convierte solo lo que se entiende, con confirmación', () => {
+  const ss = libroDates();
+  const { ctx, alerts } = cargarCodigo(ss);
+  ctx.arreglarDates();
+  assert.match(alerts[0][1], /^3 dates de col·locació estan escrites com a text/);
+  assert.match(alerts[0][1], /«Wed Jan 21 2004 00:00:00 GMT\+0100 \(Central European Standard Time\)» → 21\/01\/2004/);
+  assert.match(alerts[0][1], /fila 6 \(ni idea\)/);
+  const c = col('fecha_colocacion');
+  assert.deepEqual([2, 3, 4, 5, 6, 7, 8].map(r => iso(pacientes(ss).get(r, c))),
+    ['2004-1-20', '2004-1-21', '2018-4-11', '2014-1-27', 'ni idea', '', '2014']);
+  assert.equal(pacientes(ss).formats.get('3,' + c), 'dd/mm/yyyy');
+  // Lo que no se convierte no se reescribe ni cambia de formato (un "2014" sería 07/07/1905).
+  assert.equal(pacientes(ss).formats.get('6,' + c), undefined);
+  assert.equal(pacientes(ss).formats.get('8,' + c), undefined);
+  assert.match(alerts[1][1], /3 dates convertides/);
+  // Las demás columnas, intactas.
+  assert.equal(pacientes(ss).get(3, col('nombre')), 'Maria Puig');
+
+  // Segunda vez: ya no queda nada que convertir.
+  ctx.arreglarDates();
+  assert.match(alerts[2][1], /Cap data escrita com a text que es pugui convertir/);
+});
+
+test('Arreglar les dates: si se responde que no, no se escribe nada', () => {
+  const ss = libroDates();
+  const { ctx } = cargarCodigo(ss);
+  const getUi = ctx.SpreadsheetApp.getUi;
+  ctx.SpreadsheetApp.getUi = () => Object.assign(getUi(), { alert: () => 'NO' });
+  const abans = JSON.stringify(pacientes(ss).rows());
+  ctx.arreglarDates();
+  assert.equal(JSON.stringify(pacientes(ss).rows()), abans);
+});
+
+test('Arreglar les dates: con otra zona horaria en la hoja no toca nada', () => {
+  const ss = libroDates();
+  ss.tz = 'UTC';
+  const { ctx, alerts } = cargarCodigo(ss);
+  const abans = JSON.stringify(pacientes(ss).rows());
+  ctx.arreglarDates();
+  assert.match(alerts[0][1], /zona horària del full \(UTC\)/);
+  assert.equal(JSON.stringify(pacientes(ss).rows()), abans);
+});
+
+test('Arreglar les dates: vuelve a leer después de la pregunta (alguien ha guardado mientras tanto)', () => {
+  const ss = libroDates();
+  const { ctx } = cargarCodigo(ss);
+  const c = col('fecha_colocacion');
+  const getUi = ctx.SpreadsheetApp.getUi;
+  ctx.SpreadsheetApp.getUi = () => Object.assign(getUi(), {
+    alert: (titol, text, botons) => {
+      // Con la pregunta abierta, la Auxiliar corrige a mano la fila 4.
+      if (botons === 'YES_NO') pacientes(ss).set(4, c, new Date(2018, 3, 12));
+      return 'YES';
+    }
+  });
+  ctx.arreglarDates();
+  assert.equal(iso(pacientes(ss).get(4, c)), '2018-4-12', 'no se pisa lo que se ha guardado');
+  assert.equal(iso(pacientes(ss).get(3, c)), '2004-1-21');
 });

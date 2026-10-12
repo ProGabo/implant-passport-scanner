@@ -68,7 +68,8 @@ function onOpen() {
       .addSeparator()
       .addItem('🔑 Autoritzar el meu compte', 'autorizarCuenta')
       .addSubMenu(ui.createMenu('⚙️ Manteniment')
-          .addItem('🩺 Comprovar-ho tot', 'comprobarTodo'))
+          .addItem('🩺 Comprovar-ho tot', 'comprobarTodo')
+          .addItem('📅 Arreglar les dates', 'arreglarDates'))
       .addToUi();
   // Sin menú a propósito (solo para quien mantiene la herramienta, desde el editor de
   // Apps Script): arreglarCodigosUndefined, eliminarDuplicados, provarAvisSecretaria,
@@ -1974,17 +1975,94 @@ function diagnosticDates_() {
     const { headers, idx, files } = leerPacientes(sheet);
     if (idx.fecha_colocacion === undefined) return "⚠️ Data de col·locació: no trobo la columna";
     ponerFormatoData_(sheet, headers, 2, Math.max(sheet.getMaxRows(), 2) - 1);
-    const text = [];
-    files.forEach((f, i) => {
-      const v = f[idx.fecha_colocacion];
-      if (v !== '' && v !== null && !(v instanceof Date)) text.push('fila ' + (i + 2) + ' (' + v + ')');
-    });
-    return text.length
-      ? "⚠️ Data de col·locació: format dd/mm/aaaa aplicat, però aquestes són text i no data (cal tornar-les a escriure): " + text.slice(0, 20).join(', ') + (text.length > 20 ? ' i ' + (text.length - 20) + ' més' : '')
+    const { aConvertir, illegibles } = datesEnText_(files, idx);
+    const linies = [];
+    if (aConvertir.length) linies.push(aConvertir.length + " escrites com a text: es poden convertir en data amb " + NOM_MENU + " → ⚙️ Manteniment → 📅 Arreglar les dates");
+    if (illegibles.length) linies.push("no s'entenen (cal mirar-les a mà): " + llistaFiles_(illegibles));
+    return linies.length
+      ? "⚠️ Data de col·locació (format dd/mm/aaaa aplicat):\n- " + linies.join('\n- ')
       : "✅ Data de col·locació: totes en format dd/mm/aaaa";
   } catch (e) {
     return "❌ Data de col·locació: no s'ha pogut revisar (" + e.message + ')';
   }
+}
+
+/**
+ * Fechas de colocación guardadas como texto (filas antiguas: "Wed Jan 21 2004 00:00:00
+ * GMT+0100 (...)"). Las que se entienden sin dudas (PortalModel.isoData), con su Date.
+ * @returns {{aConvertir: {fila, abans, data}[], illegibles: {fila, abans}[]}}
+ */
+function datesEnText_(files, idx) {
+  const aConvertir = [], illegibles = [];
+  files.forEach((f, i) => {
+    const v = f[idx.fecha_colocacion];
+    if (v === '' || v === null || v === undefined || Object.prototype.toString.call(v) === '[object Date]') return;
+    if (String(v).trim() === '') return;
+    const data = RecordatoriModel.aData(PortalModel.isoData(v));
+    (data ? aConvertir : illegibles).push({ fila: i + 2, abans: v, data: data });
+  });
+  return { aConvertir, illegibles };
+}
+
+function llistaFiles_(l) {
+  return l.slice(0, 20).map(x => 'fila ' + x.fila + ' (' + x.abans + ')').join(', ') + (l.length > 20 ? ' i ' + (l.length - 20) + ' més' : '');
+}
+
+/**
+ * Manteniment: convierte en fecha de verdad las fechas de colocación escritas como texto.
+ * Solo las que se entienden sin dudas; las demás no se tocan y se listan. Pide confirmación.
+ */
+function arreglarDates() {
+  exigirUsuariIntern_();
+  const titol = 'Arreglar les dates';
+  // Las fechas se crean a medianoche en la zona del script: con otra zona en la hoja,
+  // saldrían un día antes o después.
+  const tzFull = SpreadsheetApp.openById(SPREADSHEET_ID).getSpreadsheetTimeZone();
+  if (tzFull !== Session.getScriptTimeZone()) {
+    return avisar_(titol, 'La zona horària del full (' + tzFull + ") no és la de l'script (" + Session.getScriptTimeZone() + "). No toco res: avisa en Gabriel.");
+  }
+  const ui = SpreadsheetApp.getUi();
+  const previ = (() => { const { idx, files } = leerPacientes(hojaPacientes()); return idx.fecha_colocacion === undefined ? null : datesEnText_(files, idx); })();
+  if (!previ) return avisar_(titol, 'No trobo la columna «Data de col·locació».');
+  const restants = l => (l.length ? "\n\nNo s'entenen i no es tocaran (cal mirar-les a mà): " + llistaFiles_(l) : '');
+  if (!previ.aConvertir.length) return avisar_(titol, 'Cap data escrita com a text que es pugui convertir.' + restants(previ.illegibles));
+  const ex = previ.aConvertir[0];
+  // La pregunta, sin el lock: mientras está abierta, los demás pueden seguir guardando.
+  const resposta = ui.alert(titol,
+    previ.aConvertir.length + " dates de col·locació estan escrites com a text. Les convertim en data (dd/mm/aaaa)?\n\n" +
+    'Per exemple, fila ' + ex.fila + ': «' + ex.abans + '» → ' + PortalModel.textData(ex.data) + restants(previ.illegibles),
+    ui.ButtonSet.YES_NO);
+  if (resposta !== ui.Button.YES) return;
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  let fet;
+  try {
+    // Se vuelve a leer: alguien puede haber guardado mientras la pregunta estaba abierta.
+    const sheet = hojaPacientes();
+    const { idx, files } = leerPacientes(sheet);
+    fet = datesEnText_(files, idx);
+    // Solo las celdas convertidas, por tramos de filas seguidas: reescribir las demás
+    // haría que Sheets volviera a interpretar sus textos (y perdería las fórmulas).
+    trams_(fet.aConvertir).forEach(t => {
+      sheet.getRange(t[0].fila, idx.fecha_colocacion + 1, t.length, 1)
+        .setNumberFormat('dd/mm/yyyy')
+        .setValues(t.map(x => [x.data]));
+    });
+  } finally {
+    lock.releaseLock();
+  }
+  avisar_(titol, '✅ ' + fet.aConvertir.length + ' dates convertides.' + restants(fet.illegibles));
+}
+
+/** Agrupa {fila} ordenadas en tramos de filas consecutivas. */
+function trams_(llista) {
+  const out = [];
+  llista.forEach(x => {
+    const ultim = out[out.length - 1];
+    if (ultim && ultim[ultim.length - 1].fila === x.fila - 1) ultim.push(x); else out.push([x]);
+  });
+  return out;
 }
 
 /** Emails rebotados en los últimos 30 días, en el Gmail de la cuenta que ejecuta el diagnóstico. */
@@ -2347,7 +2425,12 @@ function vistaPreviaFilaSeleccionada() {
   const { objetos } = leerPacientes(hojaPacientes());
   const o = objetos[sel.fila - 2];
   const codi = o ? String(o.codi_acces === undefined || o.codi_acces === null ? '' : o.codi_acces).trim() : '';
-  if (!codi) return avisar_('Vista prèvia', "Aquesta fila no té cap pacient (li falta el Codi d'accés).");
+  if (!codi) {
+    const qui = o ? [o.nombre, o.cuenta_quartup && 'Cuenta ' + o.cuenta_quartup].filter(Boolean).join(', ') : '';
+    return avisar_('Vista prèvia', qui
+      ? 'La fila ' + sel.fila + " (" + qui + ") no té Codi d'accés: aquest pacient encara no té pasaport al portal."
+      : 'La fila ' + sel.fila + " està buida: selecciona una fila d'un implant.");
+  }
   const t = HtmlService.createTemplateFromFile('VistaPreviaFinestra');
   t.pasaport = htmlPasaport_(implantsDesats_(objetos, codi), codi, { nomesCos: true });
   t.avisos = null;

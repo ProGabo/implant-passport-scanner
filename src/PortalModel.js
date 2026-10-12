@@ -130,19 +130,49 @@ function crearPortalModel() {
     return String(v);
   }
 
+  const DIES_EN = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const MESOS_EN = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+
+  function dd(n) { return (n < 10 ? '0' : '') + n; }
+
+  /** 'AAAA-MM-DD' si el día existe (no 31/02) y el año es razonable; si no, ''. */
+  function isoValid(a, mes, dia) {
+    if (a < 1900 || a > 2100 || mes < 1 || mes > 12 || dia < 1) return '';
+    const dies = new Date(Date.UTC(a, mes, 0)).getUTCDate();
+    return dia <= dies ? a + '-' + dd(mes) + '-' + dd(dia) : '';
+  }
+
   /**
-   * Una fecha como la ve el paciente: dd/mm/aaaa. Acepta Date (la hoja), 'aaaa-mm-dd'
-   * (el input date del formulario, en la vista previa) y 'd/m/aaaa'; lo demás, tal cual.
+   * Una fecha de colocación como 'AAAA-MM-DD', o '' si no se entiende sin dudas. Acepta:
+   * - Date (la hoja);
+   * - 'aaaa-mm-dd' (el input date del formulario);
+   * - 'd/m/aaaa' (si el 2º número pasa de 12, es m/d americano: 01/27/2014);
+   * - el texto largo de una fecha de JavaScript que se quedó escrito en filas antiguas:
+   *   'Wed Jan 21 2004 00:00:00 GMT+0100 (...)', 'Mon Jul 07 2014' o 'Apr 11 2018'. Se
+   *   leen el día, el mes y el año tal como están escritos, sin pasar por husos horarios.
    */
-  function textData(v) {
-    const dd = n => (n < 10 ? '0' : '') + n;
-    if (esData(v)) return dd(v.getDate()) + '/' + dd(v.getMonth() + 1) + '/' + v.getFullYear();
-    const s = aText(v).trim();
+  function isoData(v) {
+    if (esData(v)) return isoValid(v.getFullYear(), v.getMonth() + 1, v.getDate());
+    const s = String(v === undefined || v === null ? '' : v).trim();
     let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
-    if (m) return dd(+m[3]) + '/' + dd(+m[2]) + '/' + m[1];
+    if (m) return isoValid(+m[1], +m[2], +m[3]);
     m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
-    if (m) return dd(+m[1]) + '/' + dd(+m[2]) + '/' + m[3];
-    return s;
+    if (m) return +m[2] > 12 && +m[1] <= 12 ? isoValid(+m[3], +m[1], +m[2]) : isoValid(+m[3], +m[2], +m[1]);
+    // Hasta el final: como mucho la hora y el huso ("00:00:00 GMT+0100 (...)"), nada más.
+    m = /^(?:([a-z]{3}),?\s+)?([a-z]{3})\s+(\d{1,2}),?\s+(\d{4})(?:\s+\d{2}:\d{2}:\d{2}(?:\s+GMT[+-]\d{4}(?:\s*\([^)]*\))?)?)?$/i.exec(s);
+    if (!m || !MESOS_EN[m[2].toLowerCase()]) return '';
+    const iso = isoValid(+m[4], MESOS_EN[m[2].toLowerCase()], +m[3]);
+    // El día de la semana, si está, tiene que cuadrar con la fecha: es una prueba de que
+    // el texto es una fecha de verdad y no algo que se le parece.
+    if (iso && m[1] && DIES_EN.indexOf(m[1].toLowerCase()) !== new Date(Date.UTC(+m[4], +iso.slice(5, 7) - 1, +m[3])).getUTCDay()) return '';
+    return iso;
+  }
+
+  /** Una fecha como la ve el paciente: dd/mm/aaaa (ver isoData). Lo que no se entiende, tal cual. */
+  function textData(v) {
+    const iso = isoData(v);
+    if (iso) return iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4);
+    return esData(v) ? dd(v.getDate()) + '/' + dd(v.getMonth() + 1) + '/' + v.getFullYear() : aText(v).trim();
   }
 
   function esCert(v) {
@@ -440,6 +470,7 @@ function crearPortalModel() {
     emmascararDni,
     perAlPortal,
     textData,
+    isoData,
     estaPausat,
     registrarIntentFallit,
     escapar,
