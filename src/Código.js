@@ -2422,14 +2422,21 @@ function vistaPreviaFilaSeleccionada() {
   exigirUsuariIntern_();
   const sel = filaSeleccionada_();
   if (sel.error) return avisar_('Vista prèvia', sel.error);
-  const { objetos } = leerPacientes(hojaPacientes());
+  const { headers, idx, files, objetos } = leerPacientes(hojaPacientes());
   const o = objetos[sel.fila - 2];
   const codi = o ? String(o.codi_acces === undefined || o.codi_acces === null ? '' : o.codi_acces).trim() : '';
   if (!codi) {
     const qui = o ? [o.nombre, o.cuenta_quartup && 'Cuenta ' + o.cuenta_quartup].filter(Boolean).join(', ') : '';
-    return avisar_('Vista prèvia', qui
-      ? 'La fila ' + sel.fila + " (" + qui + ") no té Codi d'accés: aquest pacient encara no té pasaport al portal."
-      : 'La fila ' + sel.fila + " està buida: selecciona una fila d'un implant.");
+    // Qué se ha leído exactamente: si el codi está en otra columna, se ve aquí.
+    const f = files[sel.fila - 2] || [];
+    const columna = idx.codi_acces === undefined ? "no trobo la columna «Codi d'accés»"
+      : "llegeixo la columna " + columnaLletra_(idx.codi_acces + 1) + " («" + headers[idx.codi_acces] + "»)";
+    const plenes = headers.map((h, i) => [h, f[i]]).filter(x => x[1] !== '' && x[1] !== false && x[1] !== null && x[1] !== undefined)
+      .map(x => (String(x[0]).trim() || '(sense capçalera)') + ': ' + x[1]).slice(0, 12).join(' | ');
+    return avisar_('Vista prèvia', (qui
+      ? 'La fila ' + sel.fila + " (" + qui + ") no té Codi d'accés."
+      : 'La fila ' + sel.fila + " està buida: selecciona una fila d'un implant.") +
+      (o ? '\n\nDetall per a en Gabriel: ' + columna + ' (de ' + files.length + ' files). Fila: ' + plenes : ''));
   }
   const t = HtmlService.createTemplateFromFile('VistaPreviaFinestra');
   t.pasaport = htmlPasaport_(implantsDesats_(objetos, codi), codi, { nomesCos: true });
