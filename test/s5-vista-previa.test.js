@@ -113,6 +113,45 @@ test('la vista previa solo se abre desde la hoja o el panel (ADR 0003)', () => {
   assert.throws(() => ctx.pdfVistaPreviaPasaport({ implantes: [NOU] }), /només es pot fer servir des del full/);
 });
 
+test('vista previa desde el menú: cualquier fila del paciente abre su pasaporte entero, sin avisos', () => {
+  const { ctx, ss, dialegs } = carregar();
+  const hoja = ss.getSheetByName('Pacientes');
+  const abans = JSON.stringify(hoja.rows());
+  ss.setActiveRange(hoja.getRange(11, 1)); // la 2ª fila de Àngels (el 14)
+  ctx.vistaPreviaFilaSeleccionada();
+  assert.equal(JSON.stringify(hoja.rows()), abans, 'no escribe');
+  assert.equal(dialegs.length, 1);
+  const t = dialegs[0].out.t;
+  assert.equal(t.nom, 'VistaPreviaFinestra');
+  assert.equal(t.avisos, null);
+  assert.equal(JSON.parse(t.codiJson), 'ABC234');
+  assert.ok(t.pasaport.indexOf('>14<') !== -1 && t.pasaport.indexOf('>26<') !== -1, 'los dos implantes');
+  assert.match(t.pasaport, /03\/09\/2026/);
+  assert.doesNotMatch(t.pasaport, /angels@x\.cat|43000200|12345678Z|Altre/);
+
+  const pdf = ctx.pdfPasaportDesat('ABC234');
+  assert.equal(pdf.ok, true, pdf.message);
+  assert.equal(pdf.nom, 'Pasaporte_Àngels_Núñez.pdf');
+  assert.equal(ctx.pdfPasaportDesat('ZZZ999').ok, false);
+});
+
+test('vista previa desde el menú: la cabecera o una fila vacía avisan y no abren nada', () => {
+  const { ctx, ss, dialegs, alerts } = carregar();
+  const hoja = ss.getSheetByName('Pacientes');
+  ss.setActiveRange(hoja.getRange(1, 1));
+  ctx.vistaPreviaFilaSeleccionada();
+  ss.setActiveRange(hoja.getRange(40, 1));
+  ctx.vistaPreviaFilaSeleccionada();
+  assert.equal(dialegs.length, 0);
+  assert.match(alerts[0][1], /no la capçalera/);
+  assert.match(alerts[1][1], /no té cap pacient/);
+});
+
+test('la vista previa desde el menú también exige estar en la hoja (ADR 0003)', () => {
+  const { ctx } = carregar({ usuari: '' });
+  assert.throws(() => ctx.pdfPasaportDesat('ABC234'), /només es pot fer servir des del full/);
+});
+
 test('pilar pendiente: casilla Pendent + pilar vacío -> "Pendiente de colocar"; nunca sale la casilla', () => {
   const { ctx } = carregar();
   const r = ctx.calcularVistaPrevia_(fd(NOVA, [

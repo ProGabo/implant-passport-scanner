@@ -63,6 +63,7 @@ function onOpen() {
   ui.createMenu(NOM_MENU)
       .addItem('➕ Afegir implant / pacient', 'showSidebar')
       .addItem('✏️ Completar i enviar (fila seleccionada)', 'obrirPanellPendents')
+      .addItem('👁️ Vista prèvia del passaport (fila seleccionada)', 'vistaPreviaFilaSeleccionada')
       .addItem('🔔 Recordatoris', 'obrirRecordatoris')
       .addSeparator()
       .addItem('🔑 Autoritzar el meu compte', 'autorizarCuenta')
@@ -401,6 +402,17 @@ function ponerFormatoTexto(sheet, headers, filaInicio, numFilas) {
 }
 
 /**
+ * La fecha de colocación se ve como dd/mm/aaaa. Después de escribir: el texto
+ * '2024-09-09' del formulario, Sheets lo convierte en fecha con formato aaaa-mm-dd.
+ */
+function ponerFormatoData_(sheet, headers, filaInicio, numFilas) {
+  if (numFilas <= 0) return;
+  const { idx } = PacientModel.indexarCapcaleres(headers);
+  if (idx.fecha_colocacion === undefined) return;
+  sheet.getRange(filaInicio, idx.fecha_colocacion + 1, numFilas, 1).setNumberFormat('dd/mm/yyyy');
+}
+
+/**
  * Genera un Codi d'accés de 6 caracteres que no exista ya (sin O/0/I/1/L, ver PortalModel).
  * @param {string[]} existentes códigos ya usados
  */
@@ -625,6 +637,7 @@ function saveNewImplant(formData) {
     marca_('marge');
     ponerFormatoTexto(sheet, headers, primera, filas.length);
     sheet.getRange(primera, 1, filas.length, headers.length).setValues(filas);
+    ponerFormatoData_(sheet, headers, primera, filas.length);
     ponerCasillas(sheet, headers, primera, filas.length);
     marca_('escriure');
     // Ya tenemos la hoja entera leída: el índice del portal sale gratis.
@@ -746,6 +759,7 @@ function prepararHoja_(sheet, headers) {
 
   // "Què falta" como texto: "+PC, falta el pilar" no debe convertirse en fórmula.
   if (idx.que_falta !== undefined) sheet.getRange(2, idx.que_falta + 1, nFiles, 1).setNumberFormat('@');
+  ponerFormatoData_(sheet, headers, 2, nFiles);
 
   // Formato condicional: se reconoce el propio por su fórmula y se sustituye.
   const formula = formulaPendent_(idx);
@@ -934,6 +948,7 @@ function desarPanell_(formData, completar) {
         // Un texto que empiece por = + - @ sería una fórmula: como texto literal.
         if (esText[k] || (typeof v === 'string' && /^[=+\-@]/.test(v))) cel.setNumberFormat('@');
         cel.setValue(esText[k] && v !== '' && v !== null ? String(v) : v);
+        if (k === 'fecha_colocacion') cel.setNumberFormat('dd/mm/yyyy');
       });
       ponerCasillas(sheet, headers, n, 1);
     });
@@ -1926,6 +1941,7 @@ function comprobarTodo() {
   }
 
   lineas.push(diagnosticCodis_());
+  lineas.push(diagnosticDates_());
   lineas.push(diagnosticRebots_());
 
   avisar_("Diagnòstic", lineas.join("\n\n"));
@@ -1945,6 +1961,29 @@ function diagnosticCodis_() {
       : "✅ Codis d'accés: tots correctes";
   } catch (e) {
     return "❌ Codis d'accés: no s'han pogut revisar (" + e.message + ')';
+  }
+}
+
+/**
+ * La columna de la fecha de colocación, toda en dd/mm/aaaa (también las filas antiguas).
+ * Las que son texto y no fecha no cambian con el formato: se listan para revisarlas.
+ */
+function diagnosticDates_() {
+  try {
+    const sheet = hojaPacientes();
+    const { headers, idx, files } = leerPacientes(sheet);
+    if (idx.fecha_colocacion === undefined) return "⚠️ Data de col·locació: no trobo la columna";
+    ponerFormatoData_(sheet, headers, 2, Math.max(sheet.getMaxRows(), 2) - 1);
+    const text = [];
+    files.forEach((f, i) => {
+      const v = f[idx.fecha_colocacion];
+      if (v !== '' && v !== null && !(v instanceof Date)) text.push('fila ' + (i + 2) + ' (' + v + ')');
+    });
+    return text.length
+      ? "⚠️ Data de col·locació: format dd/mm/aaaa aplicat, però aquestes són text i no data (cal tornar-les a escriure): " + text.slice(0, 20).join(', ') + (text.length > 20 ? ' i ' + (text.length - 20) + ' més' : '')
+      : "✅ Data de col·locació: totes en format dd/mm/aaaa";
+  } catch (e) {
+    return "❌ Data de col·locació: no s'ha pogut revisar (" + e.message + ')';
   }
 }
 
@@ -2274,6 +2313,7 @@ function vistaPreviaPasaport(formData) {
     t.avisos = r.avisos;
     // Dentro de un <script>: sin "<" literal, un "</script>" en un campo no cierra nada.
     t.formDataJson = JSON.stringify(formData || {}).replace(/</g, '\\u003c');
+    t.codiJson = 'null';
     SpreadsheetApp.getUi().showModelessDialog(t.evaluate().setWidth(1000).setHeight(720), 'Vista prèvia del pasaport');
     return { ok: true, avisos: r.avisos };
   } catch (e) {
@@ -2288,6 +2328,40 @@ function pdfVistaPreviaPasaport(formData) {
   const r = calcularVistaPrevia_(formData);
   if (!r.ok) return r;
   const b = pdfPasaport_(r.implants, r.codi);
+  return { ok: true, nom: b.getName(), base64: Utilities.base64Encode(b.getBytes()) };
+}
+
+/** Lo guardado de un paciente, tal como lo ve: todas sus filas, no solo una. */
+function implantsDesats_(objetos, codi) {
+  return implantsPerAlPacient_(objetos.filter(o => mismoCodigo(o.codi_acces, codi)));
+}
+
+/**
+ * Menú: la Vista prèvia de un paciente ya guardado, desde cualquier fila suya (de
+ * Pacientes o de Pendents). Solo el pasaporte, sin los avisos de la Comprovació.
+ */
+function vistaPreviaFilaSeleccionada() {
+  exigirUsuariIntern_();
+  const sel = filaSeleccionada_();
+  if (sel.error) return avisar_('Vista prèvia', sel.error);
+  const { objetos } = leerPacientes(hojaPacientes());
+  const o = objetos[sel.fila - 2];
+  const codi = o ? String(o.codi_acces === undefined || o.codi_acces === null ? '' : o.codi_acces).trim() : '';
+  if (!codi) return avisar_('Vista prèvia', "Aquesta fila no té cap pacient (li falta el Codi d'accés).");
+  const t = HtmlService.createTemplateFromFile('VistaPreviaFinestra');
+  t.pasaport = htmlPasaport_(implantsDesats_(objetos, codi), codi, { nomesCos: true });
+  t.avisos = null;
+  t.formDataJson = 'null';
+  t.codiJson = JSON.stringify(codi).replace(/</g, '\\u003c');
+  SpreadsheetApp.getUi().showModelessDialog(t.evaluate().setWidth(1000).setHeight(720), 'Vista prèvia del pasaport');
+}
+
+/** Ventana de la Vista prèvia de un paciente guardado: su PDF, para descargarlo. */
+function pdfPasaportDesat(codi) {
+  exigirUsuariIntern_();
+  const implants = implantsDesats_(leerPacientes(hojaPacientes()).objetos, codi);
+  if (!implants.length) return { ok: false, message: "No trobo cap implant amb el codi " + codi + '.' };
+  const b = pdfPasaport_(implants, codi);
   return { ok: true, nom: b.getName(), base64: Utilities.base64Encode(b.getBytes()) };
 }
 

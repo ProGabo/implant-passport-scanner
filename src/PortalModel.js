@@ -126,8 +126,23 @@ function crearPortalModel() {
 
   function aText(v) {
     if (v === undefined || v === null) return '';
-    if (esData(v)) return v.getDate() + '/' + (v.getMonth() + 1) + '/' + v.getFullYear();
+    if (esData(v)) return textData(v);
     return String(v);
+  }
+
+  /**
+   * Una fecha como la ve el paciente: dd/mm/aaaa. Acepta Date (la hoja), 'aaaa-mm-dd'
+   * (el input date del formulario, en la vista previa) y 'd/m/aaaa'; lo demás, tal cual.
+   */
+  function textData(v) {
+    const dd = n => (n < 10 ? '0' : '') + n;
+    if (esData(v)) return dd(v.getDate()) + '/' + dd(v.getMonth() + 1) + '/' + v.getFullYear();
+    const s = aText(v).trim();
+    let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+    if (m) return dd(+m[3]) + '/' + dd(+m[2]) + '/' + m[1];
+    m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+    if (m) return dd(+m[1]) + '/' + dd(+m[2]) + '/' + m[3];
+    return s;
   }
 
   function esCert(v) {
@@ -144,7 +159,7 @@ function crearPortalModel() {
     const out = { nombre: aText(o.nombre) };
     const dni = esCert(o.sense_dni) ? null : emmascararDni(o.dni);
     if (dni) out.dni_parcial = dni;
-    CAMPS_PORTAL.forEach(k => { if (k in o) out[k] = aText(o[k]); });
+    CAMPS_PORTAL.forEach(k => { if (k in o) out[k] = k === 'fecha_colocacion' ? textData(o[k]) : aText(o[k]); });
     out.pilar_pendiente = !!(opcions && opcions.pilarPendiente);
     return Object.assign(out, textosImplant(out));
   }
@@ -424,6 +439,7 @@ function crearPortalModel() {
     analitzarCodis,
     emmascararDni,
     perAlPortal,
+    textData,
     estaPausat,
     registrarIntentFallit,
     escapar,

@@ -66,7 +66,7 @@ El implante no lleva pilar. Sustituye al antiguo "NO". No es lo mismo que el pil
 _Avoid_: NO, No
 
 **Vista prèvia**:
-El pasaporte exactamente como lo recibirá el paciente, que la Auxiliar abre desde el panel antes de guardar, en una ventana aparte en la que puede seguir escribiendo. Desde ahí se imprime o se descarga. Es el mismo documento que el PDF del portal y el adjunto del Avís a la secretària.
+El pasaporte exactamente como lo ve o lo verá el paciente, en una ventana aparte desde la que se imprime o se descarga. La Auxiliar la abre desde el panel antes de guardar (con los avisos de la Comprovació, y puede seguir escribiendo), o desde el menú para cualquier paciente ya guardado (solo el pasaporte). Es el mismo documento que el PDF del portal y el adjunto del Avís a la secretària.
 _Avoid_: informe, borrador
 
 **Comprovació**:

@@ -103,7 +103,19 @@ test('perAlPortal: lista blanca, nunca email ni Cuenta, DNI enmascarado solo si 
 
 test('perAlPortal formatea las fechas de Sheets', () => {
   const out = PM.perAlPortal({ nombre: 'A', fecha_colocacion: new Date(2026, 0, 15) });
-  assert.equal(out.fecha_colocacion, '15/1/2026');
+  assert.equal(out.fecha_colocacion, '15/01/2026');
+});
+
+test('textData: siempre dd/mm/aaaa (la hoja, el input date del formulario o d/m/aaaa)', () => {
+  assert.equal(PM.textData(new Date(2024, 8, 9)), '09/09/2024');
+  assert.equal(PM.textData('2024-09-09'), '09/09/2024');
+  assert.equal(PM.textData('9/9/2024'), '09/09/2024');
+  assert.equal(PM.textData(' 15/01/2026 '), '15/01/2026');
+  assert.equal(PM.textData(''), '');
+  assert.equal(PM.textData(null), '');
+  assert.equal(PM.textData('setembre'), 'setembre');
+  // La vista previa (antes de guardar) recibe el valor del input date.
+  assert.equal(PM.perAlPortal({ nombre: 'A', fecha_colocacion: '2026-10-01' }).fecha_colocacion, '01/10/2026');
 });
 
 // --- Límite de intentos ---

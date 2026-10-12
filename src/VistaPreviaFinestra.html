@@ -34,9 +34,14 @@
     <div class="barra">
         <button type="button" onclick="window.print()">🖨️ Imprimir</button>
         <button type="button" class="sec" id="descarregar">⬇️ Descarregar PDF</button>
+        <? if (avisos === null) { ?>
+        <span id="estat">Així ho veu el pacient (dades desades).</span>
+        <? } else { ?>
         <span id="estat">Així ho veurà el pacient. Per corregir, fes-ho al panell i torna a prémer «Vista prèvia».</span>
+        <? } ?>
     </div>
-    <? if (avisos.length) { ?>
+    <? if (avisos === null) { ?>
+    <? } else if (avisos.length) { ?>
     <div class="avisos">
         <b>⚠️ Comprova-ho abans de desar:</b>
         <ul><? avisos.forEach(function (a) { ?><li><?= a ?></li><? }); ?></ul>
@@ -46,12 +51,14 @@
     <? } ?>
     <div class="full"><?!= pasaport ?></div>
 <script>
+    // Antes de guardar, el formulario (FORM); de un paciente guardado, su codi (CODI).
     const FORM = <?!= formDataJson ?>;
+    const CODI = <?!= codiJson ?>;
     document.getElementById('descarregar').addEventListener('click', function () {
         const btn = this, estat = document.getElementById('estat');
         btn.disabled = true;
         estat.textContent = 'Preparant el PDF...';
-        google.script.run
+        const run = google.script.run
             .withSuccessHandler(function (r) {
                 btn.disabled = false;
                 if (!r || !r.ok) { estat.textContent = "No s'ha pogut fer el PDF: " + ((r && r.message) || ''); return; }
@@ -62,8 +69,9 @@
                 document.body.appendChild(a); a.click(); a.remove();
                 estat.textContent = 'PDF descarregat: ' + r.nom;
             })
-            .withFailureHandler(function (e) { btn.disabled = false; estat.textContent = 'Error: ' + e.message; })
-            .pdfVistaPreviaPasaport(FORM);
+            .withFailureHandler(function (e) { btn.disabled = false; estat.textContent = 'Error: ' + e.message; });
+        if (CODI !== null) run.pdfPasaportDesat(CODI);
+        else run.pdfVistaPreviaPasaport(FORM);
     });
 </script>
 </body>
