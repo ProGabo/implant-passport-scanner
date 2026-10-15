@@ -39,6 +39,10 @@ _Avoid_: informe, ficha (en la interfaz del paciente)
 **Implante**:
 Una pieza colocada en una posición dental. En la hoja, cada fila es un implante, y los datos del paciente se repiten en todas sus filas. Para borrar un implante basta con vaciar su fila: una fila vacía no es nadie y el hueco puede quedarse.
 
+**Sistema de implante**:
+La marca y el modelo de un implante, tal como se le muestran al paciente (en el pasaporte, «Ticare» / «Osseous»). En la interfaz interna se rotula «Sistema d'implant (Marca)».
+_Avoid_: implante (como nombre de la marca y el modelo)
+
 **DNI parcial**:
 El DNI con la mayoría de cifras tapadas (`***4567**`) que el paciente ve en el portal y en el pasaporte, para reconocerse. El DNI completo nunca sale hacia el paciente.
 

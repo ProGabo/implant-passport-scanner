@@ -425,7 +425,7 @@ function crearPortalModel() {
     return `
       <table class="psp-taula">
         <thead>
-          <tr><th style="width:13%;text-align:center;">Pos.</th><th style="width:21%;">Implante</th><th style="width:13%;">Medidas</th>
+          <tr><th style="width:10%;text-align:center;">Pos.</th><th style="width:24%;">Sistema de implante</th><th style="width:13%;">Medidas</th>
               <th style="width:19%;">Conexión</th><th style="width:19%;">Ref / Lote</th><th style="width:15%;">Fecha</th></tr>
           <tr class="psp-espai"><td colspan="6"></td></tr>
         </thead>
